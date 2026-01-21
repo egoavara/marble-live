@@ -143,7 +143,7 @@ impl RouletteConfig {
             ],
             holes: vec![Hole {
                 center: [400.0, 550.0],
-                radius: 40.0,
+                radius: 60.0,
             }],
             spawn_area: SpawnArea {
                 x: [100.0, 700.0],

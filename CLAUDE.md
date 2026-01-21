@@ -2,6 +2,13 @@
 
 구슬 룰렛 + WebRTC P2P 실시간 세션 공유
 
+## Claude 규칙
+
+### 서버 실행 금지
+- `trunk serve`, `cargo run -p marble-server` 등 포트를 사용하는 서버 실행 명령어는 **절대 직접 호출하지 말 것**
+- 사용자가 직접 서버를 띄워야 함
+- 빌드/체크 명령어(`trunk build`, `cargo check`, `cargo build`)는 허용
+
 ## 기술 스택
 
 - Backend: Axum + tonic (gRPC-Web)

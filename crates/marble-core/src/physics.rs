@@ -38,6 +38,25 @@ impl Default for PhysicsWorld {
     }
 }
 
+impl Clone for PhysicsWorld {
+    fn clone(&self) -> Self {
+        Self {
+            rigid_body_set: self.rigid_body_set.clone(),
+            collider_set: self.collider_set.clone(),
+            integration_parameters: self.integration_parameters,
+            physics_pipeline: PhysicsPipeline::new(),
+            island_manager: self.island_manager.clone(),
+            broad_phase: self.broad_phase.clone(),
+            narrow_phase: self.narrow_phase.clone(),
+            impulse_joint_set: self.impulse_joint_set.clone(),
+            multibody_joint_set: self.multibody_joint_set.clone(),
+            ccd_solver: CCDSolver::new(),
+            gravity: self.gravity,
+            frame: self.frame,
+        }
+    }
+}
+
 impl fmt::Debug for PhysicsWorld {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PhysicsWorld")

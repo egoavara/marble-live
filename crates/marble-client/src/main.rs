@@ -2,20 +2,21 @@
 //!
 //! Yew WASM frontend application.
 
-use yew::prelude::*;
+mod app;
+mod components;
+mod pages;
+mod renderer;
+mod routes;
+mod state;
 
-#[function_component(App)]
-fn app() -> Html {
-    html! {
-        <main>
-            <h1>{ "Marble Live" }</h1>
-            <p>{ "WebRTC P2P 구슬 룰렛 게임" }</p>
-        </main>
-    }
-}
+use app::App;
 
 fn main() {
-    wasm_bindgen_futures::spawn_local(async {
-        yew::Renderer::<App>::new().render();
-    });
+    // Initialize console error panic hook for better error messages
+    console_error_panic_hook::set_once();
+
+    // Initialize tracing for wasm
+    tracing_wasm::set_as_global_default();
+
+    yew::Renderer::<App>::new().render();
 }

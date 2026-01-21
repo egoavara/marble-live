@@ -50,7 +50,7 @@ impl Player {
 }
 
 /// Complete game state containing all game data.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
     pub phase: GamePhase,
     pub players: Vec<Player>,

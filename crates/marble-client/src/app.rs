@@ -1,0 +1,26 @@
+//! Main application component.
+
+use crate::pages::{DebugIndexPage, DebugSimplePage, HomePage, NotFoundPage};
+use crate::routes::Route;
+use yew::prelude::*;
+use yew_router::prelude::*;
+
+/// Route switch function.
+fn switch(routes: Route) -> Html {
+    match routes {
+        Route::Home => html! { <HomePage /> },
+        Route::DebugIndex => html! { <DebugIndexPage /> },
+        Route::DebugSimple => html! { <DebugSimplePage /> },
+        Route::NotFound => html! { <NotFoundPage /> },
+    }
+}
+
+/// Root application component with router.
+#[function_component(App)]
+pub fn app() -> Html {
+    html! {
+        <BrowserRouter>
+            <Switch<Route> render={switch} />
+        </BrowserRouter>
+    }
+}

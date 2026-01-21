@@ -58,7 +58,7 @@ impl Color {
 }
 
 /// Default marble radius in pixels.
-pub const DEFAULT_MARBLE_RADIUS: f32 = 12.0;
+pub const DEFAULT_MARBLE_RADIUS: f32 = 25.0;
 
 /// Marble entity representing a player's marble in the game.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,7 +100,7 @@ impl Marble {
 }
 
 /// Manages marble entities in the physics world.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarbleManager {
     marbles: Vec<Marble>,
     next_id: MarbleId,
@@ -284,7 +284,8 @@ impl MarbleManager {
 
                 // Get hole radius from collider shape
                 if let Some(ball) = hole_collider.shape().as_ball() {
-                    let threshold = ball.radius * 0.5; // Marble must be mostly inside
+                    // Marble center must be inside the hole
+                    let threshold = ball.radius;
                     if dist_sq < threshold * threshold {
                         marble.eliminated = true;
                         eliminated.push(marble.id);
