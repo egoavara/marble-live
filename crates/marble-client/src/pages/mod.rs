@@ -1,10 +1,12 @@
 //! Page components.
 
+mod debug_conntest;
 mod debug_index;
 mod debug_simple;
 mod home;
 mod not_found;
 
+pub use debug_conntest::DebugConnTestPage;
 pub use debug_index::DebugIndexPage;
 pub use debug_simple::DebugSimplePage;
 pub use home::HomePage;

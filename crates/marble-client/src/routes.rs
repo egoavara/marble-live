@@ -14,6 +14,9 @@ pub enum Route {
     /// Simple debug page with basic simulation.
     #[at("/debug/simple")]
     DebugSimple,
+    /// P2P connection test page.
+    #[at("/debug/conntest")]
+    DebugConnTest,
     /// 404 Not Found.
     #[not_found]
     #[at("/404")]

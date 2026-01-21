@@ -28,6 +28,9 @@ js-sys.workspace = true
 gloo.workspace = true
 matchbox_socket.workspace = true
 
+prost.workspace = true
+futures = "0.3"
+
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

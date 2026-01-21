@@ -8,9 +8,9 @@ default:
 client:
     trunk serve --open
 
-# Run server development
+# Run server development (watch mode)
 server:
-    cargo run -p marble-server
+    watchexec -r -e rs,toml,proto -- cargo run -p marble-server
 
 # Run both client and server (requires terminal multiplexer)
 dev:
@@ -52,8 +52,8 @@ clean:
 
 # Watch and run tests
 watch-test:
-    cargo watch -x 'test --all'
+    watchexec -e rs,toml -- cargo test --all
 
 # Watch server
 watch-server:
-    cargo watch -x 'run -p marble-server'
+    watchexec -r -e rs,toml,proto -- cargo run -p marble-server

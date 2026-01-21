@@ -17,6 +17,12 @@ pub fn debug_index_page() -> Html {
                     </Link<Route>>
                     <span class="link-desc">{ " - Basic marble roulette with debug UI" }</span>
                 </li>
+                <li>
+                    <Link<Route> to={Route::DebugConnTest}>
+                        { "Connection Test" }
+                    </Link<Route>>
+                    <span class="link-desc">{ " - P2P connection and state sync test" }</span>
+                </li>
             </ul>
         </main>
     }

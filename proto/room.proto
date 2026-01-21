@@ -28,6 +28,7 @@ message CreateRoomRequest {
 message CreateRoomResponse {
   string room_id = 1;
   string join_code = 2;
+  string signaling_url = 3;
 }
 
 message JoinRoomRequest {
@@ -40,6 +41,7 @@ message JoinRoomResponse {
   string player_id = 2;
   RoomInfo room = 3;
   string error_message = 4;
+  string signaling_url = 5;
 }
 
 message LeaveRoomRequest {
