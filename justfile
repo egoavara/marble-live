@@ -29,6 +29,15 @@ build-release:
     cargo build --release --all
     trunk build --release
 
+# Build server with embedded client (single binary deployment)
+build-server:
+    trunk build --release
+    cargo build -p marble-server --release
+
+# Build server (skip client build, assumes dist/ exists)
+build-server-only:
+    SKIP_CLIENT_BUILD=1 cargo build -p marble-server --release
+
 # Run all tests
 test:
     cargo test --all

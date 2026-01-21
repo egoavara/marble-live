@@ -68,6 +68,10 @@ uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
 http = "1"
 
+# Static file embedding
+rust-embed = { version = "8.11", features = ["axum"] }
+mime_guess = "2.0"
+
 [workspace.lints.rust]
 unsafe_code = "warn"
 
