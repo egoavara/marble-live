@@ -67,13 +67,14 @@ async fn main() -> anyhow::Result<()> {
             "grpc-message".parse().unwrap(),
         ]);
 
-    // App router (gRPC + embedded SPA)
+    // App router (gRPC only - fallback will be added in build_with)
     let app_router = Router::new()
         .nest("/grpc", grpc_router)
-        .fallback(serve_embedded)
         .layer(cors);
 
     // Build signaling server with integrated app router
+    // NOTE: fallback must be set on the final router inside build_with,
+    // because Router::merge() does not propagate fallback services.
     let signaling_server = SignalingServer::full_mesh_builder(addr)
         .cors()
         .trace()
@@ -83,10 +84,11 @@ async fn main() -> anyhow::Result<()> {
         .on_peer_disconnected(|peer_id| {
             tracing::info!("Peer disconnected: {peer_id}");
         })
-        .build_with(|signaling_router| {
+        .build_with(move |signaling_router| {
             Router::new()
                 .nest("/signaling", signaling_router)
                 .merge(app_router)
+                .fallback(serve_embedded)
         });
 
     tracing::info!("Server listening on {addr}");
