@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "name": "Classic",
+    "width": 800.0,
+    "height": 600.0
+  },
+  "walls": [
+    { "type": "line", "start": [0.0, 0.0], "end": [800.0, 0.0] },
+    { "type": "line", "start": [800.0, 0.0], "end": [800.0, 600.0] },
+    { "type": "line", "start": [800.0, 600.0], "end": [0.0, 600.0] },
+    { "type": "line", "start": [0.0, 600.0], "end": [0.0, 0.0] }
+  ],
+  "obstacles": [
+    { "type": "circle", "center": [400.0, 300.0], "radius": 30.0 },
+    { "type": "rect", "center": [200.0, 200.0], "size": [60.0, 10.0], "rotation": 30.0 },
+    { "type": "rect", "center": [600.0, 200.0], "size": [60.0, 10.0], "rotation": -30.0 },
+    { "type": "rect", "center": [200.0, 400.0], "size": [60.0, 10.0], "rotation": -30.0 },
+    { "type": "rect", "center": [600.0, 400.0], "size": [60.0, 10.0], "rotation": 30.0 }
+  ],
+  "holes": [
+    { "center": [400.0, 550.0], "radius": 40.0 }
+  ],
+  "spawn_area": {
+    "x": [100.0, 700.0],
+    "y": [50.0, 150.0]
+  }
+}
