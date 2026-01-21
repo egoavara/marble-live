@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package game;
+
+// Game state snapshot
+message GameState {
+  uint64 frame = 1;
+  repeated Marble marbles = 2;
+  PhysicsState physics = 3;
+}
+
+// Marble entity
+message Marble {
+  uint32 id = 1;
+  string owner_id = 2;
+  Vector2 position = 3;
+  Vector2 velocity = 4;
+  float radius = 5;
+  uint32 color = 6;
+}
+
+// Physics state for synchronization
+message PhysicsState {
+  bytes serialized_world = 1;
+}
+
+// 2D Vector
+message Vector2 {
+  float x = 1;
+  float y = 2;
+}
+
+// Game input from player
+message PlayerInput {
+  uint64 frame = 1;
+  string player_id = 2;
+  InputAction action = 3;
+}
+
+// Possible input actions
+message InputAction {
+  oneof action {
+    SpawnMarble spawn = 1;
+    ApplyForce force = 2;
+  }
+}
+
+message SpawnMarble {
+  Vector2 position = 1;
+  uint32 color = 2;
+}
+
+message ApplyForce {
+  uint32 marble_id = 1;
+  Vector2 force = 2;
+}

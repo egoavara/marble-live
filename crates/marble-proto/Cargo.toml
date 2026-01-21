@@ -1,0 +1,21 @@
+[package]
+name = "marble-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Protobuf definitions and generated code for marble-live"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+server = ["tonic", "tonic-prost"]
+
+[dependencies]
+prost.workspace = true
+tonic = { workspace = true, optional = true }
+tonic-prost = { version = "0.14", optional = true }
+
+[build-dependencies]
+tonic-prost-build = "0.14"

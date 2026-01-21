@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package room;
+
+// Room service for managing game sessions
+service RoomService {
+  // Create a new room
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
+
+  // Join an existing room
+  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
+
+  // Leave a room
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+
+  // List available rooms
+  rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);
+
+  // Get room info
+  rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);
+}
+
+message CreateRoomRequest {
+  string name = 1;
+  uint32 max_players = 2;
+}
+
+message CreateRoomResponse {
+  string room_id = 1;
+  string join_code = 2;
+}
+
+message JoinRoomRequest {
+  string room_id = 1;
+  string player_name = 2;
+}
+
+message JoinRoomResponse {
+  bool success = 1;
+  string player_id = 2;
+  RoomInfo room = 3;
+  string error_message = 4;
+}
+
+message LeaveRoomRequest {
+  string room_id = 1;
+  string player_id = 2;
+}
+
+message LeaveRoomResponse {
+  bool success = 1;
+}
+
+message ListRoomsRequest {
+  uint32 offset = 1;
+  uint32 limit = 2;
+}
+
+message ListRoomsResponse {
+  repeated RoomInfo rooms = 1;
+  uint32 total = 2;
+}
+
+message GetRoomRequest {
+  string room_id = 1;
+}
+
+message GetRoomResponse {
+  RoomInfo room = 1;
+}
+
+message RoomInfo {
+  string id = 1;
+  string name = 2;
+  uint32 player_count = 3;
+  uint32 max_players = 4;
+  RoomStatus status = 5;
+  repeated PlayerInfo players = 6;
+}
+
+message PlayerInfo {
+  string id = 1;
+  string name = 2;
+  bool is_host = 3;
+  bool is_ready = 4;
+}
+
+enum RoomStatus {
+  ROOM_STATUS_UNSPECIFIED = 0;
+  ROOM_STATUS_WAITING = 1;
+  ROOM_STATUS_PLAYING = 2;
+  ROOM_STATUS_FINISHED = 3;
+}

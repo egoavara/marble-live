@@ -1,0 +1,33 @@
+[package]
+name = "marble-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Yew WASM frontend for marble-live"
+
+[lints]
+workspace = true
+
+[dependencies]
+marble-core.workspace = true
+marble-proto.workspace = true
+
+yew.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "console",
+] }
+js-sys.workspace = true
+gloo.workspace = true
+matchbox_socket.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+getrandom.workspace = true

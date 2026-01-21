@@ -1,0 +1,14 @@
+[build]
+target = "crates/marble-client/index.html"
+dist = "dist"
+
+[watch]
+ignore = ["target", "dist", "crates/marble-server", "crates/marble-proto", "crates/marble-core"]
+
+[serve]
+address = "127.0.0.1"
+port = 8080
+open = false
+
+[clean]
+dist = "dist"
