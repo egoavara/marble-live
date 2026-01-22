@@ -5,6 +5,7 @@
 mod app;
 mod components;
 mod network;
+mod p2p;
 mod pages;
 mod renderer;
 mod routes;

@@ -27,6 +27,7 @@ web-sys = { workspace = true, features = [
 js-sys.workspace = true
 gloo.workspace = true
 matchbox_socket.workspace = true
+uuid.workspace = true
 
 prost.workspace = true
 futures = "0.3"

@@ -281,6 +281,38 @@ impl GameState {
         self.players.iter().find(|p| p.id == player_id)
     }
 
+    /// Eliminates a player's marble (e.g., when they disconnect).
+    /// Returns true if the player was eliminated, false if already eliminated or not found.
+    pub fn eliminate_player(&mut self, player_id: PlayerId) -> bool {
+        // Check if already eliminated
+        if self.eliminated_order.contains(&player_id) {
+            return false;
+        }
+
+        // Find and eliminate the marble
+        if let Some(marble) = self.marble_manager.get_marble_by_owner_mut(player_id) {
+            if !marble.eliminated {
+                marble.eliminate();
+                self.eliminated_order.push(player_id);
+
+                // Check for game end
+                let active_count = self.marble_manager.active_count();
+                if active_count <= 1 {
+                    let winner = self
+                        .marble_manager
+                        .active_marbles()
+                        .first()
+                        .map(|m| m.owner_id);
+                    self.phase = GamePhase::Finished { winner };
+                }
+
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Gets the ranking of eliminated players (first eliminated = last place).
     pub fn get_rankings(&self) -> Vec<PlayerId> {
         let mut rankings: Vec<PlayerId> = self.eliminated_order.clone();

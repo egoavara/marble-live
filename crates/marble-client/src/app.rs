@@ -1,6 +1,8 @@
 //! Main application component.
 
-use crate::pages::{DebugConnTestPage, DebugIndexPage, DebugSimplePage, HomePage, NotFoundPage};
+use crate::pages::{
+    DebugConnTestPage, DebugIndexPage, DebugP2PPlayPage, DebugSimplePage, HomePage, NotFoundPage,
+};
 use crate::routes::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -12,6 +14,7 @@ fn switch(routes: Route) -> Html {
         Route::DebugIndex => html! { <DebugIndexPage /> },
         Route::DebugSimple => html! { <DebugSimplePage /> },
         Route::DebugConnTest => html! { <DebugConnTestPage /> },
+        Route::DebugP2PPlay => html! { <DebugP2PPlayPage /> },
         Route::NotFound => html! { <NotFoundPage /> },
     }
 }

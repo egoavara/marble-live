@@ -48,6 +48,11 @@ impl NetworkManager {
         &self.peers
     }
 
+    /// Get our own peer ID from the socket.
+    pub fn my_peer_id(&mut self) -> Option<PeerId> {
+        self.socket.as_mut().and_then(|s| s.id())
+    }
+
     pub fn room_client(&self) -> &RoomClient {
         &self.room_client
     }

@@ -231,6 +231,16 @@ impl MarbleManager {
         self.marbles.iter_mut().find(|m| m.collider_handle == handle)
     }
 
+    /// Gets a marble by its owner (player) ID.
+    pub fn get_marble_by_owner(&self, owner_id: PlayerId) -> Option<&Marble> {
+        self.marbles.iter().find(|m| m.owner_id == owner_id)
+    }
+
+    /// Gets a mutable marble by its owner (player) ID.
+    pub fn get_marble_by_owner_mut(&mut self, owner_id: PlayerId) -> Option<&mut Marble> {
+        self.marbles.iter_mut().find(|m| m.owner_id == owner_id)
+    }
+
     /// Returns all marbles.
     pub fn marbles(&self) -> &[Marble] {
         &self.marbles
