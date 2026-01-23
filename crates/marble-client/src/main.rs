@@ -4,12 +4,14 @@
 
 mod app;
 mod components;
+mod fingerprint;
 mod network;
 mod p2p;
 mod pages;
 mod renderer;
 mod routes;
 mod state;
+mod storage;
 
 use app::App;
 

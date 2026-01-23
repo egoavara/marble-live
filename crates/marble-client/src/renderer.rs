@@ -62,11 +62,6 @@ impl CanvasRenderer {
         if let marble_core::GamePhase::Countdown { remaining_frames } = game_state.current_phase() {
             self.draw_countdown(*remaining_frames);
         }
-
-        // Draw winner announcement if finished
-        if let marble_core::GamePhase::Finished { winner } = game_state.current_phase() {
-            self.draw_winner(*winner, game_state);
-        }
     }
 
     /// Draws the roulette map (walls, obstacles, holes).

@@ -14,6 +14,7 @@ pub mod msg_type {
     pub const FRAME_HASH: u8 = 0x04;
     pub const SYNC_REQUEST: u8 = 0x05;
     pub const SYNC_STATE: u8 = 0x06;
+    pub const RESTART_GAME: u8 = 0x09;
     pub const PING: u8 = 0xFE;
     pub const PONG: u8 = 0xFF;
 }
@@ -21,10 +22,11 @@ pub mod msg_type {
 /// P2P message types.
 #[derive(Debug, Clone)]
 pub enum P2PMessage {
-    /// Player info message (name and color).
+    /// Player info message (name, color, and hash code).
     PlayerInfo {
         name: String,
         color: Color,
+        hash_code: String,
     },
     /// Player ready status.
     PlayerReady {
@@ -48,6 +50,10 @@ pub enum P2PMessage {
     SyncState {
         frame: u64,
         state: Vec<u8>,
+    },
+    /// Restart game message from host.
+    RestartGame {
+        seed: u64,
     },
     /// Ping message for RTT measurement.
     Ping {
@@ -85,7 +91,7 @@ impl P2PMessage {
     /// Encode the message to bytes.
     pub fn encode(&self) -> Vec<u8> {
         match self {
-            P2PMessage::PlayerInfo { name, color } => {
+            P2PMessage::PlayerInfo { name, color, hash_code } => {
                 let mut buf = vec![msg_type::PLAYER_INFO];
                 // Color (3 bytes: r, g, b)
                 buf.push(color.r);
@@ -95,6 +101,10 @@ impl P2PMessage {
                 let name_bytes = name.as_bytes();
                 buf.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
                 buf.extend_from_slice(name_bytes);
+                // Hash code length (1 byte) + hash code bytes
+                let hash_bytes = hash_code.as_bytes();
+                buf.push(hash_bytes.len() as u8);
+                buf.extend_from_slice(hash_bytes);
                 buf
             }
             P2PMessage::PlayerReady { ready } => {
@@ -136,6 +146,11 @@ impl P2PMessage {
                 buf.extend_from_slice(state);
                 buf
             }
+            P2PMessage::RestartGame { seed } => {
+                let mut buf = vec![msg_type::RESTART_GAME];
+                buf.extend_from_slice(&seed.to_be_bytes());
+                buf
+            }
             P2PMessage::Ping { timestamp } => {
                 let mut buf = vec![msg_type::PING];
                 buf.extend_from_slice(&timestamp.to_be_bytes());
@@ -159,12 +174,17 @@ impl P2PMessage {
             msg_type::PLAYER_INFO if data.len() >= 6 => {
                 let color = Color::rgb(data[1], data[2], data[3]);
                 let name_len = u16::from_be_bytes([data[4], data[5]]) as usize;
-                if data.len() >= 6 + name_len {
-                    let name = String::from_utf8_lossy(&data[6..6 + name_len]).to_string();
-                    Some(P2PMessage::PlayerInfo { name, color })
-                } else {
-                    None
+                if data.len() < 6 + name_len + 1 {
+                    return None;
                 }
+                let name = String::from_utf8_lossy(&data[6..6 + name_len]).to_string();
+                let hash_offset = 6 + name_len;
+                let hash_len = data[hash_offset] as usize;
+                if data.len() < hash_offset + 1 + hash_len {
+                    return None;
+                }
+                let hash_code = String::from_utf8_lossy(&data[hash_offset + 1..hash_offset + 1 + hash_len]).to_string();
+                Some(P2PMessage::PlayerInfo { name, color, hash_code })
             }
             msg_type::PLAYER_READY if data.len() >= 2 => {
                 Some(P2PMessage::PlayerReady { ready: data[1] != 0 })
@@ -257,6 +277,13 @@ impl P2PMessage {
                 ]);
                 Some(P2PMessage::Pong { timestamp })
             }
+            msg_type::RESTART_GAME if data.len() >= 9 => {
+                let seed = u64::from_be_bytes([
+                    data[1], data[2], data[3], data[4],
+                    data[5], data[6], data[7], data[8],
+                ]);
+                Some(P2PMessage::RestartGame { seed })
+            }
             _ => None,
         }
     }
@@ -271,13 +298,28 @@ mod tests {
         let msg = P2PMessage::PlayerInfo {
             name: "TestPlayer".to_string(),
             color: Color::RED,
+            hash_code: "1A2B".to_string(),
         };
         let encoded = msg.encode();
         let decoded = P2PMessage::decode(&encoded).unwrap();
 
-        if let P2PMessage::PlayerInfo { name, color } = decoded {
+        if let P2PMessage::PlayerInfo { name, color, hash_code } = decoded {
             assert_eq!(name, "TestPlayer");
             assert_eq!(color, Color::RED);
+            assert_eq!(hash_code, "1A2B");
+        } else {
+            panic!("Wrong message type");
+        }
+    }
+
+    #[test]
+    fn test_restart_game_roundtrip() {
+        let msg = P2PMessage::RestartGame { seed: 0xDEADBEEF12345678 };
+        let encoded = msg.encode();
+        let decoded = P2PMessage::decode(&encoded).unwrap();
+
+        if let P2PMessage::RestartGame { seed } = decoded {
+            assert_eq!(seed, 0xDEADBEEF12345678);
         } else {
             panic!("Wrong message type");
         }

@@ -5,9 +5,12 @@ use yew_router::prelude::*;
 /// Application routes.
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
-    /// Home page (placeholder for future main game).
+    /// Home page.
     #[at("/")]
     Home,
+    /// Play page with room ID.
+    #[at("/play/:room_id")]
+    Play { room_id: String },
     /// Debug pages index.
     #[at("/debug")]
     DebugIndex,

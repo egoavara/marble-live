@@ -42,6 +42,7 @@ impl Default for P2PPhase {
 pub struct PeerInfo {
     pub peer_id: PeerId,
     pub name: String,
+    pub hash_code: String,
     pub color: Color,
     pub ready: bool,
     pub rtt_ms: Option<u32>,
@@ -54,6 +55,7 @@ impl PeerInfo {
         Self {
             peer_id,
             name,
+            hash_code: String::new(),
             color,
             ready: false,
             rtt_ms: None,
@@ -73,6 +75,8 @@ pub struct P2PGameState {
     pub my_peer_id: Option<PeerId>,
     /// My player name.
     pub my_name: String,
+    /// My player hash code (e.g., "1A2B").
+    pub my_hash_code: String,
     /// My player color.
     pub my_color: Color,
     /// Whether I'm ready.
@@ -122,6 +126,7 @@ impl P2PGameState {
             network: create_shared_network_manager("/grpc"),
             my_peer_id: None,
             my_name: String::new(),
+            my_hash_code: String::new(),
             my_color: Color::RED,
             my_ready: false,
             peers: HashMap::new(),
@@ -202,10 +207,11 @@ pub enum P2PAction {
     SetMyPeerId(PeerId),
     UpdatePeerReady { peer_id: PeerId, ready: bool },
     UpdatePeerRtt { peer_id: PeerId, rtt_ms: u32 },
-    UpdatePeerInfo { peer_id: PeerId, name: String, color: Color },
+    UpdatePeerInfo { peer_id: PeerId, name: String, color: Color, hash_code: String },
 
     // Player setup
     SetMyName(String),
+    SetMyHashCode(String),
     SetMyColor(Color),
     SetMyReady(bool),
 
@@ -216,6 +222,7 @@ pub enum P2PAction {
     Tick,
     GameFinished,
     ResetToLobby,
+    RestartGame { seed: u64 },
 
     // Synchronization
     ReceiveFrameHash { peer_id: PeerId, frame: u64, hash: u64 },
@@ -360,14 +367,18 @@ impl Reducible for P2PGameState {
                     peer.rtt_ms = Some(rtt_ms);
                 }
             }
-            P2PAction::UpdatePeerInfo { peer_id, name, color } => {
+            P2PAction::UpdatePeerInfo { peer_id, name, color, hash_code } => {
                 if let Some(peer) = new_state.peers.get_mut(&peer_id) {
                     peer.name = name;
                     peer.color = color;
+                    peer.hash_code = hash_code;
                 }
             }
             P2PAction::SetMyName(name) => {
                 new_state.my_name = name;
+            }
+            P2PAction::SetMyHashCode(hash_code) => {
+                new_state.my_hash_code = hash_code;
             }
             P2PAction::SetMyColor(color) => {
                 new_state.my_color = color;
@@ -466,6 +477,28 @@ impl Reducible for P2PGameState {
                 new_state.peer_hashes.clear();
                 new_state.peer_player_map.clear();
                 new_state.add_log("Reset to lobby");
+            }
+            P2PAction::RestartGame { seed } => {
+                let mut game = GameState::new(seed);
+                game.load_map(RouletteConfig::default_classic());
+                new_state.game_state = Rc::new(game);
+                new_state.game_seed = seed;
+                new_state.peer_player_map.clear();
+                new_state.peer_hashes.clear();
+                new_state.desync_detected = false;
+
+                // Reset ready status
+                for peer in new_state.peers.values_mut() {
+                    peer.ready = false;
+                }
+                new_state.my_ready = false;
+
+                new_state.phase = if new_state.peers.is_empty() {
+                    P2PPhase::WaitingForPeers
+                } else {
+                    P2PPhase::Lobby
+                };
+                new_state.add_log(&format!("Game restarted with seed {}", seed));
             }
             P2PAction::ReceiveFrameHash { peer_id, frame, hash } => {
                 new_state.peer_hashes.insert(peer_id, (frame, hash));

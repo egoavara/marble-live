@@ -22,6 +22,11 @@ web-sys = { workspace = true, features = [
     "Element",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
+    "WebGlRenderingContext",
+    "WebGl2RenderingContext",
+    "Storage",
+    "Navigator",
+    "Clipboard",
     "console",
 ] }
 js-sys.workspace = true

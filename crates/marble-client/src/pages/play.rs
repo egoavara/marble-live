@@ -1,16 +1,16 @@
-//! P2P multiplayer game page.
-//!
-//! This page provides a full P2P game experience with lobby, synchronization,
-//! and game state management.
+//! Play page with P2P multiplayer game.
 
 use crate::components::{
-    ConnectionPanel, DesyncWarning, EventLogPanel, GameStatusPanel, LobbyPanel, PeerStatusPanel,
+    CanvasControls, DebugLogToggle, DesyncWarning, Layout, Leaderboard, PlayerLegend, ShareButton,
+    WinnerModal,
 };
+use crate::fingerprint::generate_hash_code;
 use crate::network::NetworkEvent;
 use crate::p2p::protocol::P2PMessage;
 use crate::p2p::state::{P2PAction, P2PGameState, P2PPhase, P2PStateContext};
 use crate::p2p::sync::{RttTracker, SyncTracker, HASH_EXCHANGE_INTERVAL};
 use crate::renderer::CanvasRenderer;
+use crate::storage::UserSettings;
 use gloo::timers::callback::Interval;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -21,23 +21,100 @@ use yew::prelude::*;
 const CANVAS_WIDTH: u32 = 800;
 const CANVAS_HEIGHT: u32 = 600;
 
-/// P2P Play page component.
-#[function_component(DebugP2PPlayPage)]
-pub fn debug_p2p_play_page() -> Html {
+/// Props for the PlayPage component.
+#[derive(Properties, PartialEq)]
+pub struct PlayPageProps {
+    pub room_id: String,
+}
+
+/// Play page component with P2P multiplayer.
+#[function_component(PlayPage)]
+pub fn play_page(props: &PlayPageProps) -> Html {
+    let room_id = props.room_id.clone();
     let state = use_reducer(P2PGameState::new);
     let canvas_ref = use_node_ref();
     let renderer_ref = use_mut_ref(|| None::<CanvasRenderer>);
     let sync_tracker = use_mut_ref(SyncTracker::new);
     let rtt_tracker = use_mut_ref(RttTracker::new);
+    let connection_attempted = use_state(|| false);
 
-    // Initialize canvas and renderer - depends on phase so it re-runs when canvas becomes visible
+    // Load user settings and apply them
+    {
+        let state = state.clone();
+        use_effect_with((), move |_| {
+            let settings = UserSettings::load().unwrap_or_default();
+            state.dispatch(P2PAction::SetMyName(settings.name.clone()));
+            state.dispatch(P2PAction::SetMyColor(settings.color));
+            // Generate and set hash code
+            let hash_code = generate_hash_code(&settings.name);
+            state.dispatch(P2PAction::SetMyHashCode(hash_code));
+            || ()
+        });
+    }
+
+    // Auto-connect to room when component mounts
+    {
+        let state = state.clone();
+        let room_id = room_id.clone();
+        let connection_attempted = connection_attempted.clone();
+
+        use_effect_with(connection_attempted.clone(), move |attempted| {
+            if !**attempted {
+                let settings = UserSettings::load().unwrap_or_default();
+                let name = if settings.name.is_empty() {
+                    "Player".to_string()
+                } else {
+                    settings.display_name()
+                };
+
+                connection_attempted.set(true);
+                state.dispatch(P2PAction::SetConnecting);
+
+                let network = state.network.clone();
+                let state_clone = state.clone();
+                let room_id_clone = room_id.clone();
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    let result = network.borrow_mut().join_room(&room_id_clone, &name).await;
+
+                    match result {
+                        Ok(()) => {
+                            state_clone.dispatch(P2PAction::SetConnected {
+                                room_id: room_id_clone,
+                            });
+                        }
+                        Err(_) => {
+                            match network
+                                .borrow_mut()
+                                .create_and_join_room("Marble Race", &name)
+                                .await
+                            {
+                                Ok(created_room_id) => {
+                                    state_clone.dispatch(P2PAction::SetConnected {
+                                        room_id: created_room_id,
+                                    });
+                                }
+                                Err(e) => {
+                                    state_clone.dispatch(P2PAction::SetError(e));
+                                    state_clone.dispatch(P2PAction::SetDisconnected);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            || ()
+        });
+    }
+
+    // Initialize canvas and renderer
     {
         let canvas_ref = canvas_ref.clone();
         let renderer_ref = renderer_ref.clone();
         let phase = state.phase.clone();
 
         use_effect_with(phase, move |_phase| {
-            // Try to initialize the renderer if we haven't yet
             if renderer_ref.borrow().is_none() {
                 if let Some(canvas) = canvas_ref.cast::<HtmlCanvasElement>() {
                     canvas.set_width(CANVAS_WIDTH);
@@ -59,7 +136,6 @@ pub fn debug_p2p_play_page() -> Html {
         let rtt_tracker = rtt_tracker.clone();
 
         use_effect_with(state.phase.clone(), move |phase| {
-            // Only poll when connected
             let interval: Option<Interval> = if *phase == P2PPhase::Disconnected {
                 None
             } else {
@@ -78,7 +154,6 @@ pub fn debug_p2p_play_page() -> Html {
         let sync_tracker = sync_tracker.clone();
 
         use_effect_with(state.phase.clone(), move |phase| {
-            // Only tick when game is running
             let should_tick = matches!(
                 phase,
                 P2PPhase::Countdown { .. } | P2PPhase::Running
@@ -90,14 +165,11 @@ pub fn debug_p2p_play_page() -> Html {
                 Some(Interval::new(16, move || {
                     state.dispatch(P2PAction::Tick);
 
-                    // Check if we should send frame hash
                     let frame = state.game_state.current_frame();
                     if frame > 0 && frame % HASH_EXCHANGE_INTERVAL == 0 {
                         let hash = state.game_state.compute_hash();
                         let msg = P2PMessage::FrameHash { frame, hash };
                         state.network.borrow_mut().broadcast(&msg.encode());
-
-                        // Record that we sent the hash
                         sync_tracker.borrow_mut().mark_hash_sent(frame);
                     }
                 }))
@@ -107,7 +179,7 @@ pub fn debug_p2p_play_page() -> Html {
         });
     }
 
-    // Render effect - always render when we have a canvas
+    // Render effect
     {
         let canvas_ref = canvas_ref.clone();
         let renderer_ref = renderer_ref.clone();
@@ -115,9 +187,7 @@ pub fn debug_p2p_play_page() -> Html {
         let phase = state.phase.clone();
 
         use_effect(move || {
-            // Render for any phase where canvas is visible
             if !matches!(phase, P2PPhase::Disconnected | P2PPhase::Connecting) {
-                // Try to initialize renderer if not done yet
                 if renderer_ref.borrow().is_none() {
                     if let Some(canvas) = canvas_ref.cast::<HtmlCanvasElement>() {
                         canvas.set_width(CANVAS_WIDTH);
@@ -129,7 +199,6 @@ pub fn debug_p2p_play_page() -> Html {
                     }
                 }
 
-                // Now render
                 if let Some(renderer) = renderer_ref.borrow().as_ref() {
                     renderer.render(&game_state);
                 }
@@ -138,77 +207,94 @@ pub fn debug_p2p_play_page() -> Html {
         });
     }
 
+    let is_connecting = matches!(state.phase, P2PPhase::Connecting);
+    let show_canvas = !matches!(state.phase, P2PPhase::Disconnected | P2PPhase::Connecting);
+    let is_in_lobby = matches!(state.phase, P2PPhase::WaitingForPeers | P2PPhase::Lobby);
+    let is_in_gameplay = matches!(
+        state.phase,
+        P2PPhase::Countdown { .. } | P2PPhase::Running | P2PPhase::Finished
+    );
+    let is_finished = matches!(state.phase, P2PPhase::Finished);
+
     html! {
         <ContextProvider<P2PStateContext> context={state.clone()}>
-            <main class="page debug-p2p-play-page" style="min-height: 100vh; background: #f0f0f0; color: #333;">
-                <DesyncWarning />
+            <Layout>
+                <div class="game-fullscreen">
+                    <DesyncWarning />
 
-                <header style="background: #333; color: white; padding: 15px 20px;">
-                    <h1 style="margin: 0; font-size: 20px;">{"P2P Multiplayer Game"}</h1>
-                </header>
+                    // Connecting state overlay
+                    { if is_connecting {
+                        html! {
+                            <div class="connecting-overlay fullscreen">
+                                <div class="connecting-spinner" />
+                                <p>{ "Connecting to room..." }</p>
+                                <p class="room-id-text">{ format!("Room: {}", room_id) }</p>
+                            </div>
+                        }
+                    } else if !show_canvas {
+                        html! {
+                            <div class="error-overlay fullscreen">
+                                <p>{ "Failed to connect" }</p>
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }}
 
-                <div style="display: flex; padding: 20px; gap: 20px; max-width: 1400px; margin: 0 auto;">
-                    // Left side: Game canvas or connection panel
-                    <div style="flex: 1;">
-                        // Connection panel (shown when disconnected)
-                        {if matches!(state.phase, P2PPhase::Disconnected | P2PPhase::Connecting) {
-                            html! { <ConnectionPanel /> }
+                    // Fullscreen game canvas
+                    <div class={classes!("game-canvas-container", (!show_canvas).then_some("hidden"))}>
+                        <canvas
+                            ref={canvas_ref.clone()}
+                            width={CANVAS_WIDTH.to_string()}
+                            height={CANVAS_HEIGHT.to_string()}
+                            class="game-canvas fullscreen"
+                        />
+
+                        // Left sidebar: PlayerLegend during gameplay, Leaderboard during lobby
+                        { if show_canvas {
+                            if is_in_gameplay {
+                                html! { <PlayerLegend /> }
+                            } else {
+                                html! { <Leaderboard /> }
+                            }
                         } else {
                             html! {}
                         }}
 
-                        // Canvas (always the same element, just hidden when disconnected)
-                        <div style={if matches!(state.phase, P2PPhase::Disconnected | P2PPhase::Connecting) {
-                            "display: none;"
+                        // Top-left: Share button
+                        { if show_canvas && !state.room_id.is_empty() {
+                            html! {
+                                <div class="top-left-controls">
+                                    <ShareButton />
+                                </div>
+                            }
                         } else {
-                            "background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
-                        }}>
-                            <canvas
-                                ref={canvas_ref.clone()}
-                                width={CANVAS_WIDTH.to_string()}
-                                height={CANVAS_HEIGHT.to_string()}
-                                style="display: block; max-width: 100%; height: auto; border-radius: 4px;"
-                            />
-                            {if matches!(state.phase, P2PPhase::WaitingForPeers | P2PPhase::Lobby) {
-                                html! {
-                                    <div style="text-align: center; padding: 20px; color: #666;">
-                                        {"Game preview - waiting in lobby"}
-                                    </div>
-                                }
-                            } else {
-                                html! {}
-                            }}
-                        </div>
-                    </div>
+                            html! {}
+                        }}
 
-                    // Right side: Control panels
-                    <div style="width: 320px; display: flex; flex-direction: column; gap: 15px;">
-                        {match state.phase {
-                            P2PPhase::Disconnected | P2PPhase::Connecting => {
-                                html! {}
-                            }
-                            P2PPhase::WaitingForPeers | P2PPhase::Lobby => {
-                                html! {
-                                    <>
-                                        <PeerStatusPanel />
-                                        <LobbyPanel />
-                                        <EventLogPanel />
-                                    </>
-                                }
-                            }
-                            _ => {
-                                html! {
-                                    <>
-                                        <PeerStatusPanel />
-                                        <GameStatusPanel />
-                                        <EventLogPanel />
-                                    </>
-                                }
-                            }
+                        // Center overlay: Ready/Start (only in lobby, WinnerModal handles finished)
+                        { if is_in_lobby {
+                            html! { <CanvasControls /> }
+                        } else {
+                            html! {}
+                        }}
+
+                        // Winner modal when game is finished
+                        { if is_finished {
+                            html! { <WinnerModal /> }
+                        } else {
+                            html! {}
                         }}
                     </div>
+
+                    // Debug log toggle (bottom-right)
+                    { if show_canvas {
+                        html! { <DebugLogToggle /> }
+                    } else {
+                        html! {}
+                    }}
                 </div>
-            </main>
+            </Layout>
         </ContextProvider<P2PStateContext>>
     }
 }
@@ -219,7 +305,6 @@ fn poll_network(
     sync_tracker: &Rc<RefCell<SyncTracker>>,
     rtt_tracker: &Rc<RefCell<RttTracker>>,
 ) {
-    // Check if we need to set our peer ID
     if state.my_peer_id.is_none() {
         if let Some(my_id) = state.network.borrow_mut().my_peer_id() {
             state.dispatch(P2PAction::SetMyPeerId(my_id));
@@ -233,7 +318,6 @@ fn poll_network(
             NetworkEvent::PeerJoined(peer_id) => {
                 state.dispatch(P2PAction::PeerJoined(peer_id));
 
-                // Send our player info to the new peer
                 let msg = P2PMessage::PlayerInfo {
                     name: if state.my_name.is_empty() {
                         "Player".to_string()
@@ -245,7 +329,6 @@ fn poll_network(
                 };
                 state.network.borrow_mut().send_to(peer_id, &msg.encode());
 
-                // Send our ready status
                 let ready_msg = P2PMessage::PlayerReady {
                     ready: state.my_ready,
                 };
@@ -258,13 +341,10 @@ fn poll_network(
             NetworkEvent::Message { from, data } => {
                 handle_message(state, sync_tracker, rtt_tracker, from, &data);
             }
-            NetworkEvent::StateChanged(_) => {
-                // Connection state changes are handled elsewhere
-            }
+            NetworkEvent::StateChanged(_) => {}
         }
     }
 
-    // Periodic ping for RTT measurement
     let now = js_sys::Date::now();
     if rtt_tracker.borrow().should_ping(now) {
         for &peer_id in state.peers.keys() {
@@ -303,7 +383,6 @@ fn handle_message(
             });
         }
         P2PMessage::GameStart { seed, players } => {
-            // Convert PlayerStartInfo to tuples
             let player_list: Vec<_> = players
                 .iter()
                 .map(|p| (p.peer_id(), p.name.clone(), p.color))
@@ -316,7 +395,6 @@ fn handle_message(
             state.dispatch(P2PAction::StartCountdown);
         }
         P2PMessage::FrameHash { frame, hash } => {
-            // Record the hash from this peer
             sync_tracker.borrow_mut().record_peer_hash(frame, from, hash);
             state.dispatch(P2PAction::ReceiveFrameHash {
                 peer_id: from,
@@ -324,12 +402,10 @@ fn handle_message(
                 hash,
             });
 
-            // Check for desync using majority vote - only when game is running
             if matches!(state.phase, P2PPhase::Running) && !state.desync_detected {
                 let my_frame = state.game_state.current_frame();
                 let my_hash = state.game_state.compute_hash();
 
-                // Only compare if we're at the same frame
                 if frame == my_frame {
                     let connected_peer_count = state.peers.values().filter(|p| p.connected).count();
                     let result = sync_tracker.borrow_mut().compare_hashes(
@@ -340,14 +416,9 @@ fn handle_message(
 
                     use crate::p2p::sync::HashCompareResult;
                     match result {
-                        HashCompareResult::Match => {
-                            // All good, hashes match
-                        }
-                        HashCompareResult::Waiting => {
-                            // Still waiting for more peers to report
-                        }
+                        HashCompareResult::Match => {}
+                        HashCompareResult::Waiting => {}
                         HashCompareResult::Desync { majority_hash } => {
-                            // My hash doesn't match the majority
                             state.dispatch(P2PAction::AddLog(format!(
                                 "Desync detected at frame {}: mine={:016X}, majority={:016X}",
                                 frame, my_hash, majority_hash
@@ -355,7 +426,6 @@ fn handle_message(
                             state.dispatch(P2PAction::DetectDesync);
                             state.dispatch(P2PAction::StartResync);
 
-                            // Find a peer with the majority hash to request sync from
                             let sync_source = state.peer_hashes.iter()
                                 .find(|&(_, (f, h))| *f == frame && *h == majority_hash)
                                 .map(|(peer_id, _)| *peer_id);
@@ -363,10 +433,6 @@ fn handle_message(
                             if let Some(source_peer) = sync_source {
                                 let msg = P2PMessage::SyncRequest { from_frame: my_frame };
                                 state.network.borrow_mut().send_to(source_peer, &msg.encode());
-                                state.dispatch(P2PAction::AddLog(format!(
-                                    "Requested sync from peer {} (majority holder)",
-                                    &source_peer.0.to_string()[..8]
-                                )));
                             }
                         }
                     }
@@ -374,9 +440,6 @@ fn handle_message(
             }
         }
         P2PMessage::SyncRequest { from_frame } => {
-            // Someone is requesting sync - respond if we're in the majority
-            // (The requester selected us because we have the majority hash)
-            // Serialize and send our game state
             let snapshot = state.game_state.create_snapshot();
             match snapshot.to_bytes() {
                 Ok(state_data) => {
@@ -386,10 +449,8 @@ fn handle_message(
                     };
                     state.network.borrow_mut().send_to(from, &msg.encode());
                     state.dispatch(P2PAction::AddLog(format!(
-                        "Sent sync state to peer {} (requested from frame {}, current frame {})",
-                        &from.0.to_string()[..8],
-                        from_frame,
-                        state.game_state.current_frame()
+                        "Sent sync state (requested from frame {})",
+                        from_frame
                     )));
                 }
                 Err(e) => {
@@ -401,14 +462,12 @@ fn handle_message(
             }
         }
         P2PMessage::SyncState { frame, state: state_data } => {
-            // Received sync state - apply it
             state.dispatch(P2PAction::ApplySyncState {
                 frame,
                 state_data,
             });
         }
         P2PMessage::Ping { timestamp } => {
-            // Respond with pong
             let msg = P2PMessage::Pong { timestamp };
             state.network.borrow_mut().send_to(from, &msg.encode());
         }
