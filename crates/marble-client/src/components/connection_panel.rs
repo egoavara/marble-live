@@ -1,6 +1,8 @@
 //! Connection panel component for creating/joining rooms.
 
+use crate::fingerprint::get_browser_fingerprint;
 use crate::p2p::state::{P2PAction, P2PPhase, P2PStateContext};
+use marble_core::Color;
 use yew::prelude::*;
 
 /// Connection panel for creating or joining a room.
@@ -36,6 +38,8 @@ pub fn connection_panel() -> Html {
         Callback::from(move |_| {
             let state = state.clone();
             let name = (*player_name).clone();
+            let fingerprint = get_browser_fingerprint();
+            let color = state.my_color;
 
             state.dispatch(P2PAction::SetMyName(name.clone()));
             state.dispatch(P2PAction::SetConnecting);
@@ -43,9 +47,10 @@ pub fn connection_panel() -> Html {
             let network = state.network.clone();
 
             wasm_bindgen_futures::spawn_local(async move {
-                match network.borrow_mut().create_and_join_room("P2P Game", &name).await {
-                    Ok(room_id) => {
-                        state.dispatch(P2PAction::SetConnected { room_id });
+                match network.borrow_mut().create_and_join_room("P2P Game", &name, &fingerprint, color).await {
+                    Ok((room_id, seed, is_game_in_progress, player_id, is_host, server_players)) => {
+                        state.dispatch(P2PAction::SetConnected { room_id, server_seed: seed, is_game_in_progress, player_id, is_host });
+                        state.dispatch(P2PAction::UpdateServerPlayers(server_players));
                     }
                     Err(e) => {
                         state.dispatch(P2PAction::SetError(e.clone()));
@@ -65,6 +70,8 @@ pub fn connection_panel() -> Html {
             let state = state.clone();
             let room_id = (*join_room_id).clone();
             let name = (*player_name).clone();
+            let fingerprint = get_browser_fingerprint();
+            let color = state.my_color;
 
             if room_id.is_empty() {
                 state.dispatch(P2PAction::AddLog("Room ID is required".to_string()));
@@ -77,9 +84,10 @@ pub fn connection_panel() -> Html {
             let network = state.network.clone();
 
             wasm_bindgen_futures::spawn_local(async move {
-                match network.borrow_mut().join_room(&room_id, &name).await {
-                    Ok(()) => {
-                        state.dispatch(P2PAction::SetConnected { room_id });
+                match network.borrow_mut().join_room(&room_id, &name, &fingerprint, color).await {
+                    Ok((seed, is_game_in_progress, player_id, is_host, server_players)) => {
+                        state.dispatch(P2PAction::SetConnected { room_id, server_seed: seed, is_game_in_progress, player_id, is_host });
+                        state.dispatch(P2PAction::UpdateServerPlayers(server_players));
                     }
                     Err(e) => {
                         state.dispatch(P2PAction::SetError(e.clone()));

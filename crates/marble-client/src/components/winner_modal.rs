@@ -1,12 +1,12 @@
 //! WinnerModal component for displaying game results.
 
-use crate::p2p::protocol::P2PMessage;
-use crate::p2p::state::{P2PAction, P2PPhase, P2PStateContext};
+use crate::p2p::state::{P2PPhase, P2PStateContext};
 use crate::routes::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
 /// WinnerModal component showing game results when the game finishes.
+/// The room is not reusable - players must leave and create a new room for another game.
 #[function_component(WinnerModal)]
 pub fn winner_modal() -> Html {
     let state = use_context::<P2PStateContext>().expect("P2PStateContext not found");
@@ -74,27 +74,7 @@ pub fn winner_modal() -> Html {
         })
         .collect();
 
-    let is_host = state.is_host;
-
-    // Play Again handler
-    let on_play_again = {
-        let state = state.clone();
-        Callback::from(move |_: MouseEvent| {
-            if state.is_host {
-                // Generate new seed
-                let seed = js_sys::Date::now() as u64;
-
-                // Broadcast RestartGame message
-                let msg = P2PMessage::RestartGame { seed };
-                state.network.borrow_mut().broadcast(&msg.encode());
-
-                // Apply locally
-                state.dispatch(P2PAction::RestartGame { seed });
-            }
-        })
-    };
-
-    // Leave Game handler
+    // Leave Game handler - go back to home to create a new room
     let on_leave = {
         let navigator = navigator.clone();
         Callback::from(move |_: MouseEvent| {
@@ -200,15 +180,7 @@ pub fn winner_modal() -> Html {
 
                 <div class="winner-modal-actions">
                     <button
-                        class={classes!("btn", "play-again-btn", (!is_host).then_some("disabled"))}
-                        onclick={on_play_again}
-                        disabled={!is_host}
-                        title={if is_host { "Start a new game" } else { "Only the host can restart" }}
-                    >
-                        { "Play Again" }
-                    </button>
-                    <button
-                        class="btn btn-secondary leave-btn"
+                        class="btn leave-btn"
                         onclick={on_leave}
                     >
                         { "Leave Game" }

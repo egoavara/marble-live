@@ -14,8 +14,8 @@ pub fn leaderboard() -> Html {
         .unwrap_or_else(|| "N/A".to_string());
 
     // Build player list: self first, then peers
-    // (display_name, color, is_self, is_host, ready, rtt)
-    let mut players: Vec<(String, marble_core::Color, bool, bool, bool, Option<u32>)> = Vec::new();
+    // (display_name, color, is_self, is_host, rtt)
+    let mut players: Vec<(String, marble_core::Color, bool, bool, Option<u32>)> = Vec::new();
 
     // Add self with hash code
     let my_name = if state.my_name.is_empty() {
@@ -25,9 +25,10 @@ pub fn leaderboard() -> Html {
     } else {
         format!("{}#{}", state.my_name, state.my_hash_code)
     };
-    players.push((my_name, state.my_color, true, state.is_host, state.my_ready, None));
+    players.push((my_name, state.my_color, true, state.is_host, None));
 
     // Add peers with hash codes
+    // Use server_players for authoritative host status when available
     for (peer_id, info) in state.peers.iter() {
         if !info.connected {
             continue;
@@ -40,8 +41,14 @@ pub fn leaderboard() -> Html {
         } else {
             format!("{}#{}", info.name, info.hash_code)
         };
-        let is_peer_host = state.all_peer_ids().first() == Some(peer_id);
-        players.push((name, info.color, false, is_peer_host, info.ready, info.rtt_ms));
+
+        // Get is_host from server_players via peer_to_player mapping (authoritative)
+        let is_host = state.peer_to_player.get(peer_id)
+            .and_then(|player_id| state.server_players.get(player_id))
+            .map(|sp| sp.is_host)
+            .unwrap_or(false);
+
+        players.push((name, info.color, false, is_host, info.rtt_ms));
     }
 
     html! {
@@ -50,7 +57,7 @@ pub fn leaderboard() -> Html {
                 { "Players" }
             </div>
             <div class="leaderboard-list">
-                { for players.iter().enumerate().map(|(idx, (name, color, is_self, is_host, ready, rtt))| {
+                { for players.iter().enumerate().map(|(idx, (name, color, is_self, is_host, rtt))| {
                     html! {
                         <div class={classes!("leaderboard-item", is_self.then_some("self"))}>
                             <span class="leaderboard-rank">{ idx + 1 }</span>
@@ -75,11 +82,6 @@ pub fn leaderboard() -> Html {
                                 }}
                             </span>
                             <span class="leaderboard-status">
-                                { if *ready {
-                                    html! { <span class="ready-indicator ready" /> }
-                                } else {
-                                    html! { <span class="ready-indicator not-ready" /> }
-                                }}
                                 { if let Some(rtt_val) = rtt {
                                     let rtt_class = if *rtt_val < 50 {
                                         "good"

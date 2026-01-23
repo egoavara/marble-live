@@ -1,5 +1,7 @@
 //! Network manager for P2P game synchronization
 
+use crate::p2p::state::ServerPlayerInfo;
+use marble_core::Color;
 use matchbox_socket::{PeerId, PeerState, WebRtcSocket};
 use prost::Message;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -57,11 +59,14 @@ impl NetworkManager {
         &self.room_client
     }
 
+    /// Result of a successful room join containing (room_id, seed, is_game_in_progress, player_id, is_host, server_players).
     pub async fn create_and_join_room(
         &mut self,
         room_name: &str,
         player_name: &str,
-    ) -> Result<String, String> {
+        fingerprint: &str,
+        color: Color,
+    ) -> Result<(String, u64, bool, String, bool, Vec<ServerPlayerInfo>), String> {
         self.state = ConnectionState::Connecting;
 
         // Create room via gRPC
@@ -77,7 +82,7 @@ impl NetworkManager {
         // Join the room we just created
         let join_resp = self
             .room_client
-            .join_room(&room_id, player_name)
+            .join_room(&room_id, player_name, fingerprint, color.r as u32, color.g as u32, color.b as u32)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -85,6 +90,21 @@ impl NetworkManager {
             self.state = ConnectionState::Disconnected;
             return Err(join_resp.error_message);
         }
+
+        // Get seed and status from room info
+        let seed = join_resp.room.as_ref().map(|r| r.seed).unwrap_or(0);
+        // Room status 2 = Playing (from proto)
+        let is_game_in_progress = join_resp.room.as_ref().map(|r| r.status == 2).unwrap_or(false);
+        let player_id = join_resp.player_id.clone();
+
+        // Check if this player is the host
+        let is_host = join_resp.room.as_ref()
+            .and_then(|r| r.players.iter().find(|p| p.id == player_id))
+            .map(|p| p.is_host)
+            .unwrap_or(false);
+
+        // Extract server players from response
+        let server_players = extract_server_players(&join_resp);
 
         // Connect to signaling server for P2P
         self.signaling_url = Some(signaling_url.clone());
@@ -95,10 +115,17 @@ impl NetworkManager {
             player_id: join_resp.player_id,
         };
 
-        Ok(room_id)
+        Ok((room_id, seed, is_game_in_progress, player_id, is_host, server_players))
     }
 
-    pub async fn join_room(&mut self, room_id: &str, player_name: &str) -> Result<(), String> {
+    /// Join an existing room. Returns (seed, is_game_in_progress, player_id, is_host, server_players) from the room.
+    pub async fn join_room(
+        &mut self,
+        room_id: &str,
+        player_name: &str,
+        fingerprint: &str,
+        color: Color,
+    ) -> Result<(u64, bool, String, bool, Vec<ServerPlayerInfo>), String> {
         self.state = ConnectionState::Connecting;
 
         // First get room info to get signaling URL
@@ -114,7 +141,7 @@ impl NetworkManager {
 
         let join_resp = self
             .room_client
-            .join_room(room_id, player_name)
+            .join_room(room_id, player_name, fingerprint, color.r as u32, color.g as u32, color.b as u32)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -122,6 +149,21 @@ impl NetworkManager {
             self.state = ConnectionState::Disconnected;
             return Err(join_resp.error_message);
         }
+
+        // Get seed and status from room info
+        let seed = join_resp.room.as_ref().map(|r| r.seed).unwrap_or(0);
+        // Room status 2 = Playing (from proto)
+        let is_game_in_progress = join_resp.room.as_ref().map(|r| r.status == 2).unwrap_or(false);
+        let player_id = join_resp.player_id.clone();
+
+        // Check if this player is the host
+        let is_host = join_resp.room.as_ref()
+            .and_then(|r| r.players.iter().find(|p| p.id == player_id))
+            .map(|p| p.is_host)
+            .unwrap_or(false);
+
+        // Extract server players from response
+        let server_players = extract_server_players(&join_resp);
 
         // Use the signaling_url from join response
         let signaling_url = join_resp.signaling_url.clone();
@@ -133,7 +175,22 @@ impl NetworkManager {
             player_id: join_resp.player_id,
         };
 
-        Ok(())
+        Ok((seed, is_game_in_progress, player_id, is_host, server_players))
+    }
+
+    /// Start game on the server (host only).
+    pub async fn start_game_on_server(&self, room_id: &str, player_id: &str) -> Result<(), String> {
+        let resp = self
+            .room_client
+            .start_game(room_id, player_id)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if resp.success {
+            Ok(())
+        } else {
+            Err(resp.error_message)
+        }
     }
 
     fn connect_p2p(&mut self, signaling_url: &str) -> Result<(), String> {
@@ -228,4 +285,24 @@ pub type SharedNetworkManager = Rc<RefCell<NetworkManager>>;
 
 pub fn create_shared_network_manager(grpc_base_url: &str) -> SharedNetworkManager {
     Rc::new(RefCell::new(NetworkManager::new(grpc_base_url)))
+}
+
+/// Extract ServerPlayerInfo from a JoinRoomResponse.
+fn extract_server_players(resp: &marble_proto::room::JoinRoomResponse) -> Vec<ServerPlayerInfo> {
+    resp.room
+        .as_ref()
+        .map(|room| {
+            room.players
+                .iter()
+                .map(|p| ServerPlayerInfo {
+                    player_id: p.id.clone(),
+                    name: p.name.clone(),
+                    color: Color::rgb(p.color_r as u8, p.color_g as u8, p.color_b as u8),
+                    is_host: p.is_host,
+                    is_connected: p.is_connected,
+                    join_order: p.join_order,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }

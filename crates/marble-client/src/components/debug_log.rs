@@ -46,6 +46,7 @@ pub fn debug_log_toggle() -> Html {
         P2PPhase::Starting => "Starting",
         P2PPhase::Running => "Running",
         P2PPhase::Resyncing => "Resyncing",
+        P2PPhase::Reconnecting => "Reconnecting",
         P2PPhase::Finished => "Finished",
     };
 

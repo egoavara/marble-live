@@ -27,16 +27,10 @@ pub fn lobby_panel() -> Html {
 }
 
 /// Game status panel shown during gameplay.
+/// Room is one-shot - no "Back to Lobby" after game finishes.
 #[function_component(GameStatusPanel)]
 pub fn game_status_panel() -> Html {
     let state = use_context::<P2PStateContext>().expect("P2PStateContext not found");
-
-    let on_back_to_lobby = {
-        let state = state.clone();
-        Callback::from(move |_| {
-            state.dispatch(P2PAction::ResetToLobby);
-        })
-    };
 
     let frame = state.game_state.current_frame();
     let hash = state.game_state.compute_hash();
@@ -69,16 +63,6 @@ pub fn game_status_panel() -> Html {
                     <div class="countdown-display">
                         { seconds + 1 }
                     </div>
-                }
-            } else {
-                html! {}
-            }}
-
-            { if state.phase == P2PPhase::Finished {
-                html! {
-                    <button class="back-to-lobby-btn" onclick={on_back_to_lobby}>
-                        { "Back to Lobby" }
-                    </button>
                 }
             } else {
                 html! {}

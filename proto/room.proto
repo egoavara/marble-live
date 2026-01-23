@@ -18,6 +18,9 @@ service RoomService {
 
   // Get room info
   rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);
+
+  // Start the game (host only, requires 2+ players)
+  rpc StartGame(StartGameRequest) returns (StartGameResponse);
 }
 
 message CreateRoomRequest {
@@ -34,6 +37,10 @@ message CreateRoomResponse {
 message JoinRoomRequest {
   string room_id = 1;
   string player_name = 2;
+  string fingerprint = 3;  // Browser fingerprint for user identification
+  uint32 color_r = 4;      // Player color (red component)
+  uint32 color_g = 5;      // Player color (green component)
+  uint32 color_b = 6;      // Player color (blue component)
 }
 
 message JoinRoomResponse {
@@ -71,6 +78,17 @@ message GetRoomResponse {
   RoomInfo room = 1;
 }
 
+message StartGameRequest {
+  string room_id = 1;
+  string player_id = 2;  // Must be the host
+}
+
+message StartGameResponse {
+  bool success = 1;
+  string error_message = 2;
+  RoomInfo room = 3;  // Updated room info with Playing status
+}
+
 message RoomInfo {
   string id = 1;
   string name = 2;
@@ -78,13 +96,18 @@ message RoomInfo {
   uint32 max_players = 4;
   RoomStatus status = 5;
   repeated PlayerInfo players = 6;
+  uint64 seed = 7;  // Room seed derived from room ID
 }
 
 message PlayerInfo {
   string id = 1;
   string name = 2;
   bool is_host = 3;
-  bool is_ready = 4;
+  bool is_connected = 4;  // Connection status for reconnection support
+  uint32 color_r = 5;     // Player color (red component)
+  uint32 color_g = 6;     // Player color (green component)
+  uint32 color_b = 7;     // Player color (blue component)
+  uint32 join_order = 8;  // Deterministic order for game initialization
 }
 
 enum RoomStatus {

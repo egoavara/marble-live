@@ -141,10 +141,22 @@ pub mod room {
             call(&self.base_url, SERVICE, "CreateRoom", &req).await
         }
 
-        pub async fn join_room(&self, room_id: &str, player_name: &str) -> Result<JoinRoomResponse, GrpcError> {
+        pub async fn join_room(
+            &self,
+            room_id: &str,
+            player_name: &str,
+            fingerprint: &str,
+            color_r: u32,
+            color_g: u32,
+            color_b: u32,
+        ) -> Result<JoinRoomResponse, GrpcError> {
             let req = JoinRoomRequest {
                 room_id: room_id.to_string(),
                 player_name: player_name.to_string(),
+                fingerprint: fingerprint.to_string(),
+                color_r,
+                color_g,
+                color_b,
             };
             call(&self.base_url, SERVICE, "JoinRoom", &req).await
         }
@@ -167,6 +179,14 @@ pub mod room {
                 room_id: room_id.to_string(),
             };
             call(&self.base_url, SERVICE, "GetRoom", &req).await
+        }
+
+        pub async fn start_game(&self, room_id: &str, player_id: &str) -> Result<StartGameResponse, GrpcError> {
+            let req = StartGameRequest {
+                room_id: room_id.to_string(),
+                player_id: player_id.to_string(),
+            };
+            call(&self.base_url, SERVICE, "StartGame", &req).await
         }
     }
 }

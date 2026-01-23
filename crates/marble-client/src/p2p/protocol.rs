@@ -9,12 +9,13 @@ use uuid::Uuid;
 /// Message type identifiers.
 pub mod msg_type {
     pub const PLAYER_INFO: u8 = 0x01;
-    pub const PLAYER_READY: u8 = 0x02;
-    pub const GAME_START: u8 = 0x03;
+    pub const PEER_ANNOUNCE: u8 = 0x02;
     pub const FRAME_HASH: u8 = 0x04;
     pub const SYNC_REQUEST: u8 = 0x05;
     pub const SYNC_STATE: u8 = 0x06;
-    pub const RESTART_GAME: u8 = 0x09;
+    pub const RECONNECT_REQUEST: u8 = 0x07;
+    pub const RECONNECT_RESPONSE: u8 = 0x08;
+    pub const GAME_START_ORDER: u8 = 0x09;
     pub const PING: u8 = 0xFE;
     pub const PONG: u8 = 0xFF;
 }
@@ -22,20 +23,23 @@ pub mod msg_type {
 /// P2P message types.
 #[derive(Debug, Clone)]
 pub enum P2PMessage {
-    /// Player info message (name, color, and hash code).
+    /// Player info message (name, color, hash code).
+    /// Used for display purposes after PeerAnnounce.
     PlayerInfo {
         name: String,
         color: Color,
         hash_code: String,
     },
-    /// Player ready status.
-    PlayerReady {
-        ready: bool,
+    /// Peer announcement - maps peer_id to server player_id.
+    /// Sent when P2P connection is established.
+    PeerAnnounce {
+        player_id: String,
     },
-    /// Game start message from host.
-    GameStart {
+    /// Game start using server-defined player order.
+    /// Host sends this after StartGame succeeds on server.
+    GameStartOrder {
         seed: u64,
-        players: Vec<PlayerStartInfo>,
+        player_order: Vec<String>,  // player_ids in join_order
     },
     /// Frame hash for sync verification.
     FrameHash {
@@ -51,9 +55,25 @@ pub enum P2PMessage {
         frame: u64,
         state: Vec<u8>,
     },
-    /// Restart game message from host.
-    RestartGame {
+    /// Reconnection request - sent when a player rejoins during gameplay.
+    ReconnectRequest {
+        /// Player's name
+        name: String,
+        /// Player's color
+        color: Color,
+        /// Player's hash code
+        hash_code: String,
+    },
+    /// Reconnection response - contains full game state for reconnecting player.
+    ReconnectResponse {
+        /// Current game seed
         seed: u64,
+        /// Current frame number
+        frame: u64,
+        /// Serialized game state
+        state: Vec<u8>,
+        /// Player list with peer_id mappings
+        players: Vec<PlayerStartInfo>,
     },
     /// Ping message for RTT measurement.
     Ping {
@@ -107,24 +127,23 @@ impl P2PMessage {
                 buf.extend_from_slice(hash_bytes);
                 buf
             }
-            P2PMessage::PlayerReady { ready } => {
-                vec![msg_type::PLAYER_READY, if *ready { 1 } else { 0 }]
+            P2PMessage::PeerAnnounce { player_id } => {
+                let mut buf = vec![msg_type::PEER_ANNOUNCE];
+                // Player ID length (2 bytes) + player_id bytes
+                let id_bytes = player_id.as_bytes();
+                buf.extend_from_slice(&(id_bytes.len() as u16).to_be_bytes());
+                buf.extend_from_slice(id_bytes);
+                buf
             }
-            P2PMessage::GameStart { seed, players } => {
-                let mut buf = vec![msg_type::GAME_START];
+            P2PMessage::GameStartOrder { seed, player_order } => {
+                let mut buf = vec![msg_type::GAME_START_ORDER];
                 buf.extend_from_slice(&seed.to_be_bytes());
-                buf.push(players.len() as u8);
-                for player in players {
-                    // Peer ID (16 bytes)
-                    buf.extend_from_slice(&player.peer_id_bytes);
-                    // Color (3 bytes)
-                    buf.push(player.color.r);
-                    buf.push(player.color.g);
-                    buf.push(player.color.b);
-                    // Name length (1 byte) + name bytes
-                    let name_bytes = player.name.as_bytes();
-                    buf.push(name_bytes.len() as u8);
-                    buf.extend_from_slice(name_bytes);
+                buf.push(player_order.len() as u8);
+                for player_id in player_order {
+                    // Player ID length (2 bytes) + player_id bytes
+                    let id_bytes = player_id.as_bytes();
+                    buf.extend_from_slice(&(id_bytes.len() as u16).to_be_bytes());
+                    buf.extend_from_slice(id_bytes);
                 }
                 buf
             }
@@ -146,9 +165,45 @@ impl P2PMessage {
                 buf.extend_from_slice(state);
                 buf
             }
-            P2PMessage::RestartGame { seed } => {
-                let mut buf = vec![msg_type::RESTART_GAME];
+            P2PMessage::ReconnectRequest { name, color, hash_code } => {
+                let mut buf = vec![msg_type::RECONNECT_REQUEST];
+                // Color (3 bytes)
+                buf.push(color.r);
+                buf.push(color.g);
+                buf.push(color.b);
+                // Name length (2 bytes) + name bytes
+                let name_bytes = name.as_bytes();
+                buf.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
+                buf.extend_from_slice(name_bytes);
+                // Hash code length (1 byte) + hash code bytes
+                let hash_bytes = hash_code.as_bytes();
+                buf.push(hash_bytes.len() as u8);
+                buf.extend_from_slice(hash_bytes);
+                buf
+            }
+            P2PMessage::ReconnectResponse { seed, frame, state, players } => {
+                let mut buf = vec![msg_type::RECONNECT_RESPONSE];
+                // Seed (8 bytes)
                 buf.extend_from_slice(&seed.to_be_bytes());
+                // Frame (8 bytes)
+                buf.extend_from_slice(&frame.to_be_bytes());
+                // State length (4 bytes) + state
+                buf.extend_from_slice(&(state.len() as u32).to_be_bytes());
+                buf.extend_from_slice(state);
+                // Player count (1 byte) + players
+                buf.push(players.len() as u8);
+                for player in players {
+                    // Peer ID (16 bytes)
+                    buf.extend_from_slice(&player.peer_id_bytes);
+                    // Color (3 bytes)
+                    buf.push(player.color.r);
+                    buf.push(player.color.g);
+                    buf.push(player.color.b);
+                    // Name length (1 byte) + name bytes
+                    let name_bytes = player.name.as_bytes();
+                    buf.push(name_bytes.len() as u8);
+                    buf.extend_from_slice(name_bytes);
+                }
                 buf
             }
             P2PMessage::Ping { timestamp } => {
@@ -186,49 +241,39 @@ impl P2PMessage {
                 let hash_code = String::from_utf8_lossy(&data[hash_offset + 1..hash_offset + 1 + hash_len]).to_string();
                 Some(P2PMessage::PlayerInfo { name, color, hash_code })
             }
-            msg_type::PLAYER_READY if data.len() >= 2 => {
-                Some(P2PMessage::PlayerReady { ready: data[1] != 0 })
+            msg_type::PEER_ANNOUNCE if data.len() >= 3 => {
+                let id_len = u16::from_be_bytes([data[1], data[2]]) as usize;
+                if data.len() < 3 + id_len {
+                    return None;
+                }
+                let player_id = String::from_utf8_lossy(&data[3..3 + id_len]).to_string();
+                Some(P2PMessage::PeerAnnounce { player_id })
             }
-            msg_type::GAME_START if data.len() >= 10 => {
+            msg_type::GAME_START_ORDER if data.len() >= 10 => {
                 let seed = u64::from_be_bytes([
                     data[1], data[2], data[3], data[4],
                     data[5], data[6], data[7], data[8],
                 ]);
                 let player_count = data[9] as usize;
                 let mut offset = 10;
-                let mut players = Vec::with_capacity(player_count);
+                let mut player_order = Vec::with_capacity(player_count);
 
                 for _ in 0..player_count {
-                    if offset + 20 > data.len() {
+                    if offset + 2 > data.len() {
                         return None;
                     }
-                    // Peer ID (16 bytes)
-                    let mut peer_id_bytes = [0u8; 16];
-                    peer_id_bytes.copy_from_slice(&data[offset..offset + 16]);
-                    offset += 16;
+                    let id_len = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
+                    offset += 2;
 
-                    // Color (3 bytes)
-                    let color = Color::rgb(data[offset], data[offset + 1], data[offset + 2]);
-                    offset += 3;
-
-                    // Name length (1 byte) + name
-                    let name_len = data[offset] as usize;
-                    offset += 1;
-
-                    if offset + name_len > data.len() {
+                    if offset + id_len > data.len() {
                         return None;
                     }
-                    let name = String::from_utf8_lossy(&data[offset..offset + name_len]).to_string();
-                    offset += name_len;
-
-                    players.push(PlayerStartInfo {
-                        peer_id_bytes,
-                        name,
-                        color,
-                    });
+                    let player_id = String::from_utf8_lossy(&data[offset..offset + id_len]).to_string();
+                    offset += id_len;
+                    player_order.push(player_id);
                 }
 
-                Some(P2PMessage::GameStart { seed, players })
+                Some(P2PMessage::GameStartOrder { seed, player_order })
             }
             msg_type::FRAME_HASH if data.len() >= 17 => {
                 let frame = u64::from_be_bytes([
@@ -263,6 +308,74 @@ impl P2PMessage {
                     None
                 }
             }
+            msg_type::RECONNECT_REQUEST if data.len() >= 6 => {
+                let color = Color::rgb(data[1], data[2], data[3]);
+                let name_len = u16::from_be_bytes([data[4], data[5]]) as usize;
+                if data.len() < 6 + name_len + 1 {
+                    return None;
+                }
+                let name = String::from_utf8_lossy(&data[6..6 + name_len]).to_string();
+                let hash_offset = 6 + name_len;
+                let hash_len = data[hash_offset] as usize;
+                if data.len() < hash_offset + 1 + hash_len {
+                    return None;
+                }
+                let hash_code = String::from_utf8_lossy(&data[hash_offset + 1..hash_offset + 1 + hash_len]).to_string();
+                Some(P2PMessage::ReconnectRequest { name, color, hash_code })
+            }
+            msg_type::RECONNECT_RESPONSE if data.len() >= 21 => {
+                let seed = u64::from_be_bytes([
+                    data[1], data[2], data[3], data[4],
+                    data[5], data[6], data[7], data[8],
+                ]);
+                let frame = u64::from_be_bytes([
+                    data[9], data[10], data[11], data[12],
+                    data[13], data[14], data[15], data[16],
+                ]);
+                let state_len = u32::from_be_bytes([
+                    data[17], data[18], data[19], data[20],
+                ]) as usize;
+                if data.len() < 21 + state_len + 1 {
+                    return None;
+                }
+                let state = data[21..21 + state_len].to_vec();
+                let player_offset = 21 + state_len;
+                let player_count = data[player_offset] as usize;
+                let mut offset = player_offset + 1;
+                let mut players = Vec::with_capacity(player_count);
+
+                for _ in 0..player_count {
+                    if offset + 20 > data.len() {
+                        return None;
+                    }
+                    // Peer ID (16 bytes)
+                    let mut peer_id_bytes = [0u8; 16];
+                    peer_id_bytes.copy_from_slice(&data[offset..offset + 16]);
+                    offset += 16;
+
+                    // Color (3 bytes)
+                    let color = Color::rgb(data[offset], data[offset + 1], data[offset + 2]);
+                    offset += 3;
+
+                    // Name length (1 byte) + name
+                    let name_len = data[offset] as usize;
+                    offset += 1;
+
+                    if offset + name_len > data.len() {
+                        return None;
+                    }
+                    let name = String::from_utf8_lossy(&data[offset..offset + name_len]).to_string();
+                    offset += name_len;
+
+                    players.push(PlayerStartInfo {
+                        peer_id_bytes,
+                        name,
+                        color,
+                    });
+                }
+
+                Some(P2PMessage::ReconnectResponse { seed, frame, state, players })
+            }
             msg_type::PING if data.len() >= 9 => {
                 let timestamp = f64::from_be_bytes([
                     data[1], data[2], data[3], data[4],
@@ -276,13 +389,6 @@ impl P2PMessage {
                     data[5], data[6], data[7], data[8],
                 ]);
                 Some(P2PMessage::Pong { timestamp })
-            }
-            msg_type::RESTART_GAME if data.len() >= 9 => {
-                let seed = u64::from_be_bytes([
-                    data[1], data[2], data[3], data[4],
-                    data[5], data[6], data[7], data[8],
-                ]);
-                Some(P2PMessage::RestartGame { seed })
             }
             _ => None,
         }
@@ -307,32 +413,6 @@ mod tests {
             assert_eq!(name, "TestPlayer");
             assert_eq!(color, Color::RED);
             assert_eq!(hash_code, "1A2B");
-        } else {
-            panic!("Wrong message type");
-        }
-    }
-
-    #[test]
-    fn test_restart_game_roundtrip() {
-        let msg = P2PMessage::RestartGame { seed: 0xDEADBEEF12345678 };
-        let encoded = msg.encode();
-        let decoded = P2PMessage::decode(&encoded).unwrap();
-
-        if let P2PMessage::RestartGame { seed } = decoded {
-            assert_eq!(seed, 0xDEADBEEF12345678);
-        } else {
-            panic!("Wrong message type");
-        }
-    }
-
-    #[test]
-    fn test_player_ready_roundtrip() {
-        let msg = P2PMessage::PlayerReady { ready: true };
-        let encoded = msg.encode();
-        let decoded = P2PMessage::decode(&encoded).unwrap();
-
-        if let P2PMessage::PlayerReady { ready } = decoded {
-            assert!(ready);
         } else {
             panic!("Wrong message type");
         }
