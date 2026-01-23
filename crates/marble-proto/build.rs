@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(build_server)
         .build_client(build_server)
         .compile_protos(
-            &["../../proto/game.proto", "../../proto/room.proto"],
+            &["../../proto/room.proto"],
             &["../../proto"],
         )?;
     Ok(())
