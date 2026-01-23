@@ -1,22 +1,13 @@
 //! Session management for P2P game.
 //!
-//! Handles host election and peer management.
+//! Provides utilities for peer management.
+//! Note: Host status is now determined by the server (room creator),
+//! not by P2P peer election.
 
 use marble_core::Color;
 use matchbox_socket::PeerId;
 
 use crate::p2p::state::{P2PGameState, PeerInfo};
-
-/// Determines the host from a list of peer IDs.
-/// The host is the peer with the lowest peer ID.
-pub fn elect_host(peer_ids: &[PeerId]) -> Option<PeerId> {
-    peer_ids.iter().min().copied()
-}
-
-/// Check if the given peer ID is the host.
-pub fn is_host(my_peer_id: PeerId, all_peer_ids: &[PeerId]) -> bool {
-    elect_host(all_peer_ids) == Some(my_peer_id)
-}
 
 /// Get player info for game start message.
 /// Returns a sorted list of (peer_id, name, color) tuples.
@@ -65,22 +56,6 @@ pub fn find_peer<'a>(peers: &'a std::collections::HashMap<PeerId, PeerInfo>, pee
     peers.get(&peer_id)
 }
 
-/// Check if all peers are ready to start the game.
-pub fn check_all_ready(state: &P2PGameState) -> bool {
-    // Need at least 2 players (self + 1 peer)
-    if state.peers.is_empty() {
-        return false;
-    }
-
-    // Check if self is ready
-    if !state.my_ready {
-        return false;
-    }
-
-    // Check if all peers are ready
-    state.peers.values().all(|peer| peer.ready)
-}
-
 /// Get the average RTT across all peers.
 pub fn average_rtt(state: &P2PGameState) -> Option<u32> {
     let rtts: Vec<u32> = state
@@ -104,36 +79,6 @@ pub fn max_rtt(state: &P2PGameState) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
-
-    fn make_peer_id(n: u128) -> PeerId {
-        PeerId(Uuid::from_u128(n))
-    }
-
-    #[test]
-    fn test_elect_host() {
-        let peers = vec![
-            make_peer_id(3),
-            make_peer_id(1),
-            make_peer_id(2),
-        ];
-
-        let host = elect_host(&peers);
-        assert_eq!(host, Some(make_peer_id(1)));
-    }
-
-    #[test]
-    fn test_is_host() {
-        let peers = vec![
-            make_peer_id(3),
-            make_peer_id(1),
-            make_peer_id(2),
-        ];
-
-        assert!(is_host(make_peer_id(1), &peers));
-        assert!(!is_host(make_peer_id(2), &peers));
-        assert!(!is_host(make_peer_id(3), &peers));
-    }
 
     #[test]
     fn test_assign_player_color() {

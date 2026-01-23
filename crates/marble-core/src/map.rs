@@ -227,6 +227,36 @@ impl RouletteConfig {
 
         hole_handles
     }
+
+    /// Finds hole handles in an existing physics world by locating sensor colliders
+    /// at the configured hole positions. Used after restoring from a snapshot.
+    pub fn find_hole_handles(&self, world: &PhysicsWorld) -> Vec<ColliderHandle> {
+        let mut hole_handles = Vec::with_capacity(self.holes.len());
+
+        for hole in &self.holes {
+            let hole_x = hole.center[0];
+            let hole_y = hole.center[1];
+
+            // Find collider at this position that is a sensor
+            for (handle, collider) in world.collider_set.iter() {
+                if collider.is_sensor() {
+                    let collider_pos = collider.translation();
+                    // Calculate squared distance (avoids sqrt call)
+                    let dx = collider_pos.x - hole_x;
+                    let dy = collider_pos.y - hole_y;
+                    let dist_sq = dx * dx + dy * dy;
+
+                    // Use small epsilon for position matching (1.0^2 = 1.0)
+                    if dist_sq < 1.0 {
+                        hole_handles.push(handle);
+                        break;
+                    }
+                }
+            }
+        }
+
+        hole_handles
+    }
 }
 
 #[cfg(test)]

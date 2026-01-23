@@ -4,7 +4,8 @@ use crate::components::{
     CanvasControls, DebugLogToggle, DesyncWarning, Layout, Leaderboard, PlayerLegend, ShareButton,
     WinnerModal,
 };
-use crate::fingerprint::generate_hash_code;
+use crate::fingerprint::{generate_hash_code, get_browser_fingerprint};
+use crate::hooks::use_room_sync;
 use crate::network::NetworkEvent;
 use crate::p2p::protocol::P2PMessage;
 use crate::p2p::state::{P2PAction, P2PGameState, P2PPhase, P2PStateContext};
@@ -66,6 +67,8 @@ pub fn play_page(props: &PlayPageProps) -> Html {
                 } else {
                     settings.display_name()
                 };
+                let fingerprint = get_browser_fingerprint();
+                let color = settings.color;
 
                 connection_attempted.set(true);
                 state.dispatch(P2PAction::SetConnecting);
@@ -75,24 +78,34 @@ pub fn play_page(props: &PlayPageProps) -> Html {
                 let room_id_clone = room_id.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    let result = network.borrow_mut().join_room(&room_id_clone, &name).await;
+                    let result = network.borrow_mut().join_room(&room_id_clone, &name, &fingerprint, color).await;
 
                     match result {
-                        Ok(()) => {
+                        Ok((seed, is_game_in_progress, player_id, is_host, server_players)) => {
                             state_clone.dispatch(P2PAction::SetConnected {
                                 room_id: room_id_clone,
+                                server_seed: seed,
+                                is_game_in_progress,
+                                player_id,
+                                is_host,
                             });
+                            state_clone.dispatch(P2PAction::UpdateServerPlayers(server_players));
                         }
                         Err(_) => {
                             match network
                                 .borrow_mut()
-                                .create_and_join_room("Marble Race", &name)
+                                .create_and_join_room("Marble Race", &name, &fingerprint, color)
                                 .await
                             {
-                                Ok(created_room_id) => {
+                                Ok((created_room_id, seed, is_game_in_progress, player_id, is_host, server_players)) => {
                                     state_clone.dispatch(P2PAction::SetConnected {
                                         room_id: created_room_id,
+                                        server_seed: seed,
+                                        is_game_in_progress,
+                                        player_id,
+                                        is_host,
                                     });
+                                    state_clone.dispatch(P2PAction::UpdateServerPlayers(server_players));
                                 }
                                 Err(e) => {
                                     state_clone.dispatch(P2PAction::SetError(e));
@@ -107,6 +120,9 @@ pub fn play_page(props: &PlayPageProps) -> Html {
             || ()
         });
     }
+
+    // Poll GetRoom periodically to sync server_players during lobby
+    use_room_sync(&state);
 
     // Initialize canvas and renderer
     {
@@ -136,6 +152,7 @@ pub fn play_page(props: &PlayPageProps) -> Html {
         let rtt_tracker = rtt_tracker.clone();
 
         use_effect_with(state.phase.clone(), move |phase| {
+            // Also poll during Reconnecting phase to receive ReconnectResponse
             let interval: Option<Interval> = if *phase == P2PPhase::Disconnected {
                 None
             } else {
@@ -145,6 +162,30 @@ pub fn play_page(props: &PlayPageProps) -> Html {
             };
 
             move || drop(interval)
+        });
+    }
+
+    // Broadcast PlayerInfo when phase changes to lobby
+    {
+        let state = state.clone();
+        let phase = state.phase.clone();
+
+        use_effect_with(phase, move |phase| {
+            // Only broadcast if we're in lobby and have peers
+            let in_lobby = matches!(phase, P2PPhase::WaitingForPeers | P2PPhase::Lobby);
+            if in_lobby && !state.peers.is_empty() {
+                let msg = P2PMessage::PlayerInfo {
+                    name: if state.my_name.is_empty() {
+                        "Player".to_string()
+                    } else {
+                        state.my_name.clone()
+                    },
+                    color: state.my_color,
+                    hash_code: state.my_hash_code.clone(),
+                };
+                state.network.borrow_mut().broadcast(&msg.encode());
+            }
+            || ()
         });
     }
 
@@ -318,21 +359,43 @@ fn poll_network(
             NetworkEvent::PeerJoined(peer_id) => {
                 state.dispatch(P2PAction::PeerJoined(peer_id));
 
-                let msg = P2PMessage::PlayerInfo {
-                    name: if state.my_name.is_empty() {
-                        "Player".to_string()
-                    } else {
-                        state.my_name.clone()
-                    },
-                    color: state.my_color,
-                    hash_code: state.my_hash_code.clone(),
-                };
-                state.network.borrow_mut().send_to(peer_id, &msg.encode());
+                // If we're in Reconnecting phase, send a ReconnectRequest instead of normal info
+                if matches!(state.phase, P2PPhase::Reconnecting) {
+                    let msg = P2PMessage::ReconnectRequest {
+                        name: if state.my_name.is_empty() {
+                            "Player".to_string()
+                        } else {
+                            state.my_name.clone()
+                        },
+                        color: state.my_color,
+                        hash_code: state.my_hash_code.clone(),
+                    };
+                    state.network.borrow_mut().send_to(peer_id, &msg.encode());
+                    state.dispatch(P2PAction::AddLog(format!(
+                        "Sent reconnect request to peer {}",
+                        &peer_id.0.to_string()[..8]
+                    )));
+                } else {
+                    // Send PeerAnnounce to map peer_id <-> player_id (server-authoritative)
+                    if !state.my_player_id.is_empty() {
+                        let announce_msg = P2PMessage::PeerAnnounce {
+                            player_id: state.my_player_id.clone(),
+                        };
+                        state.network.borrow_mut().send_to(peer_id, &announce_msg.encode());
+                    }
 
-                let ready_msg = P2PMessage::PlayerReady {
-                    ready: state.my_ready,
-                };
-                state.network.borrow_mut().send_to(peer_id, &ready_msg.encode());
+                    // Also send PlayerInfo for display purposes (name, color, hash_code)
+                    let msg = P2PMessage::PlayerInfo {
+                        name: if state.my_name.is_empty() {
+                            "Player".to_string()
+                        } else {
+                            state.my_name.clone()
+                        },
+                        color: state.my_color,
+                        hash_code: state.my_hash_code.clone(),
+                    };
+                    state.network.borrow_mut().send_to(peer_id, &msg.encode());
+                }
             }
             NetworkEvent::PeerLeft(peer_id) => {
                 state.dispatch(P2PAction::PeerLeft(peer_id));
@@ -376,22 +439,16 @@ fn handle_message(
                 hash_code,
             });
         }
-        P2PMessage::PlayerReady { ready } => {
-            state.dispatch(P2PAction::UpdatePeerReady {
+        P2PMessage::PeerAnnounce { player_id } => {
+            // Map peer_id to player_id for server-authoritative player lookup
+            state.dispatch(P2PAction::MapPeerToPlayer {
                 peer_id: from,
-                ready,
+                player_id,
             });
         }
-        P2PMessage::GameStart { seed, players } => {
-            let player_list: Vec<_> = players
-                .iter()
-                .map(|p| (p.peer_id(), p.name.clone(), p.color))
-                .collect();
-
-            state.dispatch(P2PAction::StartGame {
-                seed,
-                players: player_list,
-            });
+        P2PMessage::GameStartOrder { seed, player_order } => {
+            // Use explicit player order from host for game start
+            state.dispatch(P2PAction::StartGameFromServer { seed, player_order });
             state.dispatch(P2PAction::StartCountdown);
         }
         P2PMessage::FrameHash { frame, hash } => {
@@ -480,8 +537,85 @@ fn handle_message(
                 });
             }
         }
-        P2PMessage::RestartGame { seed } => {
-            state.dispatch(P2PAction::RestartGame { seed });
+        P2PMessage::ReconnectRequest { name, color, hash_code } => {
+            // Another player is reconnecting and requesting game state
+            // Only respond if we're in a game (Running, Countdown, or Finished)
+            let is_in_game = matches!(
+                state.phase,
+                P2PPhase::Running | P2PPhase::Countdown { .. } | P2PPhase::Finished
+            );
+
+            if is_in_game {
+                // Update peer info
+                state.dispatch(P2PAction::UpdatePeerInfo {
+                    peer_id: from,
+                    name: name.clone(),
+                    color,
+                    hash_code,
+                });
+
+                // Send the current game state
+                let snapshot = state.game_state.create_snapshot();
+                match snapshot.to_bytes() {
+                    Ok(state_data) => {
+                        // Build player list from peer_player_map
+                        use crate::p2p::protocol::PlayerStartInfo;
+                        let mut players: Vec<PlayerStartInfo> = Vec::new();
+
+                        // Add self
+                        if let Some(my_peer_id) = state.my_peer_id {
+                            players.push(PlayerStartInfo::new(
+                                my_peer_id,
+                                state.my_name.clone(),
+                                state.my_color,
+                            ));
+                        }
+
+                        // Add other peers
+                        for (peer_id, info) in state.peers.iter() {
+                            players.push(PlayerStartInfo::new(
+                                *peer_id,
+                                info.name.clone(),
+                                info.color,
+                            ));
+                        }
+
+                        let msg = P2PMessage::ReconnectResponse {
+                            seed: state.game_seed,
+                            frame: state.game_state.current_frame(),
+                            state: state_data,
+                            players,
+                        };
+                        state.network.borrow_mut().send_to(from, &msg.encode());
+                        state.dispatch(P2PAction::AddLog(format!(
+                            "Sent reconnect response to {}",
+                            &from.0.to_string()[..8]
+                        )));
+                    }
+                    Err(e) => {
+                        state.dispatch(P2PAction::AddLog(format!(
+                            "Failed to serialize state for reconnect: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+        }
+        P2PMessage::ReconnectResponse { seed, frame, state: state_data, players } => {
+            // We received game state from a peer - apply it if we're reconnecting
+            if matches!(state.phase, P2PPhase::Reconnecting) {
+                let player_list: Vec<_> = players
+                    .iter()
+                    .map(|p| (p.peer_id(), p.name.clone(), p.color))
+                    .collect();
+
+                state.dispatch(P2PAction::ApplyReconnectState {
+                    seed,
+                    frame,
+                    state_data,
+                    players: player_list,
+                });
+            }
         }
     }
 }

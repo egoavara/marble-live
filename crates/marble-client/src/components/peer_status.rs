@@ -40,17 +40,16 @@ pub fn peer_status_panel() -> Html {
                 } else {
                     html! {}
                 }}
-                { if state.my_ready {
-                    html! { <span class="ready-status ready">{ "Ready" }</span> }
-                } else {
-                    html! { <span class="ready-status not-ready">{ "Not Ready" }</span> }
-                }}
             </div>
 
             // Peers
             { for state.peers.iter().map(|(peer_id, info)| {
                 let peer_short = peer_id.0.to_string()[..8].to_string();
-                let is_peer_host = state.all_peer_ids().first() == Some(peer_id);
+                // Use server-authoritative host status
+                let is_peer_host = state.peer_to_player.get(peer_id)
+                    .and_then(|player_id| state.server_players.get(player_id))
+                    .map(|sp| sp.is_host)
+                    .unwrap_or(false);
 
                 html! {
                     <div class={classes!("player-item", (!info.connected).then_some("disconnected"))}>
@@ -73,15 +72,6 @@ pub fn peer_status_panel() -> Html {
                             html! { <span class="badge disconnected">{ "OFFLINE" }</span> }
                         } else if is_peer_host {
                             html! { <span class="badge host">{ "HOST" }</span> }
-                        } else {
-                            html! {}
-                        }}
-                        { if info.connected {
-                            if info.ready {
-                                html! { <span class="ready-status ready">{ "Ready" }</span> }
-                            } else {
-                                html! { <span class="ready-status not-ready">{ "Not Ready" }</span> }
-                            }
                         } else {
                             html! {}
                         }}

@@ -75,8 +75,11 @@ impl GameState {
         // Reinitialize RNG after deserialization
         self.marble_manager.reinit_rng();
 
-        // Re-apply map config if we have one (hole_handles need to be reconstructed)
-        // Note: The map is already applied in physics_world, we just need to track hole handles
-        // For now, we skip hole tracking after resync - eliminations will still work via collision detection
+        // Reconstruct hole_handles from map_config if available
+        // The physics_world already contains the hole colliders from the snapshot,
+        // but we need to find their handles for collision detection
+        if let Some(ref config) = self.map_config {
+            self.hole_handles = config.find_hole_handles(&self.physics_world);
+        }
     }
 }

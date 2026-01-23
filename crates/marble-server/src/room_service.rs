@@ -4,7 +4,7 @@ use crate::room_state::{RoomStatus, RoomStore};
 use marble_proto::room::{
     room_service_server::RoomService, CreateRoomRequest, CreateRoomResponse, GetRoomRequest,
     GetRoomResponse, JoinRoomRequest, JoinRoomResponse, LeaveRoomRequest, LeaveRoomResponse,
-    ListRoomsRequest, ListRoomsResponse, PlayerInfo, RoomInfo,
+    ListRoomsRequest, ListRoomsResponse, PlayerInfo, RoomInfo, StartGameRequest, StartGameResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -22,6 +22,9 @@ impl RoomServiceImpl {
     }
 
     fn room_to_proto(&self, room: &crate::room_state::Room) -> RoomInfo {
+        // Get players sorted by join_order for deterministic ordering
+        let players_sorted = room.players_by_join_order();
+
         RoomInfo {
             id: room.id.clone(),
             name: room.name.clone(),
@@ -32,16 +35,20 @@ impl RoomServiceImpl {
                 RoomStatus::Playing => marble_proto::room::RoomStatus::Playing.into(),
                 RoomStatus::Finished => marble_proto::room::RoomStatus::Finished.into(),
             },
-            players: room
-                .players
+            players: players_sorted
                 .iter()
                 .map(|p| PlayerInfo {
                     id: p.id.clone(),
                     name: p.name.clone(),
                     is_host: p.is_host,
-                    is_ready: p.is_ready,
+                    is_connected: p.is_connected,
+                    color_r: p.color.r as u32,
+                    color_g: p.color.g as u32,
+                    color_b: p.color.b as u32,
+                    join_order: p.join_order,
                 })
                 .collect(),
+            seed: room.seed,
         }
     }
 
@@ -62,7 +69,8 @@ impl RoomService for RoomServiceImpl {
         } else {
             req.name
         };
-        let max_players = if req.max_players == 0 { 4 } else { req.max_players };
+        // max_players: default to 4, cap at 8 to prevent DoS
+        let max_players = if req.max_players == 0 { 4 } else { req.max_players.min(8) };
 
         let room = self.store.create_room(name, max_players);
 
@@ -81,7 +89,14 @@ impl RoomService for RoomServiceImpl {
     ) -> Result<Response<JoinRoomResponse>, Status> {
         let req = request.into_inner();
 
-        let Some((room, player)) = self.store.join_room(&req.room_id, req.player_name) else {
+        // Extract color from request
+        let color = crate::room_state::Color::rgb(
+            req.color_r as u8,
+            req.color_g as u8,
+            req.color_b as u8,
+        );
+
+        let Some((room, player, is_reconnect)) = self.store.join_room(&req.room_id, req.player_name, req.fingerprint, color) else {
             return Ok(Response::new(JoinRoomResponse {
                 success: false,
                 player_id: String::new(),
@@ -91,7 +106,11 @@ impl RoomService for RoomServiceImpl {
             }));
         };
 
-        tracing::info!(room_id = %room.id, player_id = %player.id, "Player joined room");
+        if is_reconnect {
+            tracing::info!(room_id = %room.id, player_id = %player.id, "Player reconnected to room");
+        } else {
+            tracing::info!(room_id = %room.id, player_id = %player.id, "Player joined room");
+        }
 
         Ok(Response::new(JoinRoomResponse {
             success: true,
@@ -139,5 +158,28 @@ impl RoomService for RoomServiceImpl {
         let room = self.store.get_room(&req.room_id).map(|r| self.room_to_proto(&r));
 
         Ok(Response::new(GetRoomResponse { room }))
+    }
+
+    async fn start_game(
+        &self,
+        request: Request<StartGameRequest>,
+    ) -> Result<Response<StartGameResponse>, Status> {
+        let req = request.into_inner();
+
+        match self.store.start_game(&req.room_id, &req.player_id) {
+            Ok(room) => {
+                tracing::info!(room_id = %room.id, "Game started by host");
+                Ok(Response::new(StartGameResponse {
+                    success: true,
+                    error_message: String::new(),
+                    room: Some(self.room_to_proto(&room)),
+                }))
+            }
+            Err(e) => Ok(Response::new(StartGameResponse {
+                success: false,
+                error_message: e,
+                room: None,
+            })),
+        }
     }
 }

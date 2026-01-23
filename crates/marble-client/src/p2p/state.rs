@@ -27,6 +27,8 @@ pub enum P2PPhase {
     Running,
     /// Desync detected, resyncing.
     Resyncing,
+    /// Reconnecting to an in-progress game (waiting for state sync from peers).
+    Reconnecting,
     /// Game finished.
     Finished,
 }
@@ -38,13 +40,13 @@ impl Default for P2PPhase {
 }
 
 /// Information about a peer (may be connected or disconnected).
+/// Note: Host status is determined by server_players, not stored here.
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
     pub peer_id: PeerId,
     pub name: String,
     pub hash_code: String,
     pub color: Color,
-    pub ready: bool,
     pub rtt_ms: Option<u32>,
     /// Whether the peer is currently connected.
     pub connected: bool,
@@ -57,11 +59,31 @@ impl PeerInfo {
             name,
             hash_code: String::new(),
             color,
-            ready: false,
             rtt_ms: None,
             connected: true,
         }
     }
+}
+
+/// Server-authoritative player information.
+/// This data comes from the server and is the single source of truth.
+#[derive(Debug, Clone)]
+pub struct ServerPlayerInfo {
+    pub player_id: String,
+    pub name: String,
+    pub color: Color,
+    pub is_host: bool,
+    pub is_connected: bool,
+    pub join_order: u32,
+}
+
+/// P2P runtime peer information (connection-related only).
+#[derive(Debug, Clone)]
+pub struct PeerRuntimeInfo {
+    pub peer_id: PeerId,
+    pub player_id: String,  // Links to ServerPlayerInfo
+    pub rtt_ms: Option<u32>,
+    pub p2p_connected: bool,
 }
 
 /// P2P game state containing network and game state.
@@ -73,17 +95,17 @@ pub struct P2PGameState {
     pub network: SharedNetworkManager,
     /// My peer ID (assigned after connection).
     pub my_peer_id: Option<PeerId>,
+    /// My player ID (assigned by server).
+    pub my_player_id: String,
     /// My player name.
     pub my_name: String,
     /// My player hash code (e.g., "1A2B").
     pub my_hash_code: String,
     /// My player color.
     pub my_color: Color,
-    /// Whether I'm ready.
-    pub my_ready: bool,
-    /// Connected peers.
+    /// Connected peers (P2P runtime info).
     pub peers: HashMap<PeerId, PeerInfo>,
-    /// Whether I am the host.
+    /// Whether I am the host (from server).
     pub is_host: bool,
     /// Current game state.
     pub game_state: Rc<GameState>,
@@ -93,14 +115,20 @@ pub struct P2PGameState {
     pub desync_detected: bool,
     /// Frame hashes received from peers.
     pub peer_hashes: HashMap<PeerId, (u64, u64)>,
-    /// Last ping sent timestamps.
-    pub ping_sent: HashMap<PeerId, f64>,
     /// Event log for debugging.
     pub logs: Vec<String>,
     /// Seed used for the game.
     pub game_seed: u64,
     /// Mapping from PeerId to PlayerId (set when game starts).
     pub peer_player_map: HashMap<PeerId, u32>,
+
+    // --- Server-authoritative data ---
+    /// Server-authoritative player information, keyed by player_id.
+    pub server_players: HashMap<String, ServerPlayerInfo>,
+    /// Mapping from player_id to peer_id (built via PeerAnnounce).
+    pub player_to_peer: HashMap<String, PeerId>,
+    /// Mapping from peer_id to player_id (built via PeerAnnounce).
+    pub peer_to_player: HashMap<PeerId, String>,
 }
 
 impl PartialEq for P2PGameState {
@@ -125,21 +153,31 @@ impl P2PGameState {
             phase: P2PPhase::Disconnected,
             network: create_shared_network_manager("/grpc"),
             my_peer_id: None,
+            my_player_id: String::new(),
             my_name: String::new(),
             my_hash_code: String::new(),
             my_color: Color::RED,
-            my_ready: false,
             peers: HashMap::new(),
             is_host: false,
             game_state: Rc::new(game_state),
             room_id: String::new(),
             desync_detected: false,
             peer_hashes: HashMap::new(),
-            ping_sent: HashMap::new(),
             logs: Vec::new(),
             game_seed: 42,
             peer_player_map: HashMap::new(),
+            // Server-authoritative data
+            server_players: HashMap::new(),
+            player_to_peer: HashMap::new(),
+            peer_to_player: HashMap::new(),
         }
+    }
+
+    /// Get server players sorted by join_order.
+    pub fn server_players_by_order(&self) -> Vec<&ServerPlayerInfo> {
+        let mut players: Vec<&ServerPlayerInfo> = self.server_players.values().collect();
+        players.sort_by_key(|p| p.join_order);
+        players
     }
 
     /// Add a log entry.
@@ -154,7 +192,7 @@ impl P2PGameState {
         }
     }
 
-    /// Get all peers including self as a sorted list for host election.
+    /// Get all peers including self as a sorted list.
     pub fn all_peer_ids(&self) -> Vec<PeerId> {
         let mut ids: Vec<PeerId> = self.peers.keys().copied().collect();
         if let Some(my_id) = self.my_peer_id {
@@ -164,22 +202,8 @@ impl P2PGameState {
         ids
     }
 
-    /// Determine if I am the host (lowest peer ID).
-    pub fn update_host_status(&mut self) {
-        if let Some(my_id) = self.my_peer_id {
-            let all_ids = self.all_peer_ids();
-            self.is_host = all_ids.first() == Some(&my_id);
-        }
-    }
-
-    /// Check if all connected peers are ready.
-    pub fn all_peers_ready(&self) -> bool {
-        let connected_peers: Vec<_> = self.peers.values().filter(|p| p.connected).collect();
-        if connected_peers.is_empty() {
-            return false;
-        }
-        self.my_ready && connected_peers.iter().all(|p| p.ready)
-    }
+    // Note: Host status is now determined by the server (room creator),
+    // not by P2P peer election. See SetConnected and UpdateServerPlayers actions.
 
     /// Get the total player count (all peers including disconnected).
     pub fn player_count(&self) -> usize {
@@ -197,7 +221,7 @@ impl P2PGameState {
 pub enum P2PAction {
     // Connection actions
     SetConnecting,
-    SetConnected { room_id: String },
+    SetConnected { room_id: String, server_seed: u64, is_game_in_progress: bool, player_id: String, is_host: bool },
     SetDisconnected,
     SetError(String),
 
@@ -205,24 +229,25 @@ pub enum P2PAction {
     PeerJoined(PeerId),
     PeerLeft(PeerId),
     SetMyPeerId(PeerId),
-    UpdatePeerReady { peer_id: PeerId, ready: bool },
     UpdatePeerRtt { peer_id: PeerId, rtt_ms: u32 },
     UpdatePeerInfo { peer_id: PeerId, name: String, color: Color, hash_code: String },
+
+    // Server player management (authoritative)
+    UpdateServerPlayers(Vec<ServerPlayerInfo>),
+    /// Map a peer_id to a player_id via PeerAnnounce
+    MapPeerToPlayer { peer_id: PeerId, player_id: String },
 
     // Player setup
     SetMyName(String),
     SetMyHashCode(String),
     SetMyColor(Color),
-    SetMyReady(bool),
 
     // Game flow
-    TransitionToLobby,
-    StartGame { seed: u64, players: Vec<(PeerId, String, Color)> },
+    /// Start game using explicit player order from host
+    StartGameFromServer { seed: u64, player_order: Vec<String> },
     StartCountdown,
     Tick,
     GameFinished,
-    ResetToLobby,
-    RestartGame { seed: u64 },
 
     // Synchronization
     ReceiveFrameHash { peer_id: PeerId, frame: u64, hash: u64 },
@@ -230,8 +255,13 @@ pub enum P2PAction {
     StartResync,
     ApplySyncState { frame: u64, state_data: Vec<u8> },
 
-    // Ping
-    RecordPingSent { peer_id: PeerId, timestamp: f64 },
+    // Reconnection
+    ApplyReconnectState {
+        seed: u64,
+        frame: u64,
+        state_data: Vec<u8>,
+        players: Vec<(PeerId, String, Color)>,
+    },
 
     // Logging
     AddLog(String),
@@ -248,18 +278,31 @@ impl Reducible for P2PGameState {
                 new_state.phase = P2PPhase::Connecting;
                 new_state.add_log("Connecting...");
             }
-            P2PAction::SetConnected { room_id } => {
-                new_state.phase = P2PPhase::WaitingForPeers;
+            P2PAction::SetConnected { room_id, server_seed, is_game_in_progress, player_id, is_host } => {
                 new_state.room_id = room_id.clone();
-                new_state.add_log(&format!("Connected to room: {room_id}"));
+                new_state.game_seed = server_seed;
+                new_state.my_player_id = player_id.clone();
+                new_state.is_host = is_host;  // Host status from server (room creator)
+                if is_game_in_progress {
+                    // Game is already in progress - enter reconnecting state
+                    new_state.phase = P2PPhase::Reconnecting;
+                    new_state.add_log(&format!("Reconnecting to room: {room_id} (game in progress)"));
+                } else {
+                    new_state.phase = P2PPhase::WaitingForPeers;
+                    new_state.add_log(&format!("Connected to room: {room_id} (seed: {server_seed}, host: {is_host})"));
+                }
             }
             P2PAction::SetDisconnected => {
                 new_state.phase = P2PPhase::Disconnected;
                 new_state.peers.clear();
                 new_state.my_peer_id = None;
                 new_state.is_host = false;
-                new_state.my_ready = false;
                 new_state.room_id.clear();
+                new_state.server_players.clear();
+                new_state.player_to_peer.clear();
+                new_state.peer_to_player.clear();
+                new_state.desync_detected = false;  // Clear desync state for new session
+                new_state.peer_hashes.clear();  // Clear stale hash data
                 new_state.add_log("Disconnected");
             }
             P2PAction::SetError(msg) => {
@@ -286,7 +329,7 @@ impl Reducible for P2PGameState {
                     new_state.add_log(&format!("Peer joined: {}", &peer_id.0.to_string()[..8]));
                 }
 
-                new_state.update_host_status();
+                // Host status is fixed by server (room creator), no need to update here
 
                 // Transition to lobby when peers are connected
                 if new_state.phase == P2PPhase::WaitingForPeers && !new_state.peers.is_empty() {
@@ -301,40 +344,24 @@ impl Reducible for P2PGameState {
 
                 if is_in_game {
                     // During gameplay: mark as disconnected but keep in list
+                    // DO NOT eliminate the player's marble - physics simulation continues
+                    // The marble keeps participating and the game result is preserved
                     if let Some(peer) = new_state.peers.get_mut(&peer_id) {
                         peer.connected = false;
                         peer.rtt_ms = None;
                     }
-
-                    // Eliminate the player's marble
-                    let mut eliminated_player: Option<u32> = None;
-                    let mut game_finished = false;
-
-                    if matches!(new_state.phase, P2PPhase::Countdown { .. } | P2PPhase::Running) {
-                        if let Some(&player_id) = new_state.peer_player_map.get(&peer_id) {
-                            let game = Rc::make_mut(&mut new_state.game_state);
-                            if game.eliminate_player(player_id) {
-                                eliminated_player = Some(player_id);
-                                game_finished = matches!(game.current_phase(), GamePhase::Finished { .. });
-                            }
-                        }
-                    }
-
-                    // Log and update phase after borrow ends
-                    if let Some(player_id) = eliminated_player {
-                        new_state.add_log(&format!(
-                            "Player {} eliminated (peer disconnected)",
-                            player_id
-                        ));
-                        if game_finished {
-                            new_state.phase = P2PPhase::Finished;
-                            new_state.add_log("Game finished!");
-                        }
-                    }
+                    new_state.add_log(&format!(
+                        "Peer {} disconnected (marble continues in game)",
+                        &peer_id.0.to_string()[..8]
+                    ));
                 } else {
                     // In lobby/waiting: remove peer completely
                     new_state.peers.remove(&peer_id);
-                    new_state.update_host_status();
+
+                    // Clean up peer_player_map to prevent stale data on reconnection
+                    if let Some(player_id) = new_state.peer_to_player.remove(&peer_id) {
+                        new_state.player_to_peer.remove(&player_id);
+                    }
 
                     // Go back to waiting if no peers
                     let connected_count = new_state.peers.values().filter(|p| p.connected).count();
@@ -343,24 +370,13 @@ impl Reducible for P2PGameState {
                     {
                         new_state.phase = P2PPhase::WaitingForPeers;
                     }
+                    new_state.add_log(&format!("Peer left: {}", &peer_id.0.to_string()[..8]));
                 }
-
-                new_state.add_log(&format!("Peer left: {}", &peer_id.0.to_string()[..8]));
             }
             P2PAction::SetMyPeerId(peer_id) => {
                 new_state.my_peer_id = Some(peer_id);
-                new_state.update_host_status();
+                // Host status is set by server in SetConnected, no need to update here
                 new_state.add_log(&format!("My peer ID: {}", &peer_id.0.to_string()[..8]));
-            }
-            P2PAction::UpdatePeerReady { peer_id, ready } => {
-                if let Some(peer) = new_state.peers.get_mut(&peer_id) {
-                    peer.ready = ready;
-                    new_state.add_log(&format!(
-                        "Peer {} is {}",
-                        &peer_id.0.to_string()[..8],
-                        if ready { "ready" } else { "not ready" }
-                    ));
-                }
             }
             P2PAction::UpdatePeerRtt { peer_id, rtt_ms } => {
                 if let Some(peer) = new_state.peers.get_mut(&peer_id) {
@@ -374,6 +390,30 @@ impl Reducible for P2PGameState {
                     peer.hash_code = hash_code;
                 }
             }
+            P2PAction::UpdateServerPlayers(players) => {
+                // Update server_players from server response
+                new_state.server_players.clear();
+                for player in players {
+                    // Update my host status if this is me
+                    if player.player_id == new_state.my_player_id {
+                        new_state.is_host = player.is_host;
+                    }
+                    new_state.server_players.insert(player.player_id.clone(), player);
+                }
+                new_state.add_log(&format!(
+                    "Updated server players: {} players",
+                    new_state.server_players.len()
+                ));
+            }
+            P2PAction::MapPeerToPlayer { peer_id, player_id } => {
+                new_state.player_to_peer.insert(player_id.clone(), peer_id);
+                new_state.peer_to_player.insert(peer_id, player_id.clone());
+                new_state.add_log(&format!(
+                    "Mapped peer {} to player {}",
+                    &peer_id.0.to_string()[..8],
+                    &player_id[..8.min(player_id.len())]
+                ));
+            }
             P2PAction::SetMyName(name) => {
                 new_state.my_name = name;
             }
@@ -383,36 +423,50 @@ impl Reducible for P2PGameState {
             P2PAction::SetMyColor(color) => {
                 new_state.my_color = color;
             }
-            P2PAction::SetMyReady(ready) => {
-                new_state.my_ready = ready;
-                new_state.add_log(if ready {
-                    "You are ready"
-                } else {
-                    "You are not ready"
-                });
-            }
-            P2PAction::TransitionToLobby => {
-                new_state.phase = P2PPhase::Lobby;
-                new_state.add_log("Entered lobby");
-            }
-            P2PAction::StartGame { seed, players } => {
+            P2PAction::StartGameFromServer { seed, player_order } => {
                 new_state.game_seed = seed;
                 new_state.phase = P2PPhase::Starting;
 
-                // Initialize game state with players
+                // Initialize game state using explicit player order from host
                 let mut game = GameState::new(seed);
                 game.load_map(RouletteConfig::default_classic());
 
-                // Clear and rebuild peer_player_map
+                // Use the player_order from host (authoritative order)
+                // Build player data in the exact order received
+                let player_data: Vec<(String, String, Color)> = player_order
+                    .iter()
+                    .filter_map(|player_id| {
+                        new_state.server_players.get(player_id).map(|p| {
+                            (p.player_id.clone(), p.name.clone(), p.color)
+                        })
+                    })
+                    .collect();
+
+                let player_count = player_data.len();
+
+                // Clear and rebuild peer_player_map using host's order
                 new_state.peer_player_map.clear();
-                for (i, (peer_id, name, color)) in players.iter().enumerate() {
+                for (i, (player_id, name, color)) in player_data.iter().enumerate() {
                     game.add_player(name.clone(), *color);
                     game.set_player_ready(i as u32, true);
-                    new_state.peer_player_map.insert(*peer_id, i as u32);
+
+                    // Map peer_id to game player index if we have the mapping
+                    if let Some(&peer_id) = new_state.player_to_peer.get(player_id) {
+                        new_state.peer_player_map.insert(peer_id, i as u32);
+                    } else if player_id == &new_state.my_player_id {
+                        // This is our player
+                        if let Some(my_peer_id) = new_state.my_peer_id {
+                            new_state.peer_player_map.insert(my_peer_id, i as u32);
+                        }
+                    }
                 }
 
                 new_state.game_state = Rc::new(game);
-                new_state.add_log(&format!("Game starting with seed {} and {} players", seed, players.len()));
+                new_state.add_log(&format!(
+                    "Game starting from host with seed {} and {} players (by host order)",
+                    seed,
+                    player_count
+                ));
             }
             P2PAction::StartCountdown => {
                 if new_state.phase == P2PPhase::Starting || new_state.phase == P2PPhase::Lobby {
@@ -455,51 +509,6 @@ impl Reducible for P2PGameState {
                 new_state.phase = P2PPhase::Finished;
                 new_state.add_log("Game finished!");
             }
-            P2PAction::ResetToLobby => {
-                let mut game = GameState::new(42);
-                game.load_map(RouletteConfig::default_classic());
-                new_state.game_state = Rc::new(game);
-
-                // Remove disconnected peers, reset ready status for connected ones
-                new_state.peers.retain(|_, peer| peer.connected);
-                for peer in new_state.peers.values_mut() {
-                    peer.ready = false;
-                }
-
-                let has_connected_peers = !new_state.peers.is_empty();
-                new_state.phase = if has_connected_peers {
-                    P2PPhase::Lobby
-                } else {
-                    P2PPhase::WaitingForPeers
-                };
-                new_state.my_ready = false;
-                new_state.desync_detected = false;
-                new_state.peer_hashes.clear();
-                new_state.peer_player_map.clear();
-                new_state.add_log("Reset to lobby");
-            }
-            P2PAction::RestartGame { seed } => {
-                let mut game = GameState::new(seed);
-                game.load_map(RouletteConfig::default_classic());
-                new_state.game_state = Rc::new(game);
-                new_state.game_seed = seed;
-                new_state.peer_player_map.clear();
-                new_state.peer_hashes.clear();
-                new_state.desync_detected = false;
-
-                // Reset ready status
-                for peer in new_state.peers.values_mut() {
-                    peer.ready = false;
-                }
-                new_state.my_ready = false;
-
-                new_state.phase = if new_state.peers.is_empty() {
-                    P2PPhase::WaitingForPeers
-                } else {
-                    P2PPhase::Lobby
-                };
-                new_state.add_log(&format!("Game restarted with seed {}", seed));
-            }
             P2PAction::ReceiveFrameHash { peer_id, frame, hash } => {
                 new_state.peer_hashes.insert(peer_id, (frame, hash));
             }
@@ -526,8 +535,33 @@ impl Reducible for P2PGameState {
                     }
                 }
             }
-            P2PAction::RecordPingSent { peer_id, timestamp } => {
-                new_state.ping_sent.insert(peer_id, timestamp);
+            P2PAction::ApplyReconnectState { seed, frame, state_data, players } => {
+                new_state.game_seed = seed;
+
+                // Rebuild peer_player_map from player list
+                new_state.peer_player_map.clear();
+                for (i, (peer_id, _, _)) in players.iter().enumerate() {
+                    new_state.peer_player_map.insert(*peer_id, i as u32);
+                }
+
+                match SyncSnapshot::from_bytes(&state_data) {
+                    Ok(snapshot) => {
+                        let game = Rc::make_mut(&mut new_state.game_state);
+                        game.restore_from_snapshot(snapshot);
+                        new_state.add_log(&format!(
+                            "Reconnected! Restored game state at frame {} with {} players",
+                            frame, players.len()
+                        ));
+                        new_state.desync_detected = false;
+                        new_state.peer_hashes.clear();
+                        new_state.phase = P2PPhase::Running;
+                    }
+                    Err(e) => {
+                        new_state.add_log(&format!("Failed to apply reconnect state: {}", e));
+                        // Fall back to lobby if reconnection fails
+                        new_state.phase = P2PPhase::Lobby;
+                    }
+                }
             }
             P2PAction::AddLog(msg) => {
                 new_state.add_log(&msg);
