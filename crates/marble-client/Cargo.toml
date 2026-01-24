@@ -32,7 +32,10 @@ web-sys = { workspace = true, features = [
     "Clipboard",
     "console",
     "Crypto",
-    "SubtleCrypto"
+    "SubtleCrypto",
+    "SvgElement",
+    "SvgsvgElement",
+    "DomRect"
 ] }
 js-sys.workspace = true
 gloo.workspace = true

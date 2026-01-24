@@ -221,6 +221,41 @@ impl TopologyManager {
     pub fn group_count(&self) -> usize {
         self.groups.len()
     }
+
+    /// Update peer_id for a player (returns true if player exists and was updated)
+    pub fn update_peer_id(&mut self, player_id: &str, new_peer_id: &str) -> bool {
+        if !self.player_peers.contains_key(player_id) {
+            return false;
+        }
+        self.player_peers
+            .insert(player_id.to_string(), new_peer_id.to_string());
+
+        if let Some(&group_id) = self.player_groups.get(player_id) {
+            if let Some(group) = self.groups.get_mut(group_id as usize) {
+                group.update_peer_id(player_id, new_peer_id);
+            }
+        }
+        self.topology_dirty = true;
+        true
+    }
+
+    /// Resolve peer_ids to player_ids
+    pub fn resolve_peer_ids(&self, peer_ids: &[String]) -> HashMap<String, String> {
+        let mut result = HashMap::new();
+        // Build reverse map (peer_id → player_id)
+        let peer_to_player: HashMap<&str, &str> = self
+            .player_peers
+            .iter()
+            .map(|(player, peer)| (peer.as_str(), player.as_str()))
+            .collect();
+
+        for peer_id in peer_ids {
+            if let Some(&player_id) = peer_to_player.get(peer_id.as_str()) {
+                result.insert(peer_id.clone(), player_id.to_string());
+            }
+        }
+        result
+    }
 }
 
 #[cfg(test)]

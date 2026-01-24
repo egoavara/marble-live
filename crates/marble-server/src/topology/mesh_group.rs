@@ -107,6 +107,13 @@ impl MeshGroup {
             .filter_map(|pid| self.players.get(pid).map(|peer_id| (pid.clone(), peer_id.clone())))
             .collect()
     }
+
+    /// Update peer_id for a player
+    pub fn update_peer_id(&mut self, player_id: &str, new_peer_id: &str) {
+        if let Some(peer_id) = self.players.get_mut(player_id) {
+            *peer_id = new_peer_id.to_string();
+        }
+    }
 }
 
 #[cfg(test)]

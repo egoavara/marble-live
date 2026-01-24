@@ -1,6 +1,6 @@
 //! Play page with P2P multiplayer game.
 
-use crate::components::{Layout, PlayerDashboard};
+use crate::components::{GameView, Layout};
 use crate::hooks::{use_join_room, JoinRoomState};
 use yew::prelude::*;
 
@@ -34,9 +34,12 @@ pub fn play_page(props: &PlayPageProps) -> Html {
                 </div>
             }
         }
-        JoinRoomState::Joined { signaling_url: _ } => {
+        JoinRoomState::Joined { signaling_url } => {
             html! {
-                <PlayerDashboard room_id={room_id.clone()} />
+                <GameView
+                    room_id={room_id.clone()}
+                    signaling_url={signaling_url.clone()}
+                />
             }
         }
     };

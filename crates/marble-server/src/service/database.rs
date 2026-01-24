@@ -31,6 +31,9 @@ pub enum DatabaseError {
 
     #[error("Unauthorized to start the room, only host can start the room")]
     UnauthorizedStartRequest,
+
+    #[error("Unauthorized: invalid player credentials")]
+    Unauthorized,
 }
 
 impl DatabaseError {
@@ -39,6 +42,7 @@ impl DatabaseError {
             DatabaseError::RoomError(err) => err.to_code(),
             DatabaseError::RoomNotFound => tonic::Code::NotFound,
             DatabaseError::UnauthorizedStartRequest => tonic::Code::PermissionDenied,
+            DatabaseError::Unauthorized => tonic::Code::PermissionDenied,
         }
     }
 }
@@ -143,5 +147,65 @@ impl Database {
         };
         room.get_topology(player_id)
             .ok_or(DatabaseError::RoomNotFound)
+    }
+
+    /// Register actual peer_id for a player after P2P connection is established
+    pub fn register_peer_id(
+        &self,
+        room_id: &uuid::Uuid,
+        player: &PlayerAuth,
+        peer_id: &str,
+    ) -> Result<Option<PeerTopology>, DatabaseError> {
+        let mut rooms = self.rooms.write();
+        let Some(room) = rooms.get_mut(room_id) else {
+            return Err(DatabaseError::RoomNotFound);
+        };
+
+        // Verify player credentials
+        if !room.verify_player(&player.id, &player.secret) {
+            return Err(DatabaseError::Unauthorized);
+        }
+
+        // Update peer_id and return updated topology
+        Ok(room.update_peer_id(&player.id, peer_id))
+    }
+
+    /// Get all players' topologies in a room (requires auth)
+    pub fn get_room_topology(
+        &self,
+        room_id: &uuid::Uuid,
+        player: &PlayerAuth,
+    ) -> Result<Vec<(String, PeerTopology)>, DatabaseError> {
+        let rooms = self.rooms.read();
+        let Some(room) = rooms.get(room_id) else {
+            return Err(DatabaseError::RoomNotFound);
+        };
+
+        // Verify player is a member of the room
+        if !room.verify_player(&player.id, &player.secret) {
+            return Err(DatabaseError::Unauthorized);
+        }
+
+        Ok(room.get_all_topologies())
+    }
+
+    /// Resolve peer_ids to player_ids (requires auth)
+    pub fn resolve_peer_ids(
+        &self,
+        room_id: &uuid::Uuid,
+        player: &PlayerAuth,
+        peer_ids: &[String],
+    ) -> Result<HashMap<String, String>, DatabaseError> {
+        let rooms = self.rooms.read();
+        let Some(room) = rooms.get(room_id) else {
+            return Err(DatabaseError::RoomNotFound);
+        };
+
+        // Verify player is a member of the room
+        if !room.verify_player(&player.id, &player.secret) {
+            return Err(DatabaseError::Unauthorized);
+        }
+
+        Ok(room.resolve_peer_ids(peer_ids))
     }
 }

@@ -1,4 +1,4 @@
-use marble_proto::room::*;
+use marble_proto::room::{self, *};
 use std::iter;
 use tonic::{Request, Response, Status};
 
@@ -194,5 +194,70 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
         Ok(Response::new(GetTopologyResponse {
             topology: Some(topology),
         }))
+    }
+
+    async fn register_peer_id(
+        &self,
+        request: Request<RegisterPeerIdRequest>,
+    ) -> Result<Response<RegisterPeerIdResponse>, Status> {
+        let req = request.into_inner();
+        let room_id = util::tonic_uuid!(&req.room_id)?;
+        let player_auth = util::tonic_required!(req.player)?;
+        let peer_id = &req.peer_id;
+
+        required_str(peer_id, "peer_id is required")?;
+
+        let updated_topology = self
+            .database
+            .register_peer_id(&room_id, &player_auth, peer_id)?;
+
+        tracing::info!(
+            room_id = %room_id,
+            player_id = %player_auth.id,
+            peer_id = %peer_id,
+            "Registered peer_id for player"
+        );
+
+        Ok(Response::new(RegisterPeerIdResponse {
+            success: true,
+            updated_topology,
+        }))
+    }
+
+    async fn get_room_topology(
+        &self,
+        request: Request<GetRoomTopologyRequest>,
+    ) -> Result<Response<GetRoomTopologyResponse>, Status> {
+        let req = request.into_inner();
+        let room_id = util::tonic_uuid!(&req.room_id)?;
+        let player_auth = util::tonic_required!(req.player_auth)?;
+
+        let topologies = self.database.get_room_topology(&room_id, &player_auth)?;
+
+        let players = topologies
+            .into_iter()
+            .map(|(player_id, topology)| room::PlayerTopologyInfo {
+                player_id,
+                topology: Some(topology),
+                is_connected: true, // TODO: Track actual connection status if needed
+            })
+            .collect();
+
+        Ok(Response::new(GetRoomTopologyResponse { players }))
+    }
+
+    async fn resolve_peer_ids(
+        &self,
+        request: Request<ResolvePeerIdsRequest>,
+    ) -> Result<Response<ResolvePeerIdsResponse>, Status> {
+        let req = request.into_inner();
+        let room_id = util::tonic_uuid!(&req.room_id)?;
+        let player_auth = util::tonic_required!(req.player)?;
+
+        let peer_to_player = self
+            .database
+            .resolve_peer_ids(&room_id, &player_auth, &req.peer_ids)?;
+
+        Ok(Response::new(ResolvePeerIdsResponse { peer_to_player }))
     }
 }

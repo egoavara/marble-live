@@ -189,6 +189,40 @@ impl Room {
     pub fn has_player(&self, player_id: &str) -> bool {
         self.host.id == player_id || self.other_players.iter().any(|p| p.id == player_id)
     }
+
+    /// Verify player credentials (returns true if player exists and secret matches)
+    pub fn verify_player(&self, player_id: &str, player_secret: &str) -> bool {
+        if self.host.id == player_id && self.host.secret == player_secret {
+            return true;
+        }
+        self.other_players
+            .iter()
+            .any(|p| p.id == player_id && p.secret == player_secret)
+    }
+
+    /// Update peer_id for a player and return updated topology if successful
+    pub fn update_peer_id(&mut self, player_id: &str, peer_id: &str) -> Option<PeerTopology> {
+        if self.topology_manager.update_peer_id(player_id, peer_id) {
+            self.get_topology(player_id)
+        } else {
+            None
+        }
+    }
+
+    /// Get all players' topologies
+    pub fn get_all_topologies(&self) -> Vec<(String, PeerTopology)> {
+        self.iter_players()
+            .filter_map(|player| {
+                self.get_topology(&player.id)
+                    .map(|topo| (player.id.clone(), topo))
+            })
+            .collect()
+    }
+
+    /// Resolve peer_ids to player_ids
+    pub fn resolve_peer_ids(&self, peer_ids: &[String]) -> std::collections::HashMap<String, String> {
+        self.topology_manager.resolve_peer_ids(peer_ids)
+    }
 }
 
 #[cfg(test)]

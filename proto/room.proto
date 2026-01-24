@@ -27,6 +27,15 @@ service RoomService {
 
   // Get topology info (for reconnection)
   rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse);
+
+  // Register actual peer_id after P2P connection established
+  rpc RegisterPeerId(RegisterPeerIdRequest) returns (RegisterPeerIdResponse);
+
+  // Get all players' topologies in a room (requires auth)
+  rpc GetRoomTopology(GetRoomTopologyRequest) returns (GetRoomTopologyResponse);
+
+  // Resolve peer_ids to player_ids
+  rpc ResolvePeerIds(ResolvePeerIdsRequest) returns (ResolvePeerIdsResponse);
 }
 
 message CreateRoomRequest {
@@ -159,4 +168,46 @@ message GetTopologyRequest {
 
 message GetTopologyResponse {
   PeerTopology topology = 1;
+}
+
+// Register peer_id request (client → server after P2P connection)
+message RegisterPeerIdRequest {
+  string room_id = 1;
+  PlayerAuth player = 2;
+  string peer_id = 3;
+}
+
+message RegisterPeerIdResponse {
+  bool success = 1;
+  optional PeerTopology updated_topology = 2;
+}
+
+// Get room topology request (requires auth - only room members can view)
+message GetRoomTopologyRequest {
+  string room_id = 1;
+  PlayerAuth player_auth = 2;  // Authentication required
+}
+
+// Per-player topology info
+message PlayerTopologyInfo {
+  string player_id = 1;
+  PeerTopology topology = 2;  // Reuse existing PeerTopology
+  bool is_connected = 3;      // Current connection status
+}
+
+// Get room topology response
+message GetRoomTopologyResponse {
+  repeated PlayerTopologyInfo players = 1;
+}
+
+// Resolve peer_ids to player_ids request
+message ResolvePeerIdsRequest {
+  string room_id = 1;
+  PlayerAuth player = 2;
+  repeated string peer_ids = 3;
+}
+
+// Resolve peer_ids to player_ids response
+message ResolvePeerIdsResponse {
+  map<string, string> peer_to_player = 1;  // peer_id → player_id
 }
