@@ -6,7 +6,6 @@ mod app;
 mod components;
 mod fingerprint;
 mod hooks;
-mod p2p;
 mod pages;
 mod renderer;
 mod routes;

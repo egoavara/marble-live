@@ -1,6 +1,8 @@
 use yew::prelude::*;
+use yew_router::prelude::*;
 
 use crate::components::Logo;
+use crate::routes::Route;
 
 #[derive(Properties, PartialEq)]
 pub struct LogoExpandableProps {
@@ -18,12 +20,12 @@ pub fn logo_expandable(props: &LogoExpandableProps) -> Html {
     );
 
     html! {
-        <div class={class}>
-            <Logo state={props.state} size={props.size} />
+        <Link<Route> to={Route::Home} classes={class}>
+            <Logo state={props.state} size={props.size} link={false} />
             <span class="logo-text">
                 { "Marble " }
                 <span class="logo-text-accent">{ "Live" }</span>
             </span>
-        </div>
+        </Link<Route>>
     }
 }
