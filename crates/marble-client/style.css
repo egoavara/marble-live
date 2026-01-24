@@ -247,6 +247,14 @@
     flex-direction: column;
 }
 
+/* Top Left Logo */
+.top-left-logo {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 100;
+}
+
 /* Top Right Menu (Meatball) */
 .top-right-menu {
     position: fixed;
@@ -276,22 +284,14 @@
     transform: scale(1.05);
 }
 
-.meatball-dots {
-    font-size: 1.25rem;
+.meatball-icon {
     color: #fff;
-    letter-spacing: -2px;
-    transform: rotate(90deg);
 }
 
 /* Settings Modal */
 .settings-modal {
-    background: #1a1a2e;
-    border-radius: 12px;
+    /* Inherits base styles from .modal */
     padding: 0;
-    width: 90%;
-    max-width: 400px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    overflow: hidden;
 }
 
 .modal-header {
@@ -327,7 +327,7 @@
 }
 
 .settings-modal .settings-form {
-    padding: 1.5rem;
+    /* Padding provided by .modal-content */
 }
 
 /* Legacy Header Styles (for debug pages) */
@@ -394,24 +394,51 @@
     z-index: 1000;
 }
 
-/* Welcome Modal */
-.welcome-modal {
+/* Common Modal */
+.modal {
     background: #1a1a2e;
     border-radius: 12px;
-    padding: 2rem;
     width: 90%;
     max-width: 400px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
 }
 
-.welcome-modal h2 {
-    margin: 0 0 0.5rem 0;
+.modal-content {
+    padding: 1.5rem;
+}
+
+.modal-header-no-close {
+    justify-content: center;
+}
+
+.modal-header-close-only {
+    justify-content: flex-end;
+}
+
+/* Welcome Modal */
+.welcome-modal {
+    /* Inherits base styles from .modal */
+    padding: 0;
+}
+
+.welcome-modal .modal-header {
+    background: transparent;
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.welcome-modal .modal-header h2 {
+    margin: 0;
     font-size: 1.75rem;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    text-align: center;
+}
+
+.welcome-modal .modal-content {
+    padding-top: 0.5rem;
 }
 
 .welcome-subtitle {
@@ -1788,6 +1815,107 @@
 .leave-btn:hover {
     background: rgba(255, 255, 255, 0.1);
     border-color: #555;
+}
+
+/* === Logo Marble === */
+.logo-marble {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.marble-svg {
+    stroke: #ffffff;
+    fill: none;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+}
+
+/* Speed lines */
+.speed-line {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    background: #818cf8;
+    opacity: 0;
+    border-radius: 1px;
+}
+.line-1 { left: 25%; height: 12px; }
+.line-2 { left: 50%; height: 18px; top: -10px; }
+.line-3 { left: 75%; height: 10px; }
+
+/* Marble drop animation */
+@keyframes marbleDrop {
+    0%   { transform: translateY(0) rotate(0deg); }
+    20%  { transform: translateY(-12px) rotate(-30deg); }
+    60%  { transform: translateY(6px) rotate(180deg); }
+    100% { transform: translateY(0) rotate(360deg); }
+}
+
+@keyframes lineFade {
+    0%   { transform: translateY(-20px); opacity: 0; }
+    30%  { opacity: 0.8; }
+    100% { transform: translateY(30px); opacity: 0; }
+}
+
+.logo-marble-animating .marble-svg {
+    animation: marbleDrop 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.logo-marble-animating .speed-line {
+    animation: lineFade 0.8s ease-out;
+}
+
+/* === Logo Expandable === */
+.logo-expandable {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0 10px;
+    height: 48px;
+    border-radius: 9999px;
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    width: 48px;
+    transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1),
+                background 0.6s ease,
+                border-color 0.6s ease,
+                padding 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+
+.logo-text {
+    margin-left: 0.5rem;
+    font-size: 1.25rem;
+    font-weight: 900;
+    color: white;
+    opacity: 0;
+    transform: translateX(-15px);
+    letter-spacing: -0.15rem;
+    transition: opacity 0.3s ease 0.1s,
+                transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1),
+                letter-spacing 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.logo-text-accent {
+    color: #818cf8;
+    text-shadow: 0 0 15px rgba(129, 140, 248, 0.4);
+}
+
+/* Expanded state */
+.logo-expandable-animating {
+    width: 190px;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: #818cf8;
+    padding-right: 16px;
+}
+
+.logo-expandable-animating .logo-text {
+    opacity: 1;
+    transform: translateX(0);
+    letter-spacing: 0.01rem;
 }
 
 /* Responsive */

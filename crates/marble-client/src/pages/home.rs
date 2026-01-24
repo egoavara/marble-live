@@ -39,7 +39,7 @@ pub fn home_page() -> Html {
     let username = use_config_username();
     let secret = use_config_secret();
 
-    let show_welcome_modal = username.is_none();
+    let show_welcome_modal = use_state(|| username.is_none());
 
     let room_service = use_grpc_room_service();
 
@@ -110,11 +110,7 @@ pub fn home_page() -> Html {
 
     html! {
         <>
-            { if show_welcome_modal {
-                html! { <WelcomeModal /> }
-            } else {
-                html! {}
-            }}
+            <WelcomeModal state={show_welcome_modal.clone()} />
 
             <Layout>
                 <div class="home-content">
