@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use marble_proto::play::p2p_message::Payload;
-use marble_proto::play::{ChatMessage, Ping};
+use marble_proto::play::{ChatMessage, Ping, Reaction};
 use marble_proto::room::room_service_client::RoomServiceClient;
 use marble_proto::room::{PeerTopology, PlayerAuth, RegisterPeerIdRequest};
 use matchbox_socket::{PeerId, WebRtcSocket};
@@ -163,6 +163,34 @@ impl P2pRoomHandle {
         self.messages_version.set(*self.messages_version + 1);
     }
 
+    /// Send reaction emoji (convenience method)
+    pub fn send_reaction(&self, emoji: &str) {
+        let player_id = self.inner.borrow().player_id.clone();
+        let timestamp_ms = js_sys::Date::now() as u64;
+
+        self.send(Payload::Reaction(Reaction {
+            player_id: player_id.clone(),
+            emoji: emoji.to_string(),
+            timestamp_ms,
+        }));
+
+        // Add to local messages for display
+        let msg = ReceivedMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            from_player: player_id,
+            from_peer: None, // Local message
+            payload: Payload::Reaction(Reaction {
+                player_id: self.inner.borrow().player_id.clone(),
+                emoji: emoji.to_string(),
+                timestamp_ms,
+            }),
+            timestamp: js_sys::Date::now(),
+        };
+
+        self.inner.borrow_mut().add_message(msg);
+        self.messages_version.set(*self.messages_version + 1);
+    }
+
     /// Send to specific peer (direct)
     pub fn send_to(&self, peer_id: PeerId, payload: Payload) {
         let inner = self.inner.borrow();
@@ -237,6 +265,11 @@ impl P2pRoomHandle {
     /// Get chat messages only
     pub fn chat_messages(&self) -> Vec<ReceivedMessage> {
         self.messages_of_type(|p| matches!(p, Payload::ChatMessage(_)))
+    }
+
+    /// Get reaction messages only
+    pub fn reaction_messages(&self) -> Vec<ReceivedMessage> {
+        self.messages_of_type(|p| matches!(p, Payload::Reaction(_)))
     }
 
     /// Clear message history
