@@ -3,8 +3,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use marble_core::GameState;
 use marble_proto::play::p2p_message::Payload;
-use marble_proto::play::{ChatMessage, Ping, Reaction};
+use marble_proto::play::{ChatMessage, FrameHash, GameStart, Ping, Reaction, SyncRequest, SyncState};
 use marble_proto::room::room_service_client::RoomServiceClient;
 use marble_proto::room::{PeerTopology, PlayerAuth, RegisterPeerIdRequest};
 use matchbox_socket::{PeerId, WebRtcSocket};
@@ -280,6 +281,101 @@ impl P2pRoomHandle {
             inner.new_messages_queue.clear();
         }
         self.messages_version.set(*self.messages_version + 1);
+    }
+
+    // === Game Synchronization API ===
+
+    /// Set host status
+    pub fn set_host_status(&self, is_host: bool) {
+        self.inner.borrow_mut().set_host_status(is_host);
+    }
+
+    /// Check if this client is the host
+    pub fn is_host(&self) -> bool {
+        self.inner.borrow().is_host
+    }
+
+    /// Set host peer ID
+    pub fn set_host_peer_id(&self, peer_id: Option<PeerId>) {
+        self.inner.borrow_mut().set_host_peer_id(peer_id);
+    }
+
+    /// Get host peer ID
+    pub fn host_peer_id(&self) -> Option<PeerId> {
+        self.inner.borrow().host_peer_id
+    }
+
+    /// Set game state reference
+    pub fn set_game_state(&self, state: Rc<RefCell<GameState>>) {
+        self.inner.borrow_mut().set_game_state(state);
+    }
+
+    /// Get game state reference
+    pub fn game_state(&self) -> Option<Rc<RefCell<GameState>>> {
+        self.inner.borrow().game_state.clone()
+    }
+
+    /// Broadcast frame hash to all peers (host only)
+    pub fn send_frame_hash(&self, frame: u64, hash: u64) {
+        self.send(Payload::FrameHash(FrameHash { frame, hash }));
+        self.inner.borrow_mut().last_hash_frame = frame;
+    }
+
+    /// Send sync request to host
+    pub fn send_sync_request(&self, from_frame: u64) {
+        if let Some(host_peer_id) = self.inner.borrow().host_peer_id {
+            self.send_to(host_peer_id, Payload::SyncRequest(SyncRequest { from_frame }));
+        }
+    }
+
+    /// Send sync state to a specific peer (host only)
+    pub fn send_sync_state_to(&self, peer_id: PeerId, frame: u64, state: Vec<u8>) {
+        self.send_to(peer_id, Payload::SyncState(SyncState { frame, state }));
+    }
+
+    /// Broadcast game start to all peers (host only)
+    pub fn send_game_start(&self, seed: u64, initial_state: Vec<u8>) {
+        self.send(Payload::GameStart(GameStart { seed, initial_state }));
+    }
+
+    /// Get last hash frame
+    pub fn last_hash_frame(&self) -> u64 {
+        self.inner.borrow().last_hash_frame
+    }
+
+    /// Get desync count
+    pub fn desync_count(&self) -> u32 {
+        self.inner.borrow().desync_count
+    }
+
+    /// Increment desync count
+    pub fn increment_desync_count(&self) {
+        self.inner.borrow_mut().desync_count += 1;
+    }
+
+    /// Reset desync count
+    pub fn reset_desync_count(&self) {
+        self.inner.borrow_mut().desync_count = 0;
+    }
+
+    /// Set last sync frame
+    pub fn set_last_sync_frame(&self, frame: u64) {
+        self.inner.borrow_mut().last_sync_frame = frame;
+    }
+
+    /// Get last sync frame
+    pub fn last_sync_frame(&self) -> u64 {
+        self.inner.borrow().last_sync_frame
+    }
+
+    /// Set last host hash
+    pub fn set_last_host_hash(&self, frame: u64, hash: u64) {
+        self.inner.borrow_mut().last_host_hash = Some((frame, hash));
+    }
+
+    /// Get last host hash
+    pub fn last_host_hash(&self) -> Option<(u64, u64)> {
+        self.inner.borrow().last_host_hash
     }
 
     // === Internal Methods ===

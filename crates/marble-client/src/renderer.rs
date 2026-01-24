@@ -33,6 +33,27 @@ impl CanvasRenderer {
         })
     }
 
+    /// Resize the canvas to new dimensions.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.width = f64::from(width);
+        self.height = f64::from(height);
+    }
+
+    /// Set scale for high-DPI displays.
+    pub fn set_scale(&self, scale: f64) {
+        let _ = self.context.scale(scale, scale);
+    }
+
+    /// Get current width.
+    pub fn width(&self) -> f64 {
+        self.width
+    }
+
+    /// Get current height.
+    pub fn height(&self) -> f64 {
+        self.height
+    }
+
     /// Clears the canvas with a background color.
     pub fn clear(&self) {
         self.context.set_fill_style(&JsValue::from_str("#1a1a2e"));

@@ -34,11 +34,12 @@ pub fn play_page(props: &PlayPageProps) -> Html {
                 </div>
             }
         }
-        JoinRoomState::Joined { signaling_url } => {
+        JoinRoomState::Joined { signaling_url, is_host } => {
             html! {
                 <GameView
                     room_id={room_id.clone()}
                     signaling_url={signaling_url.clone()}
+                    is_host={*is_host}
                 />
             }
         }

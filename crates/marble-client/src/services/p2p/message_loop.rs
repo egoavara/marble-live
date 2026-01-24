@@ -12,6 +12,7 @@ use prost::Message;
 use tonic_web_wasm_client::Client;
 use wasm_bindgen_futures::spawn_local;
 
+use super::game_sync;
 use super::room_state::P2pRoomState;
 use super::types::ReceivedMessage;
 use super::GossipHandler;
@@ -294,6 +295,60 @@ fn process_payload(
                 state.borrow_mut().add_message(received_msg);
                 messages_changed = true;
             }
+        }
+        // === Game synchronization messages ===
+        Payload::FrameHash(hash) => {
+            let should_request_sync = game_sync::handle_frame_hash(state, hash);
+            if should_request_sync {
+                // Request sync from host
+                if let Some(host_peer_id) = state.borrow().host_peer_id {
+                    let sync_req = {
+                        let mut gossip = gossip.borrow_mut();
+                        gossip.create_message(
+                            player_id,
+                            1,
+                            Payload::SyncRequest(marble_proto::play::SyncRequest {
+                                from_frame: hash.frame,
+                            }),
+                        )
+                    };
+                    let data = sync_req.encode_to_vec();
+                    let mut socket_inner = socket.borrow_mut();
+                    socket_inner.channel_mut(0).send(data.into_boxed_slice(), host_peer_id);
+
+                    state.borrow_mut().last_sync_frame = hash.frame;
+                    tracing::info!(frame = hash.frame, "Sent sync request to host");
+                }
+            }
+            // Don't store in message history
+        }
+        Payload::SyncRequest(request) => {
+            // Only host processes sync requests
+            if state.borrow().is_host {
+                game_sync::handle_sync_request(state, socket, gossip, peer_id, request);
+            }
+            // Don't store in message history
+        }
+        Payload::SyncState(sync_state) => {
+            game_sync::handle_sync_state(state, sync_state);
+            // Don't store in message history
+        }
+        Payload::GameStart(game_start) => {
+            // Store in message history so game loop can pick it up
+            let received_msg = ReceivedMessage {
+                id: msg.message_id.clone(),
+                from_player: msg.origin_player.clone(),
+                from_peer: Some(peer_id),
+                payload: payload.clone(),
+                timestamp: js_sys::Date::now(),
+            };
+            state.borrow_mut().add_message(received_msg);
+            messages_changed = true;
+
+            tracing::info!(
+                seed = game_start.seed,
+                "Received GameStart message"
+            );
         }
         _ => {
             // Store other message types

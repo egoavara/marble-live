@@ -1,5 +1,6 @@
 mod use_config;
 mod use_fingerprint;
+mod use_game_loop;
 mod use_grpc_room_service;
 mod use_join_room;
 mod use_localstorage;
@@ -11,6 +12,7 @@ mod use_userhash;
 
 pub use use_config::*;
 pub use use_fingerprint::use_fingerprint;
+pub use use_game_loop::{use_game_loop, GameLoopHandle, GameLoopState};
 pub use use_grpc_room_service::use_grpc_room_service;
 pub use use_join_room::*;
 pub use use_localstorage::use_localstorage;

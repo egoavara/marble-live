@@ -32,6 +32,9 @@ message P2PMessage {
     // 소셜
     ChatMessage chat_message = 17;
     Reaction reaction = 18;
+
+    // 게임 시작/종료
+    GameStart game_start = 19;
   }
 }
 
@@ -101,4 +104,14 @@ message Reaction {
   string player_id = 1;
   string emoji = 2;
   uint64 timestamp_ms = 3;
+}
+
+// ========================================
+// 게임 시작/종료
+// ========================================
+
+// 게임 시작 (호스트 → 전체)
+message GameStart {
+  uint64 seed = 1;            // RNG 시드
+  bytes initial_state = 2;    // SyncSnapshot 직렬화 데이터
 }

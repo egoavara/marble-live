@@ -1,6 +1,6 @@
 //! Hook for automatically joining a room via gRPC.
 
-use marble_proto::room::{JoinRoomRequest, PlayerAuth};
+use marble_proto::room::{GetRoomPlayerRequest, JoinRoomRequest, PlayerAuth};
 use yew::prelude::*;
 
 use crate::hooks::use_config_username;
@@ -13,7 +13,7 @@ pub enum JoinRoomState {
     Idle,
     Joining,
     /// Successfully joined the room. Server is idempotent, so this works even if already in room.
-    Joined { signaling_url: String },
+    Joined { signaling_url: String, is_host: bool },
     Error(String),
 }
 
@@ -51,7 +51,7 @@ pub fn use_join_room(room_id: &str) -> UseStateHandle<JoinRoomState> {
             wasm_bindgen_futures::spawn_local(async move {
                 state.set(JoinRoomState::Joining);
 
-                let request = JoinRoomRequest {
+                let join_request = JoinRoomRequest {
                     room_id: room_id.clone(),
                     player: Some(PlayerAuth {
                         id: player_id.clone(),
@@ -59,10 +59,34 @@ pub fn use_join_room(room_id: &str) -> UseStateHandle<JoinRoomState> {
                     }),
                 };
 
-                match client.borrow_mut().join_room(request).await {
+                // First request: join room
+                let join_result = client.borrow_mut().join_room(join_request).await;
+
+                match join_result {
                     Ok(response) => {
                         let signaling_url = response.into_inner().signaling_url;
-                        state.set(JoinRoomState::Joined { signaling_url });
+
+                        // Second request: get player info to check if we're the host
+                        let player_request = GetRoomPlayerRequest {
+                            room_id: room_id.clone(),
+                        };
+
+                        let player_result = client.borrow_mut().get_room_player(player_request).await;
+
+                        let is_host = match player_result {
+                            Ok(player_response) => {
+                                player_response
+                                    .into_inner()
+                                    .players
+                                    .iter()
+                                    .find(|p| p.id == player_id)
+                                    .map(|p| p.is_host)
+                                    .unwrap_or(false)
+                            }
+                            Err(_) => false,
+                        };
+
+                        state.set(JoinRoomState::Joined { signaling_url, is_host });
                     }
                     Err(e) => {
                         state.set(JoinRoomState::Error(e.message().to_string()));

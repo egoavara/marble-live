@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use marble_core::GameState;
 use marble_proto::room::PeerTopology;
 use matchbox_socket::{PeerId, WebRtcSocket};
 
@@ -38,6 +39,22 @@ pub struct P2pRoomState {
     pub is_running: bool,
     /// Flag to signal peers data changed (for async updates)
     pub peers_dirty: bool,
+
+    // === Game synchronization fields ===
+    /// Is this client the host?
+    pub is_host: bool,
+    /// Host's peer ID
+    pub host_peer_id: Option<PeerId>,
+    /// Shared game state reference
+    pub game_state: Option<Rc<RefCell<GameState>>>,
+    /// Last frame number when hash was broadcast
+    pub last_hash_frame: u64,
+    /// Consecutive desync count
+    pub desync_count: u32,
+    /// Last frame number when sync was performed
+    pub last_sync_frame: u64,
+    /// Last received host hash (frame, hash)
+    pub last_host_hash: Option<(u64, u64)>,
 }
 
 impl P2pRoomState {
@@ -57,6 +74,14 @@ impl P2pRoomState {
             new_messages_queue: Vec::new(),
             is_running: false,
             peers_dirty: false,
+            // Game synchronization
+            is_host: false,
+            host_peer_id: None,
+            game_state: None,
+            last_hash_frame: 0,
+            desync_count: 0,
+            last_sync_frame: 0,
+            last_host_hash: None,
         }
     }
 
@@ -115,5 +140,26 @@ impl P2pRoomState {
         self.socket = None;
         self.gossip = None;
         self.peers.clear();
+        // Reset game sync state
+        self.game_state = None;
+        self.last_hash_frame = 0;
+        self.desync_count = 0;
+        self.last_sync_frame = 0;
+        self.last_host_hash = None;
+    }
+
+    /// Set host status
+    pub fn set_host_status(&mut self, is_host: bool) {
+        self.is_host = is_host;
+    }
+
+    /// Set host peer ID
+    pub fn set_host_peer_id(&mut self, peer_id: Option<PeerId>) {
+        self.host_peer_id = peer_id;
+    }
+
+    /// Set game state reference
+    pub fn set_game_state(&mut self, state: Rc<RefCell<GameState>>) {
+        self.game_state = Some(state);
     }
 }
