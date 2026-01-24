@@ -12,8 +12,7 @@ use super::{use_config_secret, use_grpc_room_service};
 pub enum JoinRoomState {
     Idle,
     Joining,
-    /// Successfully joined (or already in) the room.
-    /// signaling_url may be empty if player was already in the room.
+    /// Successfully joined the room. Server is idempotent, so this works even if already in room.
     Joined { signaling_url: String },
     Error(String),
 }
@@ -66,16 +65,7 @@ pub fn use_join_room(room_id: &str) -> UseStateHandle<JoinRoomState> {
                         state.set(JoinRoomState::Joined { signaling_url });
                     }
                     Err(e) => {
-                        let error_msg = e.message().to_string();
-                        // If player already exists in the room (e.g., host rejoining),
-                        // treat it as a successful join
-                        if error_msg.contains("already exists") {
-                            state.set(JoinRoomState::Joined {
-                                signaling_url: String::new(),
-                            });
-                        } else {
-                            state.set(JoinRoomState::Error(error_msg));
-                        }
+                        state.set(JoinRoomState::Error(e.message().to_string()));
                     }
                 }
             });

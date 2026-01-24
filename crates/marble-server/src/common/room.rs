@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
-use marble_proto::room::RoomState;
+use marble_proto::room::{PeerConnectionStatus, PeerTopology, RoomState};
 
 use crate::common::player::Player;
+use crate::topology::{TopologyManager, TopologyManagerConfig};
 
 #[derive(Debug, Clone)]
 pub struct Room {
@@ -11,15 +12,13 @@ pub struct Room {
     other_players: Vec<Player>,
     created_at: DateTime<Utc>,
     started_at: Option<DateTime<Utc>>,
+    topology_manager: TopologyManager,
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum RoomError {
     #[error("Room is full")]
     RoomFull,
-
-    #[error("Player already exists in the room")]
-    PlayerAlreadyExists,
 
     #[error("Player not found in the room")]
     PlayerNotFound,
@@ -35,7 +34,6 @@ impl RoomError {
     pub fn to_code(&self) -> tonic::Code {
         match self {
             RoomError::RoomFull => tonic::Code::ResourceExhausted,
-            RoomError::PlayerAlreadyExists => tonic::Code::AlreadyExists,
             RoomError::PlayerNotFound => tonic::Code::NotFound,
             RoomError::HostCanNotKick => tonic::Code::InvalidArgument,
             RoomError::RoomHostOnly(_) => tonic::Code::PermissionDenied,
@@ -51,6 +49,20 @@ impl From<RoomError> for tonic::Status {
 
 impl Room {
     pub fn new(id: uuid::Uuid, max_players: u32, host: Player) -> Self {
+        // Calculate optimal topology config based on max_players
+        let config = TopologyManagerConfig {
+            mesh_group_size: (max_players / 3).max(10).min(40),
+            peer_connections: 5,
+            bridges_per_group: 2,
+            gossip_ttl: 10,
+            lockstep_delay_frames: 6,
+        };
+
+        let mut topology_manager = TopologyManager::new(config);
+
+        // Add host to topology (peer_id will be updated on actual connection)
+        topology_manager.add_player(&host.id, &format!("pending_{}", host.id));
+
         Self {
             id,
             max_players,
@@ -58,6 +70,7 @@ impl Room {
             other_players: Vec::new(),
             created_at: Utc::now(),
             started_at: None,
+            topology_manager,
         }
     }
 
@@ -109,17 +122,24 @@ impl Room {
         &self.host
     }
 
-    pub fn add_player(&mut self, player: Player) -> Result<(), RoomError> {
+    /// Add a player to the room, or return existing topology if already joined.
+    /// This is idempotent - calling multiple times with the same player is safe.
+    pub fn add_player(&mut self, player: Player) -> Result<PeerTopology, RoomError> {
+        // If player already exists, return their existing topology (idempotent)
+        if let Some(topology) = self.get_topology(&player.id) {
+            return Ok(topology);
+        }
+
         if self.count_players() >= self.max_players {
             return Err(RoomError::RoomFull);
         }
 
-        if self.iter_players().any(|p| p.id == player.id) {
-            return Err(RoomError::PlayerAlreadyExists);
-        }
+        // Add to topology (peer_id will be updated on actual connection)
+        let peer_id = format!("pending_{}", player.id);
+        let topology = self.topology_manager.add_player(&player.id, &peer_id);
 
         self.other_players.push(player);
-        Ok(())
+        Ok(topology)
     }
 
     pub fn kick_player(&mut self, player_id: &str) -> Result<(), RoomError> {
@@ -131,6 +151,7 @@ impl Room {
         if self.other_players.len() == initial_len {
             return Err(RoomError::PlayerNotFound);
         }
+        self.topology_manager.remove_player(player_id);
         Ok(())
     }
 
@@ -142,5 +163,86 @@ impl Room {
     }
     pub fn started_at(&self) -> Option<DateTime<Utc>> {
         self.started_at.clone()
+    }
+
+    /// Get topology for a player
+    pub fn get_topology(&self, player_id: &str) -> Option<PeerTopology> {
+        self.topology_manager.get_topology(player_id)
+    }
+
+    /// Update connection status and return new topology if changed
+    pub fn update_connection_status(
+        &mut self,
+        player_id: &str,
+        statuses: &[PeerConnectionStatus],
+    ) -> Option<PeerTopology> {
+        self.topology_manager
+            .update_connection_status(player_id, statuses)
+    }
+
+    /// Get topology config
+    pub fn topology_config(&self) -> &TopologyManagerConfig {
+        &self.topology_manager.config
+    }
+
+    /// Check if a player is in the room
+    pub fn has_player(&self, player_id: &str) -> bool {
+        self.host.id == player_id || self.other_players.iter().any(|p| p.id == player_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_room() -> Room {
+        let host = Player::new("host_id".to_string(), "host_secret".to_string());
+        Room::new(uuid::Uuid::new_v4(), 10, host)
+    }
+
+    #[test]
+    fn test_add_player_idempotent() {
+        let mut room = create_test_room();
+
+        // Add a new player
+        let player = Player::new("player1".to_string(), "secret1".to_string());
+        let topology1 = room.add_player(player.clone()).unwrap();
+
+        // Adding the same player again should succeed and return the same topology
+        let topology2 = room.add_player(player.clone()).unwrap();
+
+        assert_eq!(topology1.mesh_group, topology2.mesh_group);
+        assert_eq!(topology1.is_bridge, topology2.is_bridge);
+
+        // Player count should remain the same
+        assert_eq!(room.count_players(), 2); // host + 1 player
+    }
+
+    #[test]
+    fn test_host_join_idempotent() {
+        let mut room = create_test_room();
+
+        // Host trying to "join" should return their existing topology
+        let host_player = Player::new("host_id".to_string(), "host_secret".to_string());
+        let topology = room.add_player(host_player).unwrap();
+
+        // Should succeed and return host's topology
+        assert!(room.has_player("host_id"));
+        assert_eq!(room.count_players(), 1); // only host, not duplicated
+    }
+
+    #[test]
+    fn test_room_full_error() {
+        let host = Player::new("host".to_string(), "secret".to_string());
+        let mut room = Room::new(uuid::Uuid::new_v4(), 2, host); // max 2 players
+
+        // Add one more player (room now full)
+        let player1 = Player::new("player1".to_string(), "secret1".to_string());
+        room.add_player(player1).unwrap();
+
+        // Try to add another player - should fail
+        let player2 = Player::new("player2".to_string(), "secret2".to_string());
+        let result = room.add_player(player2);
+        assert!(matches!(result, Err(RoomError::RoomFull)));
     }
 }

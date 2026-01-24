@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package marble.play;
+
+// ========================================
+// P2P 메시지 (Gossip 메타데이터 포함)
+// ========================================
+
+message P2PMessage {
+  // Gossip metadata
+  string message_id = 1;       // UUID for deduplication
+  uint32 ttl = 2;              // Remaining hop count
+  uint32 origin_group = 3;     // Origin mesh group
+  string origin_player = 4;    // Original sender
+
+  oneof payload {
+    // 접속 알림
+    PlayerJoined player_joined = 10;
+
+    // 플레이어 입력
+    PlayerInput player_input = 11;
+
+    // 물리 동기화
+    FrameHash frame_hash = 12;
+    SyncRequest sync_request = 13;
+    SyncState sync_state = 14;
+
+    // RTT 측정
+    Ping ping = 15;
+    Pong pong = 16;
+
+    // 소셜
+    ChatMessage chat_message = 17;
+    Reaction reaction = 18;
+  }
+}
+
+// ========================================
+// 접속 알림
+// ========================================
+
+// 신규 플레이어 접속 (접속한 클라이언트 → 전체)
+message PlayerJoined {
+  string player_id = 1;
+}
+
+// ========================================
+// 플레이어 입력
+// ========================================
+
+// 플레이어 클릭 입력 (원클릭 게임)
+message PlayerInput {
+  uint64 frame = 1;
+  string player_id = 2;
+}
+
+// ========================================
+// 물리 동기화
+// ========================================
+
+// 프레임 해시 (호스트 → 전체, 결정성 검증)
+message FrameHash {
+  uint64 frame = 1;
+  uint64 hash = 2;
+}
+
+// 동기화 요청 (클라이언트 → 호스트)
+message SyncRequest {
+  uint64 from_frame = 1;
+}
+
+// 동기화 상태 (호스트 → 요청 클라이언트)
+message SyncState {
+  uint64 frame = 1;
+  bytes state = 2;  // SyncSnapshot 직렬화 데이터
+}
+
+// ========================================
+// RTT 측정
+// ========================================
+
+message Ping {
+  double timestamp = 1;
+}
+
+message Pong {
+  double timestamp = 1;
+}
+
+// ========================================
+// 소셜
+// ========================================
+
+message ChatMessage {
+  string player_id = 1;
+  string content = 2;
+  uint64 timestamp_ms = 3;
+}
+
+message Reaction {
+  string player_id = 1;
+  string emoji = 2;
+  uint64 timestamp_ms = 3;
+}

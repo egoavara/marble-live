@@ -64,8 +64,9 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
         let player = Player::new(player_auth.id, player_auth.secret);
         tracing::info!(room_id = %room_id, player_id = %player.id, "Player try to join room");
         match self.database.join_room(&room_id, player) {
-            Ok(_) => Ok(Response::new(JoinRoomResponse {
+            Ok((_room, topology)) => Ok(Response::new(JoinRoomResponse {
                 signaling_url: self.make_signaling_url(&room_id.to_string()),
+                topology: Some(topology),
             })),
             Err(err) => Err(err.into()),
         }
@@ -116,6 +117,7 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
             return Err(DatabaseError::RoomNotFound.into());
         };
 
+        let config = room.topology_config();
         Ok(Response::new(GetRoomResponse {
             room: Some(RoomInfo {
                 id: room.id().to_string(),
@@ -125,6 +127,10 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
                     .started_at()
                     .map(|dt| dt.to_rfc3339())
                     .unwrap_or_default(),
+                lockstep_delay_frames: config.lockstep_delay_frames,
+                gossip_ttl: config.gossip_ttl,
+                mesh_group_size: config.mesh_group_size,
+                peer_connections: config.peer_connections,
             }),
         }))
     }
@@ -154,6 +160,39 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
 
         Ok(Response::new(GetRoomPlayerResponse {
             players: host_iter.chain(others_iter).collect(),
+        }))
+    }
+
+    async fn report_connection(
+        &self,
+        request: Request<ReportConnectionRequest>,
+    ) -> Result<Response<ReportConnectionResponse>, Status> {
+        let req = request.into_inner();
+        let room_id = util::tonic_uuid!(&req.room_id)?;
+        let player_auth = util::tonic_required!(req.player)?;
+
+        let new_topology = self
+            .database
+            .report_connection(&room_id, &player_auth.id, req.peer_statuses)?;
+
+        Ok(Response::new(ReportConnectionResponse {
+            topology_changed: new_topology.is_some(),
+            new_topology,
+        }))
+    }
+
+    async fn get_topology(
+        &self,
+        request: Request<GetTopologyRequest>,
+    ) -> Result<Response<GetTopologyResponse>, Status> {
+        let req = request.into_inner();
+        let room_id = util::tonic_uuid!(&req.room_id)?;
+        let player_auth = util::tonic_required!(req.player)?;
+
+        let topology = self.database.get_topology(&room_id, &player_auth.id)?;
+
+        Ok(Response::new(GetTopologyResponse {
+            topology: Some(topology),
         }))
     }
 }

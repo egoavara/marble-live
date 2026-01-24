@@ -10,10 +10,10 @@ service RoomService {
   // Join an existing room
   rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
 
-  // Join an existing room
+  // Start the room
   rpc StartRoom(StartRoomRequest) returns (StartRoomResponse);
 
-  // Join an existing room
+  // Kick a player from room
   rpc KickRoom(KickRoomRequest) returns (KickRoomResponse);
 
   // Get room info
@@ -21,6 +21,12 @@ service RoomService {
 
   // Get room player info
   rpc GetRoomPlayer(GetRoomPlayerRequest) returns (GetRoomPlayerResponse);
+
+  // Report connection status (periodic call from clients)
+  rpc ReportConnection(ReportConnectionRequest) returns (ReportConnectionResponse);
+
+  // Get topology info (for reconnection)
+  rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse);
 }
 
 message CreateRoomRequest {
@@ -39,7 +45,8 @@ message JoinRoomRequest {
 }
 
 message JoinRoomResponse {
-  string signaling_url = 3;
+  string signaling_url = 1;
+  PeerTopology topology = 2;  // Peer connection topology info
 }
 
 message StartRoomRequest {
@@ -82,6 +89,12 @@ message RoomInfo {
   uint32 max_players = 2;
   RoomState state = 3;
   string started_at = 4;
+
+  // Network settings
+  uint32 lockstep_delay_frames = 5;  // Lockstep delay frames
+  uint32 gossip_ttl = 6;             // Gossip TTL (hop limit)
+  uint32 mesh_group_size = 7;        // Mesh group size
+  uint32 peer_connections = 8;       // Connections per peer (4~6)
 }
 
 enum RoomState {
@@ -99,4 +112,51 @@ message PlayerInfo {
   string id = 1;
   bool is_host = 2;
   string display_id = 3;
+}
+
+// ========================================
+// Topology related messages
+// ========================================
+
+// Peer connection info
+message PeerConnection {
+  string peer_id = 1;
+  string player_id = 2;
+}
+
+// Peer topology info (included in JoinRoom response)
+message PeerTopology {
+  uint32 mesh_group = 1;                    // Group ID (0, 1, 2...)
+  bool is_bridge = 2;                       // Is bridge node
+  repeated PeerConnection connect_to = 3;   // Peers to connect (4~6)
+  repeated PeerConnection bridge_peers = 4; // Bridge only: other group bridges
+}
+
+// Connection status report (client → server)
+message ReportConnectionRequest {
+  string room_id = 1;
+  PlayerAuth player = 2;
+  repeated PeerConnectionStatus peer_statuses = 3;
+}
+
+message PeerConnectionStatus {
+  string peer_id = 1;
+  uint32 rtt_ms = 2;           // RTT in milliseconds
+  float packet_loss = 3;       // Packet loss rate (0.0~1.0)
+  bool connected = 4;          // Connection status
+}
+
+message ReportConnectionResponse {
+  bool topology_changed = 1;              // Topology changed flag
+  optional PeerTopology new_topology = 2; // New topology if changed
+}
+
+// Get topology request (for reconnection)
+message GetTopologyRequest {
+  string room_id = 1;
+  PlayerAuth player = 2;
+}
+
+message GetTopologyResponse {
+  PeerTopology topology = 1;
 }

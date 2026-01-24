@@ -14,12 +14,15 @@ pub enum Route {
     /// Panic page shown when WASM panic occurs.
     #[at("/panic")]
     Panic,
-    /// Debug page for gRPC calls.
+    /// Debug page index.
     #[at("/debug")]
     Debug,
     /// Debug page for gRPC calls.
     #[at("/debug/grpccall")]
     DebugGrpc,
+    /// Debug page for P2P testing.
+    #[at("/debug/p2p")]
+    DebugP2p,
     /// 404 Not Found.
     #[not_found]
     #[at("/404")]

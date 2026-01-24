@@ -27,6 +27,7 @@ use crate::{
 mod common;
 mod handler;
 mod service;
+mod topology;
 mod util;
 
 /// Embedded static files from dist/ directory
