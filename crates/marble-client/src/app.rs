@@ -1,6 +1,6 @@
 //! Main application component.
 
-use crate::pages::{DebugIndexPage, DebugSimplePage, HomePage, NotFoundPage, PlayPage};
+use crate::pages::{DebugGrpcPage, DebugIndexPage, HomePage, NotFoundPage, PanicPage, PlayPage};
 use crate::routes::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -10,9 +10,10 @@ fn switch(routes: Route) -> Html {
     match routes {
         Route::Home => html! { <HomePage /> },
         Route::Play { room_id } => html! { <PlayPage room_id={room_id} /> },
-        Route::DebugIndex => html! { <DebugIndexPage /> },
-        Route::DebugSimple => html! { <DebugSimplePage /> },
+        Route::Panic => html! { <PanicPage /> },
         Route::NotFound => html! { <NotFoundPage /> },
+        Route::Debug => html! { <DebugIndexPage /> },
+        Route::DebugGrpc => html! { <DebugGrpcPage /> },
     }
 }
 

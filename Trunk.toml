@@ -12,3 +12,12 @@ open = false
 
 [clean]
 dist = "dist"
+
+# Proxy to backend server
+[[proxy]]
+backend = "http://127.0.0.1:3000/grpc"
+rewrite = "/grpc"
+
+[[proxy]]
+backend = "http://127.0.0.1:3000/signaling"
+rewrite = "/signaling"

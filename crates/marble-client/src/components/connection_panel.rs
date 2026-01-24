@@ -48,9 +48,9 @@ pub fn connection_panel() -> Html {
 
             wasm_bindgen_futures::spawn_local(async move {
                 match network.borrow_mut().create_and_join_room("P2P Game", &name, &fingerprint, color).await {
-                    Ok((room_id, seed, is_game_in_progress, player_id, is_host, server_players)) => {
+                    Ok((room_id, seed, is_game_in_progress, player_id, is_host, server_players, host_player_id)) => {
                         state.dispatch(P2PAction::SetConnected { room_id, server_seed: seed, is_game_in_progress, player_id, is_host });
-                        state.dispatch(P2PAction::UpdateServerPlayers(server_players));
+                        state.dispatch(P2PAction::UpdateServerPlayers { players: server_players, host_player_id });
                     }
                     Err(e) => {
                         state.dispatch(P2PAction::SetError(e.clone()));
@@ -85,9 +85,9 @@ pub fn connection_panel() -> Html {
 
             wasm_bindgen_futures::spawn_local(async move {
                 match network.borrow_mut().join_room(&room_id, &name, &fingerprint, color).await {
-                    Ok((seed, is_game_in_progress, player_id, is_host, server_players)) => {
+                    Ok((seed, is_game_in_progress, player_id, is_host, server_players, host_player_id)) => {
                         state.dispatch(P2PAction::SetConnected { room_id, server_seed: seed, is_game_in_progress, player_id, is_host });
-                        state.dispatch(P2PAction::UpdateServerPlayers(server_players));
+                        state.dispatch(P2PAction::UpdateServerPlayers { players: server_players, host_player_id });
                     }
                     Err(e) => {
                         state.dispatch(P2PAction::SetError(e.clone()));

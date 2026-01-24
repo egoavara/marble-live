@@ -6,23 +6,35 @@ mod app;
 mod components;
 mod fingerprint;
 mod hooks;
-mod network;
 mod p2p;
 mod pages;
 mod renderer;
 mod routes;
 mod services;
 mod state;
-mod storage;
+mod util;
 
 use app::App;
+use tracing_subscriber::fmt::format::Pretty;
+use tracing_subscriber::prelude::*;
+use tracing_web::{performance_layer, MakeWebConsoleWriter};
 
 fn main() {
-    // Initialize console error panic hook for better error messages
-    console_error_panic_hook::set_once();
+    // Initialize custom panic hook that redirects to panic page
+    pages::set_panic_hook();
 
-    // Initialize tracing for wasm
-    tracing_wasm::set_as_global_default();
+    // Initialize tracing for wasm with tracing-web
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .without_time()
+        .with_writer(MakeWebConsoleWriter::new());
+
+    let perf_layer = performance_layer().with_details_from_fields(Pretty::default());
+
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(perf_layer)
+        .init();
 
     yew::Renderer::<App>::new().render();
 }

@@ -38,12 +38,12 @@ impl SyncSnapshot {
 
     /// Serialize the snapshot to bytes.
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
-        bincode::serialize(self).map_err(|e| e.to_string())
+        postcard::to_allocvec(self).map_err(|e| e.to_string())
     }
 
     /// Deserialize a snapshot from bytes.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        bincode::deserialize(data).map_err(|e| e.to_string())
+        postcard::from_bytes(data).map_err(|e| e.to_string())
     }
 
     /// Get the current frame number.

@@ -10,7 +10,9 @@ workspace = true
 
 [dependencies]
 marble-core.workspace = true
-marble-proto.workspace = true
+marble-proto = { workspace = true, features = ["client"] }
+
+tonic-web-wasm-client.workspace = true
 
 yew.workspace = true
 yew-router.workspace = true
@@ -28,6 +30,8 @@ web-sys = { workspace = true, features = [
     "Navigator",
     "Clipboard",
     "console",
+    "Crypto",
+    "SubtleCrypto"
 ] }
 js-sys.workspace = true
 gloo.workspace = true
@@ -40,6 +44,8 @@ futures = "0.3"
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-tracing-wasm.workspace = true
+tracing-subscriber.workspace = true
+tracing-web.workspace = true
+rand.workspace = true
 getrandom.workspace = true
 console_error_panic_hook.workspace = true

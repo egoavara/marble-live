@@ -1,56 +1,39 @@
 //! Welcome modal component for first-time users.
 
-use crate::fingerprint::generate_hash_code;
-use crate::storage::{available_colors, color_to_css, UserSettings};
+use crate::{
+    fingerprint::generate_hash_code,
+    hooks::{use_config_username, use_opt_userhash},
+};
 use marble_core::Color;
 use yew::prelude::*;
 
 /// Props for the WelcomeModal component.
 #[derive(Properties, PartialEq)]
-pub struct WelcomeModalProps {
-    /// Callback when user completes setup.
-    pub on_complete: Callback<UserSettings>,
-}
+pub struct WelcomeModalProps {}
 
 /// Welcome modal component shown to first-time users.
 #[function_component(WelcomeModal)]
 pub fn welcome_modal(props: &WelcomeModalProps) -> Html {
-    let name = use_state(String::new);
-    let selected_color = use_state(|| Color::RED);
-
+    let username = use_config_username();
     let on_name_input = {
-        let name = name.clone();
+        let name = username.clone();
         Callback::from(move |e: InputEvent| {
             let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-            name.set(input.value());
+            name.set(Some(input.value()));
         })
     };
 
-    let on_submit = {
-        let name = name.clone();
-        let selected_color = selected_color.clone();
-        let on_complete = props.on_complete.clone();
-        Callback::from(move |e: SubmitEvent| {
-            e.prevent_default();
-            if !name.is_empty() {
-                let settings = UserSettings {
-                    name: (*name).clone(),
-                    color: *selected_color,
-                };
-                settings.save();
-                on_complete.emit(settings);
-            }
-        })
-    };
+    let userhash = use_opt_userhash(username.clone());
 
-    let hash_code = generate_hash_code(&name);
-    let display_name = if name.is_empty() {
-        "???#????".to_string()
-    } else {
-        format!("{}#{}", *name, hash_code)
-    };
-
-    let colors = available_colors();
+    let display_userhash = userhash
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| "???".to_string());
+    let display_username = username
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| "???".to_string());
+    let display_name = format!("{}#{}", display_username, display_userhash);
 
     html! {
         <div class="modal-overlay">
@@ -58,7 +41,7 @@ pub fn welcome_modal(props: &WelcomeModalProps) -> Html {
                 <h2>{ "Marble Live" }</h2>
                 <p class="welcome-subtitle">{ "Welcome! Set up your profile to get started." }</p>
 
-                <form onsubmit={on_submit}>
+                <form>
                     <div class="form-group">
                         <label for="name-input">{ "Name" }</label>
                         <input
@@ -66,7 +49,7 @@ pub fn welcome_modal(props: &WelcomeModalProps) -> Html {
                             type="text"
                             class="name-input"
                             placeholder="Enter your name"
-                            value={(*name).clone()}
+                            value={(*username).clone().unwrap_or_default()}
                             oninput={on_name_input}
                             maxlength="20"
                             required=true
@@ -78,33 +61,10 @@ pub fn welcome_modal(props: &WelcomeModalProps) -> Html {
                         <span class="preview-value">{ display_name }</span>
                     </div>
 
-                    <div class="form-group">
-                        <label>{ "Color" }</label>
-                        <div class="color-picker">
-                            { for colors.iter().map(|&color| {
-                                let is_selected = *selected_color == color;
-                                let color_clone = color;
-                                let selected_color = selected_color.clone();
-                                let onclick = Callback::from(move |_| {
-                                    selected_color.set(color_clone);
-                                });
-                                html! {
-                                    <button
-                                        type="button"
-                                        class={classes!("color-btn", is_selected.then_some("selected"))}
-                                        style={format!("background-color: {}", color_to_css(&color))}
-                                        onclick={onclick}
-                                        title={format!("{:?}", color)}
-                                    />
-                                }
-                            })}
-                        </div>
-                    </div>
-
                     <button
                         type="submit"
                         class="btn btn-primary submit-btn"
-                        disabled={name.is_empty()}
+                        disabled={username.is_none()}
                     >
                         { "Start" }
                     </button>

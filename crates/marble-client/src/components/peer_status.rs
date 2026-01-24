@@ -45,10 +45,9 @@ pub fn peer_status_panel() -> Html {
             // Peers
             { for state.peers.iter().map(|(peer_id, info)| {
                 let peer_short = peer_id.0.to_string()[..8].to_string();
-                // Use server-authoritative host status
+                // Use server-authoritative host status via host_player_id
                 let is_peer_host = state.peer_to_player.get(peer_id)
-                    .and_then(|player_id| state.server_players.get(player_id))
-                    .map(|sp| sp.is_host)
+                    .map(|player_id| player_id == &state.host_player_id)
                     .unwrap_or(false);
 
                 html! {

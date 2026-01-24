@@ -1,7 +1,5 @@
 //! P2P game state management.
 
-use crate::network::create_shared_network_manager;
-use crate::network::manager::SharedNetworkManager;
 use marble_core::{Color, GamePhase, GameState, RouletteConfig, SyncSnapshot};
 use matchbox_socket::PeerId;
 use std::collections::HashMap;
@@ -67,12 +65,12 @@ impl PeerInfo {
 
 /// Server-authoritative player information.
 /// This data comes from the server and is the single source of truth.
+/// Note: Host status is determined by P2PGameState.host_player_id, not stored per-player.
 #[derive(Debug, Clone)]
 pub struct ServerPlayerInfo {
     pub player_id: String,
     pub name: String,
     pub color: Color,
-    pub is_host: bool,
     pub is_connected: bool,
     pub join_order: u32,
 }
@@ -125,6 +123,8 @@ pub struct P2PGameState {
     // --- Server-authoritative data ---
     /// Server-authoritative player information, keyed by player_id.
     pub server_players: HashMap<String, ServerPlayerInfo>,
+    /// The player_id of the current host (from server).
+    pub host_player_id: String,
     /// Mapping from player_id to peer_id (built via PeerAnnounce).
     pub player_to_peer: HashMap<String, PeerId>,
     /// Mapping from peer_id to player_id (built via PeerAnnounce).
@@ -168,6 +168,7 @@ impl P2PGameState {
             peer_player_map: HashMap::new(),
             // Server-authoritative data
             server_players: HashMap::new(),
+            host_player_id: String::new(),
             player_to_peer: HashMap::new(),
             peer_to_player: HashMap::new(),
         }
@@ -233,7 +234,7 @@ pub enum P2PAction {
     UpdatePeerInfo { peer_id: PeerId, name: String, color: Color, hash_code: String },
 
     // Server player management (authoritative)
-    UpdateServerPlayers(Vec<ServerPlayerInfo>),
+    UpdateServerPlayers { players: Vec<ServerPlayerInfo>, host_player_id: String },
     /// Map a peer_id to a player_id via PeerAnnounce
     MapPeerToPlayer { peer_id: PeerId, player_id: String },
 
@@ -299,6 +300,7 @@ impl Reducible for P2PGameState {
                 new_state.is_host = false;
                 new_state.room_id.clear();
                 new_state.server_players.clear();
+                new_state.host_player_id.clear();
                 new_state.player_to_peer.clear();
                 new_state.peer_to_player.clear();
                 new_state.desync_detected = false;  // Clear desync state for new session
@@ -374,9 +376,11 @@ impl Reducible for P2PGameState {
                 }
             }
             P2PAction::SetMyPeerId(peer_id) => {
+                // Only log if peer ID is being set for the first time
+                if new_state.my_peer_id.is_none() {
+                    new_state.add_log(&format!("My peer ID: {}", &peer_id.0.to_string()[..8]));
+                }
                 new_state.my_peer_id = Some(peer_id);
-                // Host status is set by server in SetConnected, no need to update here
-                new_state.add_log(&format!("My peer ID: {}", &peer_id.0.to_string()[..8]));
             }
             P2PAction::UpdatePeerRtt { peer_id, rtt_ms } => {
                 if let Some(peer) = new_state.peers.get_mut(&peer_id) {
@@ -390,19 +394,22 @@ impl Reducible for P2PGameState {
                     peer.hash_code = hash_code;
                 }
             }
-            P2PAction::UpdateServerPlayers(players) => {
+            P2PAction::UpdateServerPlayers { players, host_player_id } => {
                 // Update server_players from server response
                 new_state.server_players.clear();
+                new_state.host_player_id = host_player_id.clone();
+
                 for player in players {
-                    // Update my host status if this is me
-                    if player.player_id == new_state.my_player_id {
-                        new_state.is_host = player.is_host;
-                    }
                     new_state.server_players.insert(player.player_id.clone(), player);
                 }
+
+                // Update my host status based on host_player_id
+                new_state.is_host = new_state.my_player_id == host_player_id;
+
                 new_state.add_log(&format!(
-                    "Updated server players: {} players",
-                    new_state.server_players.len()
+                    "Updated server players: {} players (host: {})",
+                    new_state.server_players.len(),
+                    &host_player_id[..8.min(host_player_id.len())]
                 ));
             }
             P2PAction::MapPeerToPlayer { peer_id, player_id } => {

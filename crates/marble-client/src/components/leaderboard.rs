@@ -42,10 +42,9 @@ pub fn leaderboard() -> Html {
             format!("{}#{}", info.name, info.hash_code)
         };
 
-        // Get is_host from server_players via peer_to_player mapping (authoritative)
+        // Get is_host by comparing player_id with host_player_id
         let is_host = state.peer_to_player.get(peer_id)
-            .and_then(|player_id| state.server_players.get(player_id))
-            .map(|sp| sp.is_host)
+            .map(|player_id| player_id == &state.host_player_id)
             .unwrap_or(false);
 
         players.push((name, info.color, false, is_host, info.rtt_ms));

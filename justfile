@@ -5,16 +5,18 @@ default:
     @just --list
 
 # Run client development server (trunk)
-client:
-    trunk serve --open
+clt:
+    trunk serve
 
 # Run server development (watch mode)
-server:
-    watchexec -r -e rs,toml,proto -- cargo run -p marble-server
+svr:
+    trunk build --release
+    SKIP_CLIENT_BUILD=1 watchexec -r -e rs,toml,proto -- cargo run -p marble-server
 
-# Run both client and server (requires terminal multiplexer)
-dev:
-    @echo "Run 'just client' and 'just server' in separate terminals"
+# Force rebuild proto
+build-proto:
+    cargo clean -p marble-proto
+    cargo build -p marble-proto
 
 # Build all crates
 build:

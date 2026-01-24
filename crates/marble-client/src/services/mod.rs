@@ -2,6 +2,6 @@
 //!
 //! Services contain pure functions and logic extracted from components.
 
-mod message_handler;
+// mod message_handler;
 
-pub use message_handler::handle_message;
+// pub use message_handler::handle_message;

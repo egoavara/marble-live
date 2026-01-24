@@ -10,11 +10,12 @@ workspace = true
 
 [features]
 default = []
-server = ["tonic", "tonic-prost"]
+client = ["tonic", "tonic-prost"]
+server = ["tonic", "tonic-prost", "tonic/transport"]
 
 [dependencies]
 prost.workspace = true
-tonic = { workspace = true, optional = true }
+tonic = { version = "0.14", default-features = false, features = ["codegen"], optional = true }
 tonic-prost = { version = "0.14", optional = true }
 
 [build-dependencies]

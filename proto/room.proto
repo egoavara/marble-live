@@ -10,64 +10,55 @@ service RoomService {
   // Join an existing room
   rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
 
-  // Leave a room
-  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+  // Join an existing room
+  rpc StartRoom(StartRoomRequest) returns (StartRoomResponse);
 
-  // List available rooms
-  rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);
+  // Join an existing room
+  rpc KickRoom(KickRoomRequest) returns (KickRoomResponse);
 
   // Get room info
   rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);
 
-  // Start the game (host only, requires 2+ players)
-  rpc StartGame(StartGameRequest) returns (StartGameResponse);
+  // Get room player info
+  rpc GetRoomPlayer(GetRoomPlayerRequest) returns (GetRoomPlayerResponse);
 }
 
 message CreateRoomRequest {
-  string name = 1;
+  PlayerAuth host = 1;
   uint32 max_players = 2;
 }
 
 message CreateRoomResponse {
   string room_id = 1;
-  string join_code = 2;
-  string signaling_url = 3;
+  string signaling_url = 2;
 }
 
 message JoinRoomRequest {
   string room_id = 1;
-  string player_name = 2;
-  string fingerprint = 3;  // Browser fingerprint for user identification
-  uint32 color_r = 4;      // Player color (red component)
-  uint32 color_g = 5;      // Player color (green component)
-  uint32 color_b = 6;      // Player color (blue component)
+  PlayerAuth player = 2;
 }
 
 message JoinRoomResponse {
-  bool success = 1;
-  string player_id = 2;
-  RoomInfo room = 3;
-  string error_message = 4;
-  string signaling_url = 5;
+  string signaling_url = 3;
 }
 
-message LeaveRoomRequest {
+message StartRoomRequest {
   string room_id = 1;
-  string player_id = 2;
+  PlayerAuth player = 2;
 }
 
-message LeaveRoomResponse {
-  bool success = 1;
+message StartRoomResponse {
+  string started_at = 1;
 }
 
-message ListRoomsRequest {
-  uint32 offset = 1;
-  uint32 limit = 2;
+
+message KickRoomRequest {
+  string room_id = 1;
+  PlayerAuth player = 2;
+  string target_player = 3;
 }
 
-message ListRoomsResponse {
-  repeated RoomInfo rooms = 1;
-  uint32 total = 2;
+message KickRoomResponse {
 }
 
 message GetRoomRequest {
@@ -78,41 +69,34 @@ message GetRoomResponse {
   RoomInfo room = 1;
 }
 
-message StartGameRequest {
+message GetRoomPlayerRequest {
   string room_id = 1;
-  string player_id = 2;  // Must be the host
 }
 
-message StartGameResponse {
-  bool success = 1;
-  string error_message = 2;
-  RoomInfo room = 3;  // Updated room info with Playing status
+message GetRoomPlayerResponse {
+  repeated PlayerInfo players = 1;
 }
 
 message RoomInfo {
   string id = 1;
-  string name = 2;
-  uint32 player_count = 3;
-  uint32 max_players = 4;
-  RoomStatus status = 5;
-  repeated PlayerInfo players = 6;
-  uint64 seed = 7;  // Room seed derived from room ID
+  uint32 max_players = 2;
+  RoomState state = 3;
+  string started_at = 4;
+}
+
+enum RoomState {
+  UNDEFINED = 0;
+  WAITING = 1;
+  STARTED = 2;
+}
+
+message PlayerAuth {
+  string id = 1;
+  string secret = 2;
 }
 
 message PlayerInfo {
   string id = 1;
-  string name = 2;
-  bool is_host = 3;
-  bool is_connected = 4;  // Connection status for reconnection support
-  uint32 color_r = 5;     // Player color (red component)
-  uint32 color_g = 6;     // Player color (green component)
-  uint32 color_b = 7;     // Player color (blue component)
-  uint32 join_order = 8;  // Deterministic order for game initialization
-}
-
-enum RoomStatus {
-  ROOM_STATUS_UNSPECIFIED = 0;
-  ROOM_STATUS_WAITING = 1;
-  ROOM_STATUS_PLAYING = 2;
-  ROOM_STATUS_FINISHED = 3;
+  bool is_host = 2;
+  string display_id = 3;
 }

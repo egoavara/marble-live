@@ -1,8 +1,13 @@
 //! Home page with lobby functionality.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::components::{Layout, WelcomeModal};
+use crate::hooks::{use_config_secret, use_config_username, use_grpc_room_service};
 use crate::routes::Route;
-use crate::storage::UserSettings;
+use crate::util::async_callback;
+use marble_proto::room::{CreateRoomRequest, PlayerAuth};
 use uuid::Uuid;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -31,51 +36,82 @@ fn extract_room_id(input: &str) -> String {
 #[function_component(HomePage)]
 pub fn home_page() -> Html {
     let navigator = use_navigator().unwrap();
-    let show_welcome_modal = use_state(|| !UserSettings::exists());
-    let room_id_input = use_state(String::new);
+    let username = use_config_username();
+    let secret = use_config_secret();
 
-    let on_welcome_complete = {
-        let show_welcome_modal = show_welcome_modal.clone();
-        Callback::from(move |_settings: UserSettings| {
-            show_welcome_modal.set(false);
-        })
-    };
+    let show_welcome_modal = username.is_none();
 
-    let on_start_race = {
-        let navigator = navigator.clone();
-        Callback::from(move |_| {
-            let room_id = Uuid::new_v4().to_string();
-            navigator.push(&Route::Play { room_id });
-        })
-    };
+    let room_service = use_grpc_room_service();
 
+    let room_id_input = use_state(|| "".to_string());
     let on_room_id_input = {
         let room_id_input = room_id_input.clone();
         Callback::from(move |e: InputEvent| {
             let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-            let value = input.value();
-            // Extract room ID from URL if pasted
-            let extracted = extract_room_id(&value);
-            room_id_input.set(extracted);
+            room_id_input.set(input.value());
         })
     };
 
     let on_join_room = {
-        let navigator = navigator.clone();
         let room_id_input = room_id_input.clone();
+        let navigator = navigator.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
-            let room_id = (*room_id_input).trim().to_string();
-            if !room_id.is_empty() {
-                navigator.push(&Route::Play { room_id });
+            let extracted_room_id = extract_room_id(&room_id_input);
+            if !extracted_room_id.is_empty() {
+                // navigator.push(&Route::Play {
+                //     room_id: extracted_room_id,
+                // });
             }
         })
     };
 
+    let on_start_race = {
+        async_callback(
+            (
+                navigator.clone(),
+                room_service.clone(),
+                username.clone(),
+                secret.clone(),
+            ),
+            async move |(navigator, room_service, username, secret)| {
+                match room_service
+                    .borrow_mut()
+                    .create_room(CreateRoomRequest {
+                        host: Some(PlayerAuth {
+                            id: username
+                                .as_ref()
+                                .cloned()
+                                .expect("Username must be set to create a room"),
+                            secret: secret.to_string(),
+                        }),
+                        max_players: 8,
+                    })
+                    .await
+                {
+                    Ok(response) => {
+                        let new_room_id = response.into_inner().room_id;
+                        navigator.push(&Route::Play {
+                            room_id: new_room_id,
+                        });
+                    }
+                    Err(err) => {
+                        // TODO: 사용자 이름이 없거나 매개변수에 문제가 있는 경우에 대한 처리 추가
+                        tracing::error!("Failed to create room: {}", err);
+                    }
+                }
+
+                // navigator.push(&Route::Play {
+                //     room_id: new_room_id,
+                // });
+            },
+        )
+    };
+
     html! {
         <>
-            { if *show_welcome_modal {
-                html! { <WelcomeModal on_complete={on_welcome_complete} /> }
+            { if show_welcome_modal {
+                html! { <WelcomeModal /> }
             } else {
                 html! {}
             }}

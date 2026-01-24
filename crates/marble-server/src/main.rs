@@ -3,26 +3,31 @@
 //! Axum backend with gRPC-Web, matchbox signaling, and SPA serving.
 //! Static files are embedded in the binary via rust-embed.
 
-mod room_service;
-mod room_state;
-
 use std::net::SocketAddr;
 
 use axum::{
+    Router,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Router,
 };
-use http::{header, Method};
+use http::{Method, header};
 use marble_proto::room::room_service_server::RoomServiceServer;
 use matchbox_signaling::SignalingServer;
-use room_service::RoomServiceImpl;
-use room_state::RoomStore;
 use rust_embed::Embed;
 use tonic::service::Routes;
 use tonic_web::GrpcWebLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use crate::{
+    handler::room_service::{self, RoomServiceImpl},
+    service::database::Database,
+};
+
+mod common;
+mod handler;
+mod service;
+mod util;
 
 /// Embedded static files from dist/ directory
 #[derive(Embed)]
@@ -30,7 +35,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 struct Assets;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> () {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(
@@ -41,13 +46,11 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
 
-    // Room state store
-    let room_store = RoomStore::new();
-
-    // gRPC service
-    // Use localhost for browser-accessible signaling URL
-    let signaling_base_url = format!("ws://localhost:{}/signaling", addr.port());
-    let room_service = RoomServiceImpl::new(room_store, signaling_base_url);
+    let database = Database::new();
+    let room_service = RoomServiceImpl::new(
+        database,
+        format!("ws://localhost:{}/signaling", addr.port()),
+    );
     let grpc_router = Routes::new(RoomServiceServer::new(room_service))
         .into_axum_router()
         .layer(GrpcWebLayer::new());
@@ -68,9 +71,7 @@ async fn main() -> anyhow::Result<()> {
         ]);
 
     // App router (gRPC only - fallback will be added in build_with)
-    let app_router = Router::new()
-        .nest("/grpc", grpc_router)
-        .layer(cors);
+    let app_router = Router::new().nest("/grpc", grpc_router).layer(cors);
 
     // Build signaling server with integrated app router
     // NOTE: fallback must be set on the final router inside build_with,
@@ -96,9 +97,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("  - Signaling: ws://{addr}/signaling/{{room_id}}");
     tracing::info!("  - SPA (embedded): http://{addr}/");
 
-    signaling_server.serve().await?;
-
-    Ok(())
+    signaling_server.serve().await.unwrap();
 }
 
 /// Serve embedded static files with SPA fallback

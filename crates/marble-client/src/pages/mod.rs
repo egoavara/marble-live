@@ -1,13 +1,15 @@
 //! Page components.
 
-mod debug_index;
-mod debug_simple;
+mod debug;
+mod debug_grpc;
 mod home;
 mod not_found;
+mod panic;
 mod play;
 
-pub use debug_index::DebugIndexPage;
-pub use debug_simple::DebugSimplePage;
+pub use debug::DebugIndexPage;
+pub use debug_grpc::DebugGrpcPage;
 pub use home::HomePage;
 pub use not_found::NotFoundPage;
+pub use panic::{set_panic_hook, PanicPage};
 pub use play::PlayPage;
