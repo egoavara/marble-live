@@ -5,7 +5,8 @@ use rand_chacha::ChaCha8Rng;
 use rapier2d::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::map::SpawnArea;
+use crate::dsl::GameContext;
+use crate::map::{EvaluatedShape, SpawnerData};
 use crate::physics::PhysicsWorld;
 
 /// Unique identifier for a marble.
@@ -132,33 +133,53 @@ impl MarbleManager {
         }
     }
 
-    /// Spawns a new marble at a random position within the spawn area.
-    pub fn spawn_marble(
+    /// Spawns a new marble using a spawner definition.
+    pub fn spawn_from_spawner(
         &mut self,
         world: &mut PhysicsWorld,
         owner_id: PlayerId,
         color: Color,
-        spawn_area: &SpawnArea,
+        spawner: &SpawnerData,
     ) -> MarbleId {
-        self.spawn_marble_with_radius(world, owner_id, color, spawn_area, DEFAULT_MARBLE_RADIUS)
-    }
+        let ctx = GameContext::new(0.0, 0);
+        let shape = spawner.shape.evaluate(&ctx);
 
-    /// Spawns a new marble with a custom radius.
-    pub fn spawn_marble_with_radius(
-        &mut self,
-        world: &mut PhysicsWorld,
-        owner_id: PlayerId,
-        color: Color,
-        spawn_area: &SpawnArea,
-        radius: f32,
-    ) -> MarbleId {
         let rng = self.rng.as_mut().expect("RNG not initialized");
 
-        // Generate random position within spawn area
-        let x = rng.random_range(spawn_area.x[0]..spawn_area.x[1]);
-        let y = rng.random_range(spawn_area.y[0]..spawn_area.y[1]);
+        let (x, y) = match shape {
+            EvaluatedShape::Rect {
+                center,
+                size,
+                rotation,
+            } => {
+                // Random position within the rotated rectangle
+                let local_x = rng.random_range(-size[0] / 2.0..size[0] / 2.0);
+                let local_y = rng.random_range(-size[1] / 2.0..size[1] / 2.0);
+                let rad = rotation.to_radians();
+                let cos_r = rad.cos();
+                let sin_r = rad.sin();
+                (
+                    center[0] + local_x * cos_r - local_y * sin_r,
+                    center[1] + local_x * sin_r + local_y * cos_r,
+                )
+            }
+            EvaluatedShape::Circle { center, radius } => {
+                // Random position within the circle
+                let angle = rng.random_range(0.0..std::f32::consts::TAU);
+                let r = rng.random_range(0.0..radius);
+                (center[0] + r * angle.cos(), center[1] + r * angle.sin())
+            }
+            EvaluatedShape::Line { start, end } => {
+                // Random position along the line
+                let t = rng.random_range(0.0..1.0);
+                (
+                    start[0] + (end[0] - start[0]) * t,
+                    start[1] + (end[1] - start[1]) * t,
+                )
+            }
+        };
 
-        self.spawn_marble_at(world, owner_id, color, x, y, radius)
+        self.spawn_marble_at(world, owner_id, color, x, y, DEFAULT_MARBLE_RADIUS)
     }
 
     /// Spawns a marble at a specific position.
@@ -341,18 +362,27 @@ impl MarbleManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::RouletteConfig;
+    use crate::dsl::{NumberOrExpr, Vec2OrExpr};
+    use crate::map::{ObjectRole, RouletteConfig, Shape};
+
+    fn create_test_spawner() -> SpawnerData {
+        SpawnerData {
+            shape: Shape::Rect {
+                center: Vec2OrExpr::Static([400.0, 100.0]),
+                size: Vec2OrExpr::Static([600.0, 100.0]),
+                rotation: NumberOrExpr::Number(0.0),
+            },
+            properties: None,
+        }
+    }
 
     #[test]
     fn test_marble_creation() {
         let mut world = PhysicsWorld::new();
         let mut manager = MarbleManager::new(12345);
-        let spawn_area = SpawnArea {
-            x: [100.0, 200.0],
-            y: [50.0, 100.0],
-        };
+        let spawner = create_test_spawner();
 
-        let id = manager.spawn_marble(&mut world, 1, Color::RED, &spawn_area);
+        let id = manager.spawn_from_spawner(&mut world, 1, Color::RED, &spawner);
 
         assert_eq!(id, 0);
         assert!(manager.get_marble(id).is_some());
@@ -361,10 +391,7 @@ mod tests {
 
     #[test]
     fn test_deterministic_spawning() {
-        let spawn_area = SpawnArea {
-            x: [100.0, 700.0],
-            y: [50.0, 150.0],
-        };
+        let spawner = create_test_spawner();
 
         // Create two identical managers
         let mut world1 = PhysicsWorld::new();
@@ -376,8 +403,8 @@ mod tests {
         // Spawn marbles in both
         for i in 0..5 {
             let color = Color::palette()[i % Color::palette().len()];
-            manager1.spawn_marble(&mut world1, i as u32, color, &spawn_area);
-            manager2.spawn_marble(&mut world2, i as u32, color, &spawn_area);
+            manager1.spawn_from_spawner(&mut world1, i as u32, color, &spawner);
+            manager2.spawn_from_spawner(&mut world2, i as u32, color, &spawner);
         }
 
         // Positions should be identical
@@ -393,23 +420,28 @@ mod tests {
     fn test_marble_elimination() {
         let mut world = PhysicsWorld::new();
         let config = RouletteConfig::default_classic();
-        let hole_handles = config.apply_to_world(&mut world);
+        let map_data = config.apply_to_world(&mut world);
 
         let mut manager = MarbleManager::new(12345);
 
-        // Spawn a marble directly in the hole
-        let hole_center = config.holes[0].center;
-        let id = manager.spawn_marble_at(
-            &mut world,
-            1,
-            Color::BLUE,
-            hole_center[0],
-            hole_center[1],
-            DEFAULT_MARBLE_RADIUS,
-        );
+        // Find the trigger (goal) center from the config
+        let trigger = config
+            .objects
+            .iter()
+            .find(|o| o.role == ObjectRole::Trigger)
+            .expect("Should have a trigger");
+        let ctx = GameContext::new(0.0, 0);
+        let shape = trigger.shape.evaluate(&ctx);
+        let (cx, cy) = match shape {
+            EvaluatedShape::Circle { center, .. } => (center[0], center[1]),
+            _ => panic!("Expected circle trigger"),
+        };
+
+        // Spawn a marble directly in the trigger
+        let id = manager.spawn_marble_at(&mut world, 1, Color::BLUE, cx, cy, DEFAULT_MARBLE_RADIUS);
 
         // Check collisions
-        let eliminated = manager.check_hole_collisions(&world, &hole_handles);
+        let eliminated = manager.check_hole_collisions(&world, &map_data.trigger_handles);
 
         assert!(eliminated.contains(&id));
         assert!(manager.get_marble(id).unwrap().eliminated);
@@ -419,12 +451,9 @@ mod tests {
     fn test_marble_removal() {
         let mut world = PhysicsWorld::new();
         let mut manager = MarbleManager::new(12345);
-        let spawn_area = SpawnArea {
-            x: [100.0, 200.0],
-            y: [50.0, 100.0],
-        };
+        let spawner = create_test_spawner();
 
-        let id = manager.spawn_marble(&mut world, 1, Color::RED, &spawn_area);
+        let id = manager.spawn_from_spawner(&mut world, 1, Color::RED, &spawner);
         assert_eq!(manager.marbles().len(), 1);
 
         let removed = manager.remove_marble(&mut world, id);
@@ -437,14 +466,11 @@ mod tests {
     fn test_active_vs_eliminated() {
         let mut world = PhysicsWorld::new();
         let mut manager = MarbleManager::new(12345);
-        let spawn_area = SpawnArea {
-            x: [100.0, 200.0],
-            y: [50.0, 100.0],
-        };
+        let spawner = create_test_spawner();
 
         // Spawn 3 marbles
         for i in 0..3 {
-            manager.spawn_marble(&mut world, i, Color::RED, &spawn_area);
+            manager.spawn_from_spawner(&mut world, i, Color::RED, &spawner);
         }
 
         assert_eq!(manager.active_count(), 3);

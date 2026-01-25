@@ -1,0 +1,12 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "rust-analyzer.cargo.target": null,
+    "rust-analyzer.check.targets": null,
+    "rust-analyzer.diagnostics.disabled": []
+  }
+}

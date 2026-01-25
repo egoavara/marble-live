@@ -75,11 +75,13 @@ impl GameState {
         // Reinitialize RNG after deserialization
         self.marble_manager.reinit_rng();
 
-        // Reconstruct hole_handles from map_config if available
-        // The physics_world already contains the hole colliders from the snapshot,
+        // Reconstruct trigger_handles, spawners, and blackholes from map_config if available
+        // The physics_world already contains the colliders from the snapshot,
         // but we need to find their handles for collision detection
         if let Some(ref config) = self.map_config {
-            self.hole_handles = config.find_hole_handles(&self.physics_world);
+            self.trigger_handles = config.find_trigger_handles(&self.physics_world);
+            self.spawners = config.get_spawners();
+            self.blackholes = config.get_blackholes();
         }
     }
 }

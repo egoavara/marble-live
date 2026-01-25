@@ -16,3 +16,5 @@ postcard.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 thiserror.workspace = true
+cel-interpreter.workspace = true
+parking_lot.workspace = true

@@ -1,5 +1,6 @@
 //! UI Components for the marble-live client.
 
+mod camera_controls;
 // mod canvas;
 // mod canvas_controls;
 mod chat_panel;
@@ -27,6 +28,7 @@ mod settings_modal;
 // mod share_button;
 mod welcome_modal;
 
+pub use camera_controls::*;
 pub use chat_panel::*;
 pub use game_view::*;
 pub use layout::*;

@@ -7,10 +7,11 @@ use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
 use super::reaction_panel::{get_reaction_emoji, REACTION_COOLDOWN_MS};
-use super::{ChatPanel, PeerList, ReactionDisplay};
+use super::{CameraControls, ChatPanel, PeerList, ReactionDisplay};
+use crate::camera::CameraMode;
 use crate::hooks::{
-    use_config_secret, use_config_username, use_game_loop, use_p2p_room_with_credentials,
-    GameLoopState, P2pRoomConfig,
+    use_config_secret, use_config_username, use_game_loop, use_localstorage,
+    use_p2p_room_with_credentials, GameLoopState, P2pRoomConfig,
 };
 
 /// Props for the GameView component.
@@ -61,9 +62,25 @@ pub fn game_view(props: &GameViewProps) -> Html {
     // Canvas reference
     let canvas_ref = use_node_ref();
 
-    // Game loop hook
+    // Camera mode from localStorage
+    let camera_mode_storage = use_localstorage("marble-live-camera-mode", || CameraMode::Overview);
+
+    // Game loop hook with initial camera mode
     let game_seed = use_state(|| js_sys::Date::now() as u64);
-    let game_loop = use_game_loop(&p2p, canvas_ref.clone(), props.is_host, *game_seed);
+    let game_loop = use_game_loop(&p2p, canvas_ref.clone(), props.is_host, *game_seed, *camera_mode_storage);
+
+    // Current camera mode for UI (trigger re-render)
+    let current_camera_mode = use_state(|| *camera_mode_storage);
+
+    // Callback for camera mode change
+    let on_camera_mode_change = {
+        let camera_mode_storage = camera_mode_storage.clone();
+        let current_camera_mode = current_camera_mode.clone();
+        Callback::from(move |mode: CameraMode| {
+            camera_mode_storage.set(mode);
+            current_camera_mode.set(mode);
+        })
+    };
 
     // Track if game start was already processed
     let game_start_processed = use_mut_ref(|| false);
@@ -134,19 +151,19 @@ pub fn game_view(props: &GameViewProps) -> Html {
         })
     };
 
-    // Keyboard event handler for reaction shortcuts (1-5)
+    // Keyboard event handler for reaction shortcuts (1-5) and camera controls (Q/W/E)
     {
         let send_reaction = send_reaction.clone();
         let last_keyboard_emoji = last_keyboard_emoji.clone();
         let is_connected = is_connected;
+        let camera_state = game_loop.camera();
+        let on_camera_mode_change = on_camera_mode_change.clone();
         use_effect_with(is_connected, move |_| {
             let listener = web_sys::window().map(|window| {
                 let last_keyboard_emoji = last_keyboard_emoji.clone();
+                let camera_state = camera_state.clone();
+                let on_camera_mode_change = on_camera_mode_change.clone();
                 EventListener::new(&window, "keydown", move |event| {
-                    if !is_connected {
-                        return;
-                    }
-
                     let keyboard_event = match event.dyn_ref::<web_sys::KeyboardEvent>() {
                         Some(e) => e,
                         None => return,
@@ -162,11 +179,35 @@ pub fn game_view(props: &GameViewProps) -> Html {
                         }
                     }
 
-                    let key = keyboard_event.key();
-                    if let Some(emoji) = get_reaction_emoji(&key) {
-                        // Update last_keyboard_emoji for ChatPanel sync
-                        last_keyboard_emoji.set(Some(emoji.to_string()));
-                        send_reaction(emoji);
+                    let key = keyboard_event.key().to_lowercase();
+
+                    // Camera controls (Q/W/E)
+                    match key.as_str() {
+                        "q" => {
+                            camera_state.borrow_mut().set_mode(CameraMode::FollowMe);
+                            on_camera_mode_change.emit(CameraMode::FollowMe);
+                            return;
+                        }
+                        "w" => {
+                            camera_state.borrow_mut().set_mode(CameraMode::FollowLeader);
+                            on_camera_mode_change.emit(CameraMode::FollowLeader);
+                            return;
+                        }
+                        "e" => {
+                            camera_state.borrow_mut().set_mode(CameraMode::Overview);
+                            on_camera_mode_change.emit(CameraMode::Overview);
+                            return;
+                        }
+                        _ => {}
+                    }
+
+                    // Reaction shortcuts (only when connected)
+                    if is_connected {
+                        if let Some(emoji) = get_reaction_emoji(&key) {
+                            // Update last_keyboard_emoji for ChatPanel sync
+                            last_keyboard_emoji.set(Some(emoji.to_string()));
+                            send_reaction(emoji);
+                        }
                     }
                 })
             });
@@ -216,6 +257,13 @@ pub fn game_view(props: &GameViewProps) -> Html {
                 class="game-canvas"
                 width="800"
                 height="600"
+            />
+
+            // Camera controls (top-center)
+            <CameraControls
+                camera_state={game_loop.camera()}
+                current_mode={*current_camera_mode}
+                on_mode_change={on_camera_mode_change.clone()}
             />
 
             // Countdown overlay

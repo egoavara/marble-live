@@ -1,9 +1,10 @@
 //! Game state machine and round management.
 
-use rapier2d::prelude::ColliderHandle;
+use rapier2d::prelude::{ColliderHandle, Vector};
 use serde::{Deserialize, Serialize};
 
-use crate::map::RouletteConfig;
+use crate::dsl::GameContext;
+use crate::map::{BlackholeData, EvaluatedShape, RouletteConfig, SpawnerData};
 use crate::marble::{Color, MarbleManager, PlayerId};
 use crate::physics::PhysicsWorld;
 
@@ -61,8 +62,18 @@ pub struct GameState {
     pub marble_manager: MarbleManager,
     #[serde(skip)]
     pub map_config: Option<RouletteConfig>,
+    /// Trigger (hole) handles for elimination detection.
     #[serde(skip)]
-    pub hole_handles: Vec<ColliderHandle>,
+    pub trigger_handles: Vec<ColliderHandle>,
+    /// Spawner data from the map.
+    #[serde(skip)]
+    pub spawners: Vec<SpawnerData>,
+    /// Blackhole data for force application.
+    #[serde(skip)]
+    pub blackholes: Vec<BlackholeData>,
+    /// Cached game context for CEL expression evaluation.
+    #[serde(skip)]
+    game_context: GameContext,
 }
 
 impl GameState {
@@ -76,7 +87,10 @@ impl GameState {
             physics_world: PhysicsWorld::new(),
             marble_manager: MarbleManager::new(seed),
             map_config: None,
-            hole_handles: Vec::new(),
+            trigger_handles: Vec::new(),
+            spawners: Vec::new(),
+            blackholes: Vec::new(),
+            game_context: GameContext::with_cache(),
         }
     }
 
@@ -86,7 +100,10 @@ impl GameState {
         self.physics_world.reset();
 
         // Apply map to world
-        self.hole_handles = config.apply_to_world(&mut self.physics_world);
+        let map_data = config.apply_to_world(&mut self.physics_world);
+        self.trigger_handles = map_data.trigger_handles;
+        self.spawners = map_data.spawners;
+        self.blackholes = map_data.blackholes;
         self.map_config = Some(config);
     }
 
@@ -159,23 +176,23 @@ impl GameState {
 
     /// Starts the running phase and spawns marbles.
     fn start_running(&mut self) {
-        let spawn_area = self
-            .map_config
-            .as_ref()
-            .map(|c| &c.spawn_area)
-            .expect("Map config required");
-
         // Clear any existing marbles
         self.marble_manager.clear(&mut self.physics_world);
         self.eliminated_order.clear();
 
-        // Spawn a marble for each player
+        // Get the first spawner (or panic if none)
+        let spawner = self
+            .spawners
+            .first()
+            .expect("Map must have at least one spawner");
+
+        // Spawn a marble for each player using the spawner
         for player in &self.players {
-            self.marble_manager.spawn_marble(
+            self.marble_manager.spawn_from_spawner(
                 &mut self.physics_world,
                 player.id,
                 player.color,
-                spawn_area,
+                spawner,
             );
         }
 
@@ -199,12 +216,20 @@ impl GameState {
                 Vec::new()
             }
             GamePhase::Running => {
+                // Update game context for CEL expressions
+                let time = self.physics_world.current_frame() as f32 / 60.0;
+                self.game_context.update(time, self.physics_world.current_frame());
+
+                // Apply blackhole forces before physics step
+                self.apply_blackhole_forces();
+
                 // Step physics
                 self.physics_world.step();
 
                 // Check for eliminations
-                let eliminated_marble_ids =
-                    self.marble_manager.check_hole_collisions(&self.physics_world, &self.hole_handles);
+                let eliminated_marble_ids = self
+                    .marble_manager
+                    .check_hole_collisions(&self.physics_world, &self.trigger_handles);
 
                 // Map marble IDs to player IDs
                 let mut newly_eliminated = Vec::new();
@@ -327,6 +352,55 @@ impl GameState {
         // Reverse so winner is first
         rankings.reverse();
         rankings
+    }
+
+    /// Applies blackhole forces to all active marbles.
+    fn apply_blackhole_forces(&mut self) {
+        if self.blackholes.is_empty() {
+            return;
+        }
+
+        for blackhole in &self.blackholes {
+            // Evaluate the force using the current game context (supports CEL expressions)
+            let force = blackhole.force.evaluate(&self.game_context);
+            if force.abs() < f32::EPSILON {
+                continue;
+            }
+
+            // Get blackhole center
+            let shape = blackhole.shape.evaluate(&self.game_context);
+            let center = match shape {
+                EvaluatedShape::Circle { center, .. } => center,
+                EvaluatedShape::Rect { center, .. } => center,
+                EvaluatedShape::Line { .. } => continue,
+            };
+
+            // Apply force to all active marbles
+            for marble in self.marble_manager.marbles() {
+                if marble.eliminated {
+                    continue;
+                }
+
+                if let Some(body) = self.physics_world.get_rigid_body_mut(marble.body_handle) {
+                    let pos = body.translation();
+                    let dx = center[0] - pos.x;
+                    let dy = center[1] - pos.y;
+                    let dist_sq = dx * dx + dy * dy;
+                    let dist = dist_sq.sqrt().max(1.0); // Prevent division by zero
+
+                    // Force magnitude inversely proportional to distance
+                    let force_magnitude = force * 1000.0 / dist;
+                    let force_vec = Vector::new(dx / dist * force_magnitude, dy / dist * force_magnitude);
+
+                    body.add_force(force_vec, true);
+                }
+            }
+        }
+    }
+
+    /// Returns the current game context for CEL expression evaluation.
+    pub fn game_context(&self) -> &GameContext {
+        &self.game_context
     }
 }
 

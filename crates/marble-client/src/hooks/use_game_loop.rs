@@ -3,13 +3,15 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use marble_core::{GamePhase, GameState, RouletteConfig, SyncSnapshot};
+use marble_core::{GamePhase, GameState, PlayerId, RouletteConfig, SyncSnapshot};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlCanvasElement;
 use yew::prelude::*;
 
-use crate::renderer::CanvasRenderer;
+use crate::camera::{CameraMode, CameraState};
+use crate::renderer::WgpuRenderer;
 use crate::services::p2p::{should_broadcast_hash, P2pRoomHandle};
 
 /// Fixed timestep for physics simulation (60 FPS)
@@ -32,10 +34,12 @@ pub enum GameLoopState {
 #[derive(Clone)]
 pub struct GameLoopHandle {
     pub game_state: Rc<RefCell<GameState>>,
+    pub camera_state: Rc<RefCell<CameraState>>,
     pub loop_state: UseStateHandle<GameLoopState>,
     pub current_frame: UseStateHandle<u64>,
     is_host: bool,
     p2p: P2pRoomHandle,
+    my_player_id: Option<String>,
 }
 
 impl GameLoopHandle {
@@ -135,6 +139,10 @@ impl GameLoopHandle {
         drop(game);
         self.loop_state.set(GameLoopState::Idle);
         self.current_frame.set(0);
+
+        // Reset camera to Overview
+        let mut camera = self.camera_state.borrow_mut();
+        camera.mode = CameraMode::Overview;
     }
 
     /// Get current game phase
@@ -145,6 +153,22 @@ impl GameLoopHandle {
     /// Check if game is running
     pub fn is_running(&self) -> bool {
         matches!(*self.loop_state, GameLoopState::Running)
+    }
+
+    /// Get camera state for external access (e.g., keyboard handlers)
+    pub fn camera(&self) -> Rc<RefCell<CameraState>> {
+        self.camera_state.clone()
+    }
+
+    /// Get local player's numeric ID for camera tracking
+    pub fn my_numeric_player_id(&self) -> Option<PlayerId> {
+        let game = self.game_state.borrow();
+        let my_player_id = self.my_player_id.as_ref()?;
+
+        game.players
+            .iter()
+            .find(|p| &p.name == my_player_id)
+            .map(|p| p.id)
     }
 }
 
@@ -161,6 +185,7 @@ pub fn use_game_loop(
     canvas_ref: NodeRef,
     is_host: bool,
     seed: u64,
+    initial_camera_mode: CameraMode,
 ) -> GameLoopHandle {
     // Game state - shared with P2P layer
     let game_state = use_memo(seed, |seed| {
@@ -169,6 +194,17 @@ pub fn use_game_loop(
         state.load_map(RouletteConfig::default_classic());
         Rc::new(RefCell::new(state))
     });
+
+    // Camera state - created once with initial mode
+    let camera_state = {
+        let initial_mode = initial_camera_mode;
+        use_memo((), move |_| {
+            // Default map size from classic config
+            let mut camera = CameraState::new((800.0, 600.0), (800.0, 600.0));
+            camera.set_mode(initial_mode);
+            Rc::new(RefCell::new(camera))
+        })
+    };
 
     // Loop state
     let loop_state = use_state(|| GameLoopState::Idle);
@@ -184,8 +220,11 @@ pub fn use_game_loop(
     // Animation frame ID for cleanup
     let animation_frame_id = use_mut_ref(|| None::<i32>);
 
-    // Renderer reference
-    let renderer_ref: Rc<RefCell<Option<CanvasRenderer>>> = use_mut_ref(|| None);
+    // Renderer reference (wgpu)
+    let renderer_ref: Rc<RefCell<Option<WgpuRenderer>>> = use_mut_ref(|| None);
+
+    // Store my_player_id for the handle
+    let my_player_id = p2p.my_player_id();
 
     // Share game state with P2P layer (run once on mount)
     {
@@ -197,40 +236,57 @@ pub fn use_game_loop(
         });
     }
 
-    // Initialize renderer when canvas is ready (run once)
+    // Initialize wgpu renderer when canvas is ready (run once)
     {
         let canvas_ref = canvas_ref.clone();
         let renderer_ref = renderer_ref.clone();
         let renderer_version = renderer_version.clone();
+        let camera_state = camera_state.clone();
+
         use_effect_with((), move |_| {
             // Use timeout to ensure canvas is mounted
             let canvas_ref = canvas_ref.clone();
             let renderer_ref = renderer_ref.clone();
             let renderer_version = renderer_version.clone();
+            let camera_state = camera_state.clone();
 
             gloo::timers::callback::Timeout::new(100, move || {
                 if renderer_ref.borrow().is_some() {
                     return; // Already initialized
                 }
                 if let Some(canvas) = canvas_ref.cast::<HtmlCanvasElement>() {
-                    match CanvasRenderer::new(&canvas) {
-                        Ok(r) => {
-                            *renderer_ref.borrow_mut() = Some(r);
-                            renderer_version.set(1);
-                            tracing::debug!("Canvas renderer initialized");
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to create renderer: {:?}", e);
-                        }
+                    // Update camera viewport
+                    {
+                        let mut camera = camera_state.borrow_mut();
+                        camera.set_viewport(canvas.width() as f32, canvas.height() as f32);
                     }
+
+                    // Initialize wgpu renderer asynchronously
+                    let renderer_ref = renderer_ref.clone();
+                    let renderer_version = renderer_version.clone();
+
+                    spawn_local(async move {
+                        match WgpuRenderer::new(canvas).await {
+                            Ok(r) => {
+                                *renderer_ref.borrow_mut() = Some(r);
+                                renderer_version.set(1);
+                                tracing::info!("wgpu renderer initialized");
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to create wgpu renderer: {}", e);
+                            }
+                        }
+                    });
                 }
-            }).forget();
+            })
+            .forget();
         });
     }
 
     // Idle/Finished state rendering (single frame, no physics)
     {
         let game_state = game_state.clone();
+        let camera_state = camera_state.clone();
         let loop_state = loop_state.clone();
         let renderer_ref = renderer_ref.clone();
         let renderer_version = *renderer_version;
@@ -240,9 +296,10 @@ pub fn use_game_loop(
             move |(state, _version)| {
                 // Render once when not running but renderer is ready
                 if !matches!(state, GameLoopState::Running) {
-                    if let Some(ref renderer) = *renderer_ref.borrow() {
+                    if let Some(ref mut renderer) = *renderer_ref.borrow_mut() {
                         let game = game_state.borrow();
-                        renderer.render(&game);
+                        let camera = camera_state.borrow();
+                        renderer.render(&game, &camera);
                         tracing::debug!("Rendered idle/finished state");
                     }
                 }
@@ -253,6 +310,7 @@ pub fn use_game_loop(
     // Main game loop
     {
         let game_state = game_state.clone();
+        let camera_state = camera_state.clone();
         let loop_state = loop_state.clone();
         let current_frame = current_frame.clone();
         let renderer_ref = renderer_ref.clone();
@@ -260,6 +318,7 @@ pub fn use_game_loop(
         let accumulated_time = accumulated_time.clone();
         let last_time = last_time.clone();
         let animation_frame_id = animation_frame_id.clone();
+        let my_player_id_for_camera = my_player_id.clone();
 
         use_effect_with(
             ((*loop_state).clone(), *renderer_version),
@@ -274,6 +333,7 @@ pub fn use_game_loop(
                     let closure_clone = closure.clone();
 
                     let game_state = game_state.clone();
+                    let camera_state = camera_state.clone();
                     let current_frame = current_frame.clone();
                     let loop_state = loop_state.clone();
                     let p2p = p2p.clone();
@@ -281,6 +341,7 @@ pub fn use_game_loop(
                     let last_time = last_time.clone();
                     let animation_frame_id = animation_frame_id.clone();
                     let renderer_ref = renderer_ref.clone();
+                    let my_player_id_for_camera = my_player_id_for_camera.clone();
 
                     *closure.borrow_mut() = Some(Closure::new(move |timestamp: f64| {
                         // Check if still running
@@ -298,6 +359,15 @@ pub fn use_game_loop(
 
                         // Accumulate time
                         *accumulated_time.borrow_mut() += delta;
+
+                        // Get my numeric player ID for camera tracking
+                        let my_numeric_id: Option<PlayerId> = {
+                            let game = game_state.borrow();
+                            game.players
+                                .iter()
+                                .find(|p| p.name == my_player_id_for_camera)
+                                .map(|p| p.id)
+                        };
 
                         // Fixed timestep physics updates
                         while *accumulated_time.borrow() >= PHYSICS_DT_MS {
@@ -328,10 +398,18 @@ pub fn use_game_loop(
                             }
                         }
 
-                        // Render
-                        if let Some(ref renderer) = *renderer_ref.borrow() {
+                        // Update camera
+                        {
                             let game = game_state.borrow();
-                            renderer.render(&game);
+                            let mut camera = camera_state.borrow_mut();
+                            camera.update(&game, my_numeric_id);
+                        }
+
+                        // Render
+                        if let Some(ref mut renderer) = *renderer_ref.borrow_mut() {
+                            let game = game_state.borrow();
+                            let camera = camera_state.borrow();
+                            renderer.render(&game, &camera);
                         }
 
                         // Request next frame
@@ -372,9 +450,11 @@ pub fn use_game_loop(
 
     GameLoopHandle {
         game_state: (*game_state).clone(),
+        camera_state: (*camera_state).clone(),
         loop_state,
         current_frame,
         is_host,
         p2p: p2p.clone(),
+        my_player_id: Some(my_player_id),
     }
 }

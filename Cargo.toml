@@ -81,6 +81,13 @@ mime_guess = "2.0"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# CEL expression language
+cel-interpreter = "0.10"
+
+# Graphics
+wgpu = { version = "28", features = ["webgl"] }
+bytemuck = { version = "1", features = ["derive"] }
+
 [workspace.lints.rust]
 unsafe_code = "warn"
 
