@@ -13,6 +13,7 @@ mod components;
 mod fingerprint;
 mod hooks;
 mod pages;
+mod ranking;
 mod renderer;
 mod routes;
 mod services;

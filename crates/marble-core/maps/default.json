@@ -1,7 +1,11 @@
 {
   "meta": {
     "name": "Animated Example",
-    "gamerule": ["top_n", "last_n"]
+    "gamerule": ["top_n", "last_n"],
+    "live_ranking": {
+      "type": "distance",
+      "target_id": "goal"
+    }
   },
   "objects": [
     {

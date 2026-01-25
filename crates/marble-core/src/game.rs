@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dsl::GameContext;
 use crate::keyframe::KeyframeExecutor;
-use crate::map::{BlackholeData, EvaluatedShape, RollDirection, RouletteConfig, SpawnerData};
+use crate::map::{BlackholeData, EvaluatedShape, LiveRankingConfig, RollDirection, RouletteConfig, SpawnerData};
 use crate::marble::{Color, MarbleManager, PlayerId};
 use crate::physics::{PhysicsWorld, PHYSICS_DT};
 
@@ -437,6 +437,43 @@ impl GameState {
     /// Returns the current game context for CEL expression evaluation.
     pub fn game_context(&self) -> &GameContext {
         &self.game_context
+    }
+
+    /// Calculates ranking score based on live_ranking configuration.
+    /// Lower score = higher rank.
+    pub fn calculate_ranking_score(&self, marble_pos: (f32, f32)) -> f32 {
+        match &self.map_config {
+            Some(config) => match &config.meta.live_ranking {
+                LiveRankingConfig::YPosition => marble_pos.1,
+                LiveRankingConfig::Distance { target_id } => {
+                    self.get_object_center(target_id)
+                        .map(|(tx, ty)| {
+                            let dx = marble_pos.0 - tx;
+                            let dy = marble_pos.1 - ty;
+                            (dx * dx + dy * dy).sqrt()
+                        })
+                        .unwrap_or(marble_pos.1) // fallback to y
+                }
+            },
+            None => marble_pos.1,
+        }
+    }
+
+    /// Gets the center position of an object by its ID.
+    fn get_object_center(&self, object_id: &str) -> Option<(f32, f32)> {
+        let config = self.map_config.as_ref()?;
+        let obj = config.objects.iter().find(|o| o.id.as_deref() == Some(object_id))?;
+
+        // Evaluate shape to get center
+        let shape = obj.shape.evaluate(&self.game_context);
+        match shape {
+            EvaluatedShape::Circle { center, .. } => Some((center[0], center[1])),
+            EvaluatedShape::Rect { center, .. } => Some((center[0], center[1])),
+            EvaluatedShape::Line { start, end } => {
+                // For Line, use midpoint
+                Some(((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0))
+            }
+        }
     }
 }
 

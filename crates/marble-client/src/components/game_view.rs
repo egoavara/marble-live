@@ -5,9 +5,11 @@ use marble_proto::play::p2p_message::Payload;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 
+use super::peer_list::ArrivalInfo;
 use super::reaction_panel::{get_reaction_emoji, REACTION_COOLDOWN_MS};
 use super::{CameraControls, ChatPanel, PeerList, ReactionDisplay};
 use crate::camera::CameraMode;
+use crate::ranking::LiveRankingTracker;
 use crate::hooks::{
     use_config_secret, use_config_username, use_game_loop, use_localstorage,
     use_p2p_room_with_credentials, P2pRoomConfig,
@@ -87,6 +89,9 @@ pub fn game_view(props: &GameViewProps) -> Html {
     let host_started = use_mut_ref(|| false);
     // Track previous peer count for detecting new peer joins
     let prev_peer_count = use_mut_ref(|| 0usize);
+
+    // Live ranking tracker with hysteresis (300ms cooldown + 30px margin)
+    let live_ranking_tracker = use_mut_ref(LiveRankingTracker::new);
 
     // Auto-start game when host connects
     {
@@ -269,6 +274,66 @@ pub fn game_view(props: &GameViewProps) -> Html {
     // Calculate if reactions are on cooldown
     let reaction_disabled = *cooldown_active;
 
+    // Calculate arrival info from game state (before html! macro)
+    let (arrival_info, gamerule) = {
+        let game_state = game_loop.game_state.borrow();
+        let mut tracker = live_ranking_tracker.borrow_mut();
+
+        // 1. 쿨타임 틱
+        tracker.tick();
+
+        let leaderboard = game_state.leaderboard();
+        let gamerule = game_state.gamerule().to_string();
+        let arrival_order_list = game_state.arrival_order();
+
+        // 2. 미도착 플레이어 위치 수집
+        let non_arrived_positions: Vec<(marble_core::marble::PlayerId, f32)> = game_state.players.iter()
+            .filter(|p| !arrival_order_list.contains(&p.id))
+            .filter_map(|p| {
+                game_state.marble_manager.get_marble_by_owner(p.id).and_then(|marble| {
+                    if marble.eliminated {
+                        None
+                    } else {
+                        game_state.physics_world.get_rigid_body(marble.body_handle).map(|body| {
+                            let pos = body.translation();
+                            let score = game_state.calculate_ranking_score((pos.x, pos.y));
+                            (p.id, score)
+                        })
+                    }
+                })
+            })
+            .collect();
+
+        // 3. 히스테리시스 적용된 순위 획득
+        let live_rankings = tracker.update(&non_arrived_positions);
+
+        // 4. live_rank map 생성
+        let live_rank_map: std::collections::HashMap<marble_core::marble::PlayerId, u32> = live_rankings
+            .iter()
+            .copied()
+            .collect();
+
+        // Build arrival info: map player_id (u32) to name and rank
+        let arrival_info: Vec<ArrivalInfo> = game_state.players.iter().map(|player| {
+            let rank = leaderboard.iter()
+                .position(|&pid| pid == player.id)
+                .map(|pos| (pos + 1) as u32);
+            let arrival_order = arrival_order_list
+                .iter()
+                .position(|&pid| pid == player.id)
+                .map(|pos| (pos + 1) as u32);
+            let live_rank = live_rank_map.get(&player.id).copied();
+            ArrivalInfo {
+                player_id: player.name.clone(),
+                rank,
+                arrival_order,
+                live_rank,
+            }
+        }).collect();
+
+        (arrival_info, gamerule)
+    };
+
     html! {
         <div class="game-view fullscreen">
             // Game canvas
@@ -311,9 +376,11 @@ pub fn game_view(props: &GameViewProps) -> Html {
 
             // Left side: Peer list (vertically centered)
             <PeerList
-                peers={peers}
+                peers={peers.clone()}
                 my_player_id={player_id.clone()}
-                connection_state={connection_state}
+                connection_state={connection_state.clone()}
+                arrival_info={arrival_info}
+                gamerule={gamerule}
             />
 
             // Floating emoji reactions

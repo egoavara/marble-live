@@ -2447,6 +2447,36 @@
     flex-shrink: 0;
 }
 
+/* Arrived player styles */
+.peer-list-item.arrived {
+    background: rgba(76, 175, 80, 0.15);
+}
+
+.peer-list-item.arrived.self {
+    background: linear-gradient(90deg, rgba(102, 126, 234, 0.15) 0%, rgba(76, 175, 80, 0.15) 100%);
+}
+
+.peer-rank.arrived {
+    color: #4caf50;
+    font-weight: bold;
+}
+
+.peer-rank.pending {
+    color: #666;
+}
+
+.peer-rank.live {
+    color: #ff9800;
+    font-style: italic;
+}
+
+.peer-arrived-check {
+    color: #4caf50;
+    font-size: 0.75rem;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
 /* Connection Indicator */
 .connection-indicator {
     font-size: 0.75rem;

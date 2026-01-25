@@ -262,12 +262,27 @@ pub struct MapObject {
     pub properties: ObjectProperties,
 }
 
+/// Live ranking calculation method.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LiveRankingConfig {
+    /// Y-axis position based (lower Y = higher rank, default)
+    #[default]
+    YPosition,
+    /// Distance to a specific object (closer = higher rank)
+    Distance {
+        target_id: String,
+    },
+}
+
 /// Map metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MapMeta {
     pub name: String,
     #[serde(default)]
     pub gamerule: Vec<String>,
+    #[serde(default)]
+    pub live_ranking: LiveRankingConfig,
 }
 
 /// Complete roulette map configuration (V2).
