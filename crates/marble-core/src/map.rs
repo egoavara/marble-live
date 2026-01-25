@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use rapier2d::prelude::*;
+use rapier2d::prelude::{ColliderBuilder, ColliderHandle, RigidBodyHandle, Vector};
 use serde::{Deserialize, Serialize};
 
 use crate::dsl::{GameContext, NumberOrExpr, Vec2OrExpr};
@@ -132,6 +132,110 @@ pub struct TriggerProperties {
     pub action: String,
 }
 
+/// Roll direction for continuous rotation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RollDirection {
+    #[default]
+    Clockwise,
+    Counterclockwise,
+}
+
+/// Roll properties for continuous rotation animation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RollProperties {
+    #[serde(default)]
+    pub direction: RollDirection,
+    /// Rotation speed in degrees per second.
+    #[serde(default = "default_roll_speed")]
+    pub speed: f32,
+}
+
+fn default_roll_speed() -> f32 {
+    45.0
+}
+
+/// Easing type for keyframe animations.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EasingType {
+    #[default]
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+
+impl EasingType {
+    /// Applies the easing function to a normalized time value (0.0 to 1.0).
+    pub fn apply(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match self {
+            Self::Linear => t,
+            Self::EaseIn => t * t,
+            Self::EaseOut => t * (2.0 - t),
+            Self::EaseInOut => {
+                if t < 0.5 {
+                    2.0 * t * t
+                } else {
+                    -1.0 + (4.0 - 2.0 * t) * t
+                }
+            }
+        }
+    }
+}
+
+/// A single keyframe in an animation sequence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Keyframe {
+    /// Marks the start of a loop block.
+    LoopStart {
+        /// Number of times to loop. None means infinite.
+        #[serde(default)]
+        count: Option<u32>,
+    },
+    /// Marks the end of a loop block.
+    LoopEnd,
+    /// Delays execution for a duration.
+    Delay {
+        /// Duration in seconds.
+        duration: f32,
+    },
+    /// Applies a transformation to target objects.
+    Apply {
+        /// IDs of objects to animate.
+        target_ids: Vec<String>,
+        /// Translation offset from the initial position.
+        #[serde(default)]
+        translation: Option<[f32; 2]>,
+        /// Rotation offset from the initial rotation (degrees).
+        #[serde(default)]
+        rotation: Option<f32>,
+        /// Duration of the animation in seconds.
+        duration: f32,
+        /// Easing function to use.
+        #[serde(default)]
+        easing: EasingType,
+    },
+}
+
+/// A sequence of keyframes forming an animation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyframeSequence {
+    /// Name of the sequence.
+    pub name: String,
+    /// List of keyframes.
+    pub keyframes: Vec<Keyframe>,
+    /// Whether to automatically start this animation.
+    #[serde(default = "default_true")]
+    pub autoplay: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 /// Combined object properties.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ObjectProperties {
@@ -143,6 +247,8 @@ pub struct ObjectProperties {
     pub blackhole: Option<BlackholeProperties>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger: Option<TriggerProperties>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roll: Option<RollProperties>,
 }
 
 /// A map object with role, shape, and properties.
@@ -169,9 +275,9 @@ pub struct MapMeta {
 pub struct RouletteConfig {
     pub meta: MapMeta,
     pub objects: Vec<MapObject>,
-    /// Keyframes for animations (parsed only, not implemented yet).
+    /// Keyframe animation sequences.
     #[serde(default)]
-    pub keyframes: Vec<serde_json::Value>,
+    pub keyframes: Vec<KeyframeSequence>,
 }
 
 /// Data returned after applying map to physics world.
@@ -185,6 +291,10 @@ pub struct MapWorldData {
     pub object_handles: HashMap<String, ColliderHandle>,
     /// Objects with blackhole properties for force application.
     pub blackholes: Vec<BlackholeData>,
+    /// Kinematic body handles for animated objects (object_id -> body_handle).
+    pub kinematic_bodies: HashMap<String, RigidBodyHandle>,
+    /// Initial positions and rotations of kinematic bodies for keyframe animations.
+    pub kinematic_initial_transforms: HashMap<String, ([f32; 2], f32)>,
 }
 
 /// Spawner data for marble spawning.
@@ -213,161 +323,73 @@ impl RouletteConfig {
     }
 
     /// Creates a default classic roulette map (V2 format).
+    /// Loaded from maps/default.json at compile time.
     pub fn default_classic() -> Self {
-        Self {
-            meta: MapMeta {
-                name: "Classic".to_string(),
-                gamerule: vec!["last_n".to_string()],
-            },
-            objects: vec![
-                // Spawner
-                MapObject {
-                    id: None,
-                    role: ObjectRole::Spawner,
-                    shape: Shape::Rect {
-                        center: Vec2OrExpr::Static([400.0, 100.0]),
-                        size: Vec2OrExpr::Static([600.0, 100.0]),
-                        rotation: NumberOrExpr::Number(0.0),
-                    },
-                    properties: ObjectProperties {
-                        spawn: Some(SpawnProperties::default()),
-                        ..Default::default()
-                    },
-                },
-                // Boundary walls
-                MapObject {
-                    id: None,
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Line {
-                        start: Vec2OrExpr::Static([0.0, 0.0]),
-                        end: Vec2OrExpr::Static([800.0, 0.0]),
-                    },
-                    properties: ObjectProperties::default(),
-                },
-                MapObject {
-                    id: None,
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Line {
-                        start: Vec2OrExpr::Static([800.0, 0.0]),
-                        end: Vec2OrExpr::Static([800.0, 600.0]),
-                    },
-                    properties: ObjectProperties::default(),
-                },
-                MapObject {
-                    id: None,
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Line {
-                        start: Vec2OrExpr::Static([800.0, 600.0]),
-                        end: Vec2OrExpr::Static([0.0, 600.0]),
-                    },
-                    properties: ObjectProperties::default(),
-                },
-                MapObject {
-                    id: None,
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Line {
-                        start: Vec2OrExpr::Static([0.0, 600.0]),
-                        end: Vec2OrExpr::Static([0.0, 0.0]),
-                    },
-                    properties: ObjectProperties::default(),
-                },
-                // Center obstacle
-                MapObject {
-                    id: None,
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Circle {
-                        center: Vec2OrExpr::Static([400.0, 300.0]),
-                        radius: NumberOrExpr::Number(30.0),
-                    },
-                    properties: ObjectProperties {
-                        bumper: Some(BumperProperties {
-                            force: NumberOrExpr::Number(1.0),
-                        }),
-                        ..Default::default()
-                    },
-                },
-                // Corner obstacles
-                MapObject {
-                    id: Some("box_lt".to_string()),
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Rect {
-                        center: Vec2OrExpr::Static([200.0, 200.0]),
-                        size: Vec2OrExpr::Static([60.0, 10.0]),
-                        rotation: NumberOrExpr::Number(30.0),
-                    },
-                    properties: ObjectProperties::default(),
-                },
-                MapObject {
-                    id: Some("box_rt".to_string()),
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Rect {
-                        center: Vec2OrExpr::Static([600.0, 200.0]),
-                        size: Vec2OrExpr::Static([60.0, 10.0]),
-                        rotation: NumberOrExpr::Number(-30.0),
-                    },
-                    properties: ObjectProperties::default(),
-                },
-                MapObject {
-                    id: Some("box_lb".to_string()),
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Rect {
-                        center: Vec2OrExpr::Static([200.0, 400.0]),
-                        size: Vec2OrExpr::Static([60.0, 10.0]),
-                        rotation: NumberOrExpr::Number(-30.0),
-                    },
-                    properties: ObjectProperties::default(),
-                },
-                MapObject {
-                    id: Some("box_rb".to_string()),
-                    role: ObjectRole::Obstacle,
-                    shape: Shape::Rect {
-                        center: Vec2OrExpr::Static([600.0, 400.0]),
-                        size: Vec2OrExpr::Static([60.0, 10.0]),
-                        rotation: NumberOrExpr::Number(30.0),
-                    },
-                    properties: ObjectProperties::default(),
-                },
-                // Goal (trigger with blackhole)
-                MapObject {
-                    id: Some("goal".to_string()),
-                    role: ObjectRole::Trigger,
-                    shape: Shape::Circle {
-                        center: Vec2OrExpr::Static([400.0, 550.0]),
-                        radius: NumberOrExpr::Number(60.0),
-                    },
-                    properties: ObjectProperties {
-                        blackhole: Some(BlackholeProperties {
-                            force: NumberOrExpr::Number(0.2),
-                        }),
-                        trigger: Some(TriggerProperties {
-                            action: "gamerule".to_string(),
-                        }),
-                        ..Default::default()
-                    },
-                },
-            ],
-            keyframes: vec![],
+        const DEFAULT_MAP_JSON: &str = include_str!("../maps/default.json");
+        Self::from_json(DEFAULT_MAP_JSON).expect("Failed to parse default map JSON")
+    }
+
+    /// Collects all object IDs that are targeted by keyframe animations.
+    fn collect_keyframe_target_ids(&self) -> std::collections::HashSet<String> {
+        let mut targets = std::collections::HashSet::new();
+        for seq in &self.keyframes {
+            for kf in &seq.keyframes {
+                if let Keyframe::Apply { target_ids, .. } = kf {
+                    targets.extend(target_ids.iter().cloned());
+                }
+            }
         }
+        targets
+    }
+
+    /// Checks if an object should be created as a kinematic body.
+    fn is_animatable(&self, obj: &MapObject, keyframe_targets: &std::collections::HashSet<String>) -> bool {
+        // Has roll property
+        if obj.properties.roll.is_some() {
+            return true;
+        }
+        // Is a keyframe target
+        if let Some(id) = &obj.id {
+            if keyframe_targets.contains(id) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Applies the map configuration to a physics world.
     /// Returns `MapWorldData` containing handles and spawner data.
     pub fn apply_to_world(&self, world: &mut PhysicsWorld) -> MapWorldData {
         let ctx = GameContext::new(0.0, 0);
+        let keyframe_targets = self.collect_keyframe_target_ids();
 
         let mut trigger_handles = Vec::new();
         let mut spawners = Vec::new();
         let mut object_handles = HashMap::new();
         let mut blackholes = Vec::new();
+        let mut kinematic_bodies = HashMap::new();
+        let mut kinematic_initial_transforms = HashMap::new();
 
         for obj in &self.objects {
             let shape = obj.shape.evaluate(&ctx);
+            let is_animated = self.is_animatable(obj, &keyframe_targets);
 
             match obj.role {
                 ObjectRole::Obstacle => {
-                    let handle = self.create_obstacle_collider(world, &shape, &obj.properties, &ctx);
-                    if let Some(id) = &obj.id {
-                        object_handles.insert(id.clone(), handle);
+                    if is_animated {
+                        // Create as kinematic body
+                        if let Some(id) = &obj.id {
+                            let (body_handle, collider_handle, initial_pos, initial_rot) =
+                                self.create_kinematic_obstacle(world, &shape, &obj.properties, &ctx);
+                            kinematic_bodies.insert(id.clone(), body_handle);
+                            kinematic_initial_transforms.insert(id.clone(), (initial_pos, initial_rot));
+                            object_handles.insert(id.clone(), collider_handle);
+                        }
+                    } else {
+                        let handle = self.create_obstacle_collider(world, &shape, &obj.properties, &ctx);
+                        if let Some(id) = &obj.id {
+                            object_handles.insert(id.clone(), handle);
+                        }
                     }
                 }
                 ObjectRole::Trigger => {
@@ -408,6 +430,8 @@ impl RouletteConfig {
             spawners,
             object_handles,
             blackholes,
+            kinematic_bodies,
+            kinematic_initial_transforms,
         }
     }
 
@@ -468,6 +492,68 @@ impl RouletteConfig {
         };
 
         world.add_static_collider(collider)
+    }
+
+    /// Creates a kinematic obstacle (for animated objects).
+    /// Returns (body_handle, collider_handle, initial_position, initial_rotation_radians).
+    fn create_kinematic_obstacle(
+        &self,
+        world: &mut PhysicsWorld,
+        shape: &EvaluatedShape,
+        props: &ObjectProperties,
+        ctx: &GameContext,
+    ) -> (RigidBodyHandle, ColliderHandle, [f32; 2], f32) {
+        let (position, rotation_rad, collider) = match shape {
+            EvaluatedShape::Line { start, end } => {
+                let mid = [
+                    f32::midpoint(start[0], end[0]),
+                    f32::midpoint(start[1], end[1]),
+                ];
+                let dx = end[0] - start[0];
+                let dy = end[1] - start[1];
+                let length = (dx * dx + dy * dy).sqrt();
+                let angle = dy.atan2(dx);
+
+                let collider = ColliderBuilder::cuboid(length / 2.0, 2.0)
+                    .friction(0.3)
+                    .restitution(0.5)
+                    .build();
+                (mid, angle, collider)
+            }
+            EvaluatedShape::Circle { center, radius } => {
+                let mut builder = ColliderBuilder::ball(*radius).friction(0.3);
+
+                if let Some(bumper) = &props.bumper {
+                    let force = bumper.force.evaluate(ctx);
+                    builder = builder.restitution(0.6 + force * 0.4);
+                } else {
+                    builder = builder.restitution(0.6);
+                }
+
+                (*center, 0.0, builder.build())
+            }
+            EvaluatedShape::Rect {
+                center,
+                size,
+                rotation,
+            } => {
+                let rotation_rad = rotation.to_radians();
+                let collider = ColliderBuilder::cuboid(size[0] / 2.0, size[1] / 2.0)
+                    .friction(0.3)
+                    .restitution(0.6)
+                    .build();
+                (*center, rotation_rad, collider)
+            }
+        };
+
+        // Create kinematic body at the position
+        let body_handle = world.add_kinematic_body(
+            Vector::new(position[0], position[1]),
+            rotation_rad,
+        );
+        let collider_handle = world.add_kinematic_collider(collider, body_handle);
+
+        (body_handle, collider_handle, position, rotation_rad)
     }
 
     fn create_trigger_collider(&self, world: &mut PhysicsWorld, shape: &EvaluatedShape) -> ColliderHandle {
@@ -557,6 +643,71 @@ impl RouletteConfig {
             })
             .collect()
     }
+
+    /// Finds kinematic body handles in an existing physics world.
+    /// Used after restoring from a snapshot.
+    /// Returns (kinematic_bodies, kinematic_initial_transforms).
+    pub fn find_kinematic_handles(
+        &self,
+        world: &PhysicsWorld,
+    ) -> (HashMap<String, RigidBodyHandle>, HashMap<String, ([f32; 2], f32)>) {
+        let ctx = GameContext::new(0.0, 0);
+        let keyframe_targets = self.collect_keyframe_target_ids();
+
+        let mut kinematic_bodies = HashMap::new();
+        let mut kinematic_initial_transforms = HashMap::new();
+
+        for obj in &self.objects {
+            if obj.role != ObjectRole::Obstacle {
+                continue;
+            }
+
+            if !self.is_animatable(obj, &keyframe_targets) {
+                continue;
+            }
+
+            let id = match &obj.id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let shape = obj.shape.evaluate(&ctx);
+            let (target_x, target_y, initial_rot) = match shape {
+                EvaluatedShape::Circle { center, .. } => (center[0], center[1], 0.0),
+                EvaluatedShape::Rect { center, rotation, .. } => {
+                    (center[0], center[1], rotation.to_radians())
+                }
+                EvaluatedShape::Line { start, end } => {
+                    let mid_x = f32::midpoint(start[0], end[0]);
+                    let mid_y = f32::midpoint(start[1], end[1]);
+                    let dx = end[0] - start[0];
+                    let dy = end[1] - start[1];
+                    let angle = dy.atan2(dx);
+                    (mid_x, mid_y, angle)
+                }
+            };
+
+            // Find kinematic body at this position
+            for (handle, body) in world.rigid_body_set.iter() {
+                if !body.is_kinematic() {
+                    continue;
+                }
+
+                let pos = body.translation();
+                let dx = pos.x - target_x;
+                let dy = pos.y - target_y;
+                let dist_sq = dx * dx + dy * dy;
+
+                if dist_sq < 1.0 {
+                    kinematic_bodies.insert(id.clone(), handle);
+                    kinematic_initial_transforms.insert(id.clone(), ([target_x, target_y], initial_rot));
+                    break;
+                }
+            }
+        }
+
+        (kinematic_bodies, kinematic_initial_transforms)
+    }
 }
 
 #[cfg(test)]
@@ -566,7 +717,8 @@ mod tests {
     #[test]
     fn test_default_classic_map() {
         let config = RouletteConfig::default_classic();
-        assert_eq!(config.meta.name, "Classic");
+        // Map name comes from maps/default.json
+        assert_eq!(config.meta.name, "Animated Example");
 
         // Count by role
         let spawners: Vec<_> = config
@@ -586,8 +738,12 @@ mod tests {
             .collect();
 
         assert_eq!(spawners.len(), 1);
-        assert_eq!(obstacles.len(), 9); // 4 walls + 5 obstacles
+        // 4 walls + center bumper + 2 rotating boxes + 2 moving walls = 9
+        assert_eq!(obstacles.len(), 9);
         assert_eq!(triggers.len(), 1);
+
+        // Verify keyframes are loaded
+        assert!(!config.keyframes.is_empty());
     }
 
     #[test]

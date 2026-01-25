@@ -207,6 +207,53 @@ impl PhysicsWorld {
     pub fn reset(&mut self) {
         *self = Self::with_gravity(self.gravity);
     }
+
+    /// Adds a kinematic rigid body to the world and returns its handle.
+    /// Kinematic bodies can be animated but don't respond to forces.
+    pub fn add_kinematic_body(&mut self, position: Vector, rotation: f32) -> RigidBodyHandle {
+        let body = RigidBodyBuilder::kinematic_position_based()
+            .translation(position)
+            .rotation(rotation)
+            .build();
+        self.rigid_body_set.insert(body)
+    }
+
+    /// Adds a collider attached to a kinematic body.
+    pub fn add_kinematic_collider(
+        &mut self,
+        collider: Collider,
+        parent: RigidBodyHandle,
+    ) -> ColliderHandle {
+        self.collider_set
+            .insert_with_parent(collider, parent, &mut self.rigid_body_set)
+    }
+
+    /// Sets the next target position and rotation for a kinematic body.
+    /// Returns true if the body was found and updated.
+    pub fn set_kinematic_target(
+        &mut self,
+        handle: RigidBodyHandle,
+        translation: Vector,
+        rotation: f32,
+    ) -> bool {
+        if let Some(body) = self.rigid_body_set.get_mut(handle) {
+            body.set_next_kinematic_translation(translation);
+            body.set_next_kinematic_rotation(Rotation::from_angle(rotation));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Gets the current position and rotation of a rigid body.
+    /// Returns (translation, rotation_radians).
+    pub fn get_body_position(&self, handle: RigidBodyHandle) -> Option<([f32; 2], f32)> {
+        self.rigid_body_set.get(handle).map(|body| {
+            let pos = body.translation();
+            let rot = body.rotation().angle();
+            ([pos.x, pos.y], rot)
+        })
+    }
 }
 
 /// Hashes a f32 value by converting to bits.

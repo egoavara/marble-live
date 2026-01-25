@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "name": "Animated Example",
+    "gamerule": ["top_n", "last_n"]
+  },
+  "objects": [
+    {
+      "role": "spawner",
+      "shape": { "type": "rect", "center": [400.0, 100.0], "size": [600.0, 100.0], "rotation": 0.0 },
+      "properties": { "spawn": { "mode": "random", "initial_force": "random" } }
+    },
+    { "role": "obstacle", "shape": { "type": "line", "start": [0.0, 0.0], "end": [800.0, 0.0] } },
+    { "role": "obstacle", "shape": { "type": "line", "start": [800.0, 0.0], "end": [800.0, 600.0] } },
+    { "role": "obstacle", "shape": { "type": "line", "start": [800.0, 600.0], "end": [0.0, 600.0] } },
+    { "role": "obstacle", "shape": { "type": "line", "start": [0.0, 600.0], "end": [0.0, 0.0] } },
+    {
+      "role": "obstacle",
+      "shape": { "type": "circle", "center": [400.0, 300.0], "radius": 30.0 },
+      "properties": { "bumper": { "force": 1.0 } }
+    },
+    {
+      "id": "rotating_box",
+      "role": "obstacle",
+      "shape": { "type": "rect", "center": [200.0, 200.0], "size": [80.0, 10.0], "rotation": 0.0 },
+      "properties": { "roll": { "direction": "clockwise", "speed": 45.0 } }
+    },
+    {
+      "id": "rotating_box_ccw",
+      "role": "obstacle",
+      "shape": { "type": "rect", "center": [600.0, 200.0], "size": [80.0, 10.0], "rotation": 0.0 },
+      "properties": { "roll": { "direction": "counterclockwise", "speed": 60.0 } }
+    },
+    {
+      "id": "moving_wall",
+      "role": "obstacle",
+      "shape": { "type": "line", "start": [150.0, 400.0], "end": [250.0, 400.0] }
+    },
+    {
+      "id": "moving_wall_2",
+      "role": "obstacle",
+      "shape": { "type": "line", "start": [550.0, 400.0], "end": [650.0, 400.0] }
+    },
+    {
+      "id": "goal",
+      "role": "trigger",
+      "shape": { "type": "circle", "center": [400.0, 550.0], "radius": 40.0 },
+      "properties": {
+        "blackhole": { "force": "0.2 + 0.1 * game.time" },
+        "trigger": { "action": "gamerule" }
+      }
+    }
+  ],
+  "keyframes": [
+    {
+      "name": "wall_oscillate",
+      "autoplay": true,
+      "keyframes": [
+        { "type": "loop_start" },
+        { "type": "apply", "target_ids": ["moving_wall"], "translation": [100.0, 0.0], "duration": 2.0, "easing": "ease_in_out" },
+        { "type": "delay", "duration": 0.5 },
+        { "type": "apply", "target_ids": ["moving_wall"], "translation": [0.0, 0.0], "duration": 2.0, "easing": "ease_in_out" },
+        { "type": "delay", "duration": 0.5 },
+        { "type": "loop_end" }
+      ]
+    },
+    {
+      "name": "wall_oscillate_2",
+      "autoplay": true,
+      "keyframes": [
+        { "type": "loop_start" },
+        { "type": "apply", "target_ids": ["moving_wall_2"], "translation": [-100.0, 0.0], "duration": 2.0, "easing": "ease_in_out" },
+        { "type": "delay", "duration": 0.5 },
+        { "type": "apply", "target_ids": ["moving_wall_2"], "translation": [0.0, 0.0], "duration": 2.0, "easing": "ease_in_out" },
+        { "type": "delay", "duration": 0.5 },
+        { "type": "loop_end" }
+      ]
+    }
+  ]
+}

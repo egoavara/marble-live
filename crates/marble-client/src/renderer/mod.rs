@@ -707,7 +707,56 @@ impl WgpuRenderer {
             let ctx = GameContext::new(time, game_state.physics_world.current_frame());
 
             for obj in &config.objects {
-                let shape = obj.shape.evaluate(&ctx);
+                // Check if this object is a kinematic body (animated)
+                let kinematic_transform = obj.id.as_ref().and_then(|id| {
+                    game_state.kinematic_bodies.get(id).and_then(|handle| {
+                        game_state.physics_world.get_body_position(*handle)
+                    })
+                });
+
+                // Get the shape, applying kinematic transform if available
+                let shape = if let Some((pos, rot)) = kinematic_transform {
+                    // Use the kinematic body's current position
+                    let base_shape = obj.shape.evaluate(&ctx);
+                    match base_shape {
+                        EvaluatedShape::Line { start, end } => {
+                            // For lines, we need to rotate and translate relative to the body center
+                            let (dx1, dy1, dx2, dy2) = if let Some(&(init_pos, _)) = game_state.kinematic_initial_transforms.get(obj.id.as_ref().unwrap()) {
+                                let mid_x = (start[0] + end[0]) / 2.0;
+                                let mid_y = (start[1] + end[1]) / 2.0;
+                                (start[0] - mid_x, start[1] - mid_y, end[0] - mid_x, end[1] - mid_y)
+                            } else {
+                                let mid_x = (start[0] + end[0]) / 2.0;
+                                let mid_y = (start[1] + end[1]) / 2.0;
+                                (start[0] - mid_x, start[1] - mid_y, end[0] - mid_x, end[1] - mid_y)
+                            };
+                            let cos_r = rot.cos();
+                            let sin_r = rot.sin();
+                            EvaluatedShape::Line {
+                                start: [
+                                    pos[0] + dx1 * cos_r - dy1 * sin_r,
+                                    pos[1] + dx1 * sin_r + dy1 * cos_r,
+                                ],
+                                end: [
+                                    pos[0] + dx2 * cos_r - dy2 * sin_r,
+                                    pos[1] + dx2 * sin_r + dy2 * cos_r,
+                                ],
+                            }
+                        }
+                        EvaluatedShape::Circle { radius, .. } => {
+                            EvaluatedShape::Circle { center: pos, radius }
+                        }
+                        EvaluatedShape::Rect { size, .. } => {
+                            EvaluatedShape::Rect {
+                                center: pos,
+                                size,
+                                rotation: rot.to_degrees(),
+                            }
+                        }
+                    }
+                } else {
+                    obj.shape.evaluate(&ctx)
+                };
 
                 match obj.role {
                     ObjectRole::Trigger => {

@@ -1,12 +1,15 @@
 //! Game state machine and round management.
 
-use rapier2d::prelude::{ColliderHandle, Vector};
+use std::collections::HashMap;
+
+use rapier2d::prelude::{ColliderHandle, RigidBodyHandle, Vector};
 use serde::{Deserialize, Serialize};
 
 use crate::dsl::GameContext;
-use crate::map::{BlackholeData, EvaluatedShape, RouletteConfig, SpawnerData};
+use crate::keyframe::KeyframeExecutor;
+use crate::map::{BlackholeData, EvaluatedShape, RollDirection, RouletteConfig, SpawnerData};
 use crate::marble::{Color, MarbleManager, PlayerId};
-use crate::physics::PhysicsWorld;
+use crate::physics::{PhysicsWorld, PHYSICS_DT};
 
 /// Countdown duration in frames (3 seconds at 60Hz).
 pub const COUNTDOWN_FRAMES: u32 = 180;
@@ -74,6 +77,15 @@ pub struct GameState {
     /// Cached game context for CEL expression evaluation.
     #[serde(skip)]
     game_context: GameContext,
+    /// Kinematic body handles for animated objects.
+    #[serde(skip)]
+    pub kinematic_bodies: HashMap<String, RigidBodyHandle>,
+    /// Initial transforms for kinematic bodies (for keyframe animations).
+    #[serde(skip)]
+    pub kinematic_initial_transforms: HashMap<String, ([f32; 2], f32)>,
+    /// Active keyframe animation executors.
+    #[serde(skip)]
+    keyframe_executors: Vec<KeyframeExecutor>,
 }
 
 impl GameState {
@@ -91,6 +103,9 @@ impl GameState {
             spawners: Vec::new(),
             blackholes: Vec::new(),
             game_context: GameContext::with_cache(),
+            kinematic_bodies: HashMap::new(),
+            kinematic_initial_transforms: HashMap::new(),
+            keyframe_executors: Vec::new(),
         }
     }
 
@@ -104,6 +119,9 @@ impl GameState {
         self.trigger_handles = map_data.trigger_handles;
         self.spawners = map_data.spawners;
         self.blackholes = map_data.blackholes;
+        self.kinematic_bodies = map_data.kinematic_bodies;
+        self.kinematic_initial_transforms = map_data.kinematic_initial_transforms;
+        self.keyframe_executors.clear();
         self.map_config = Some(config);
     }
 
@@ -196,6 +214,16 @@ impl GameState {
             );
         }
 
+        // Initialize keyframe executors for autoplay sequences
+        self.keyframe_executors.clear();
+        if let Some(config) = &self.map_config {
+            for seq in &config.keyframes {
+                if seq.autoplay {
+                    self.keyframe_executors.push(KeyframeExecutor::new(seq.name.clone()));
+                }
+            }
+        }
+
         self.phase = GamePhase::Running;
     }
 
@@ -219,6 +247,12 @@ impl GameState {
                 // Update game context for CEL expressions
                 let time = self.physics_world.current_frame() as f32 / 60.0;
                 self.game_context.update(time, self.physics_world.current_frame());
+
+                // Apply roll rotations to animated objects
+                self.apply_roll_rotations();
+
+                // Update keyframe animations
+                self.update_keyframes();
 
                 // Apply blackhole forces before physics step
                 self.apply_blackhole_forces();
@@ -396,6 +430,90 @@ impl GameState {
                 }
             }
         }
+    }
+
+    /// Applies roll rotation to objects with the roll property.
+    fn apply_roll_rotations(&mut self) {
+        let config = match &self.map_config {
+            Some(c) => c,
+            None => return,
+        };
+
+        for obj in &config.objects {
+            let roll = match &obj.properties.roll {
+                Some(r) => r,
+                None => continue,
+            };
+
+            let obj_id = match &obj.id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let body_handle = match self.kinematic_bodies.get(obj_id) {
+                Some(h) => *h,
+                None => continue,
+            };
+
+            // Calculate rotation speed in radians per frame
+            let speed_deg_per_sec = roll.speed;
+            let speed_rad_per_frame = speed_deg_per_sec.to_radians() * PHYSICS_DT;
+
+            let direction_mult = match roll.direction {
+                RollDirection::Clockwise => 1.0,
+                RollDirection::Counterclockwise => -1.0,
+            };
+
+            // Get current position and rotation
+            if let Some((pos, current_rot)) = self.physics_world.get_body_position(body_handle) {
+                let new_rot = current_rot + speed_rad_per_frame * direction_mult;
+                self.physics_world.set_kinematic_target(
+                    body_handle,
+                    Vector::new(pos[0], pos[1]),
+                    new_rot,
+                );
+            }
+        }
+    }
+
+    /// Updates keyframe animations.
+    fn update_keyframes(&mut self) {
+        let config = match &self.map_config {
+            Some(c) => c,
+            None => return,
+        };
+
+        // Collect current positions of kinematic bodies
+        let mut current_positions = HashMap::new();
+        for (id, handle) in &self.kinematic_bodies {
+            if let Some(pos_rot) = self.physics_world.get_body_position(*handle) {
+                current_positions.insert(id.clone(), pos_rot);
+            }
+        }
+
+        // Update each executor
+        for executor in &mut self.keyframe_executors {
+            let updates = executor.update(
+                PHYSICS_DT,
+                &config.keyframes,
+                &current_positions,
+                &self.kinematic_initial_transforms,
+            );
+
+            // Apply updates to kinematic bodies
+            for (id, pos, rot) in updates {
+                if let Some(&handle) = self.kinematic_bodies.get(&id) {
+                    self.physics_world.set_kinematic_target(
+                        handle,
+                        Vector::new(pos[0], pos[1]),
+                        rot,
+                    );
+                }
+            }
+        }
+
+        // Remove finished executors (but keep infinite loops running)
+        self.keyframe_executors.retain(|e| !e.is_finished());
     }
 
     /// Returns the current game context for CEL expression evaluation.

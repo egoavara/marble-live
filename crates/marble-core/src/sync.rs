@@ -75,13 +75,22 @@ impl GameState {
         // Reinitialize RNG after deserialization
         self.marble_manager.reinit_rng();
 
-        // Reconstruct trigger_handles, spawners, and blackholes from map_config if available
+        // Reconstruct trigger_handles, spawners, blackholes, and kinematic_bodies from map_config
         // The physics_world already contains the colliders from the snapshot,
-        // but we need to find their handles for collision detection
+        // but we need to find their handles for collision detection and animation
         if let Some(ref config) = self.map_config {
             self.trigger_handles = config.find_trigger_handles(&self.physics_world);
             self.spawners = config.get_spawners();
             self.blackholes = config.get_blackholes();
+
+            // Restore kinematic body handles
+            let (kinematic_bodies, kinematic_initial_transforms) =
+                config.find_kinematic_handles(&self.physics_world);
+            self.kinematic_bodies = kinematic_bodies;
+            self.kinematic_initial_transforms = kinematic_initial_transforms;
+
+            // Note: keyframe_executors are not restored from snapshot
+            // They will be reinitialized if needed based on the current phase
         }
     }
 }
