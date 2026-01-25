@@ -210,12 +210,38 @@ impl PhysicsWorld {
 
     /// Adds a kinematic rigid body to the world and returns its handle.
     /// Kinematic bodies can be animated but don't respond to forces.
-    pub fn add_kinematic_body(&mut self, position: Vector, rotation: f32) -> RigidBodyHandle {
+    /// If `id` is provided, it's stored as user_data for later lookup.
+    pub fn add_kinematic_body(
+        &mut self,
+        position: Vector,
+        rotation: f32,
+        id: Option<&str>,
+    ) -> RigidBodyHandle {
+        let user_data = id.map(|s| Self::string_to_user_data(s)).unwrap_or(0);
         let body = RigidBodyBuilder::kinematic_position_based()
             .translation(position)
             .rotation(rotation)
+            .user_data(user_data)
             .build();
         self.rigid_body_set.insert(body)
+    }
+
+    /// Converts a string ID to u128 user_data using hash.
+    fn string_to_user_data(id: &str) -> u128 {
+        let mut hasher = DefaultHasher::new();
+        id.hash(&mut hasher);
+        hasher.finish() as u128
+    }
+
+    /// Finds a kinematic body by its string ID (stored in user_data).
+    pub fn find_kinematic_by_id(&self, id: &str) -> Option<RigidBodyHandle> {
+        let target_user_data = Self::string_to_user_data(id);
+        for (handle, body) in self.rigid_body_set.iter() {
+            if body.is_kinematic() && body.user_data == target_user_data {
+                return Some(handle);
+            }
+        }
+        None
     }
 
     /// Adds a collider attached to a kinematic body.
@@ -253,6 +279,22 @@ impl PhysicsWorld {
             let rot = body.rotation().angle();
             ([pos.x, pos.y], rot)
         })
+    }
+
+    /// Enables or disables a collider.
+    /// Disabled colliders don't participate in collision detection.
+    pub fn set_collider_enabled(&mut self, handle: ColliderHandle, enabled: bool) {
+        if let Some(collider) = self.collider_set.get_mut(handle) {
+            collider.set_enabled(enabled);
+        }
+    }
+
+    /// Enables or disables a rigid body.
+    /// Disabled bodies don't participate in simulation.
+    pub fn set_rigid_body_enabled(&mut self, handle: RigidBodyHandle, enabled: bool) {
+        if let Some(body) = self.rigid_body_set.get_mut(handle) {
+            body.set_enabled(enabled);
+        }
     }
 }
 

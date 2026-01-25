@@ -285,6 +285,9 @@ pub struct RouletteConfig {
 pub struct MapWorldData {
     /// Trigger (hole) collider handles for elimination detection.
     pub trigger_handles: Vec<ColliderHandle>,
+    /// Trigger actions corresponding to each trigger handle.
+    /// "gamerule" triggers will completely remove marbles from memory.
+    pub trigger_actions: Vec<String>,
     /// Spawner data for marble spawning.
     pub spawners: Vec<SpawnerData>,
     /// Object ID to collider handle mapping.
@@ -364,6 +367,7 @@ impl RouletteConfig {
         let keyframe_targets = self.collect_keyframe_target_ids();
 
         let mut trigger_handles = Vec::new();
+        let mut trigger_actions = Vec::new();
         let mut spawners = Vec::new();
         let mut object_handles = HashMap::new();
         let mut blackholes = Vec::new();
@@ -380,7 +384,7 @@ impl RouletteConfig {
                         // Create as kinematic body
                         if let Some(id) = &obj.id {
                             let (body_handle, collider_handle, initial_pos, initial_rot) =
-                                self.create_kinematic_obstacle(world, &shape, &obj.properties, &ctx);
+                                self.create_kinematic_obstacle(world, &shape, &obj.properties, &ctx, Some(id));
                             kinematic_bodies.insert(id.clone(), body_handle);
                             kinematic_initial_transforms.insert(id.clone(), (initial_pos, initial_rot));
                             object_handles.insert(id.clone(), collider_handle);
@@ -395,6 +399,12 @@ impl RouletteConfig {
                 ObjectRole::Trigger => {
                     let handle = self.create_trigger_collider(world, &shape);
                     trigger_handles.push(handle);
+                    // Get trigger action (default to "gamerule" if not specified)
+                    let action = obj.properties.trigger
+                        .as_ref()
+                        .map(|t| t.action.clone())
+                        .unwrap_or_else(|| "gamerule".to_string());
+                    trigger_actions.push(action);
                     if let Some(id) = &obj.id {
                         object_handles.insert(id.clone(), handle);
                     }
@@ -427,6 +437,7 @@ impl RouletteConfig {
 
         MapWorldData {
             trigger_handles,
+            trigger_actions,
             spawners,
             object_handles,
             blackholes,
@@ -502,6 +513,7 @@ impl RouletteConfig {
         shape: &EvaluatedShape,
         props: &ObjectProperties,
         ctx: &GameContext,
+        id: Option<&String>,
     ) -> (RigidBodyHandle, ColliderHandle, [f32; 2], f32) {
         let (position, rotation_rad, collider) = match shape {
             EvaluatedShape::Line { start, end } => {
@@ -546,10 +558,11 @@ impl RouletteConfig {
             }
         };
 
-        // Create kinematic body at the position
+        // Create kinematic body at the position (with id stored in user_data)
         let body_handle = world.add_kinematic_body(
             Vector::new(position[0], position[1]),
             rotation_rad,
+            id.map(|s| s.as_str()),
         );
         let collider_handle = world.add_kinematic_collider(collider, body_handle);
 
@@ -671,8 +684,9 @@ impl RouletteConfig {
                 None => continue,
             };
 
+            // Calculate initial transform for animation calculations
             let shape = obj.shape.evaluate(&ctx);
-            let (target_x, target_y, initial_rot) = match shape {
+            let (initial_x, initial_y, initial_rot) = match shape {
                 EvaluatedShape::Circle { center, .. } => (center[0], center[1], 0.0),
                 EvaluatedShape::Rect { center, rotation, .. } => {
                     (center[0], center[1], rotation.to_radians())
@@ -687,22 +701,10 @@ impl RouletteConfig {
                 }
             };
 
-            // Find kinematic body at this position
-            for (handle, body) in world.rigid_body_set.iter() {
-                if !body.is_kinematic() {
-                    continue;
-                }
-
-                let pos = body.translation();
-                let dx = pos.x - target_x;
-                let dy = pos.y - target_y;
-                let dist_sq = dx * dx + dy * dy;
-
-                if dist_sq < 1.0 {
-                    kinematic_bodies.insert(id.clone(), handle);
-                    kinematic_initial_transforms.insert(id.clone(), ([target_x, target_y], initial_rot));
-                    break;
-                }
+            // Find kinematic body by ID stored in user_data
+            if let Some(handle) = world.find_kinematic_by_id(id) {
+                kinematic_bodies.insert(id.clone(), handle);
+                kinematic_initial_transforms.insert(id.clone(), ([initial_x, initial_y], initial_rot));
             }
         }
 

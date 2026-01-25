@@ -45,6 +45,10 @@ pub struct GameState {
     /// Trigger (hole) handles for arrival detection.
     #[serde(skip)]
     pub trigger_handles: Vec<ColliderHandle>,
+    /// Trigger actions corresponding to each trigger handle.
+    /// "gamerule" triggers will completely remove marbles from memory.
+    #[serde(skip)]
+    pub trigger_actions: Vec<String>,
     /// Spawner data from the map.
     #[serde(skip)]
     pub spawners: Vec<SpawnerData>,
@@ -76,6 +80,7 @@ impl GameState {
             marble_manager: MarbleManager::new(seed),
             map_config: None,
             trigger_handles: Vec::new(),
+            trigger_actions: Vec::new(),
             spawners: Vec::new(),
             blackholes: Vec::new(),
             game_context: GameContext::with_cache(),
@@ -93,6 +98,7 @@ impl GameState {
         // Apply map to world
         let map_data = config.apply_to_world(&mut self.physics_world);
         self.trigger_handles = map_data.trigger_handles;
+        self.trigger_actions = map_data.trigger_actions;
         self.spawners = map_data.spawners;
         self.blackholes = map_data.blackholes;
         self.kinematic_bodies = map_data.kinematic_bodies;
@@ -182,21 +188,50 @@ impl GameState {
     }
 
     /// Checks for marbles arriving at triggers.
+    /// Handles marbles based on trigger action:
+    /// - "gamerule": completely removes marble from memory
+    /// - other: disables physics but keeps in memory
     fn check_arrivals(&mut self) -> Vec<PlayerId> {
-        let arrived_marble_ids = self
+        let arrived = self
             .marble_manager
             .check_hole_collisions(&self.physics_world, &self.trigger_handles);
 
-        // Map marble IDs to player IDs
+        // Collect marbles to remove (for "gamerule" triggers)
+        let mut marbles_to_remove = Vec::new();
+        let mut marbles_to_disable = Vec::new();
+
+        // Map marble IDs to player IDs and determine action
         let mut newly_arrived = Vec::new();
-        for marble_id in arrived_marble_ids {
-            if let Some(marble) = self.marble_manager.get_marble(marble_id) {
+        for (marble_id, trigger_idx) in &arrived {
+            if let Some(marble) = self.marble_manager.get_marble(*marble_id) {
                 let player_id = marble.owner_id;
                 if !self.arrival_order.contains(&player_id) {
                     self.arrival_order.push(player_id);
                     newly_arrived.push(player_id);
                 }
+
+                // Check trigger action
+                let action = self.trigger_actions
+                    .get(*trigger_idx)
+                    .map(|s| s.as_str())
+                    .unwrap_or("gamerule");
+
+                if action == "gamerule" {
+                    marbles_to_remove.push(*marble_id);
+                } else {
+                    marbles_to_disable.push(*marble_id);
+                }
             }
+        }
+
+        // Remove marbles for "gamerule" triggers (completely from memory)
+        for marble_id in marbles_to_remove {
+            self.marble_manager.remove_marble(&mut self.physics_world, marble_id);
+        }
+
+        // Disable physics for other triggers (keep in memory)
+        for marble_id in marbles_to_disable {
+            self.marble_manager.disable_marble_physics(&mut self.physics_world, marble_id);
         }
 
         newly_arrived

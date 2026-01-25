@@ -79,6 +79,11 @@ impl P2pRoomHandle {
         self.inner.borrow().topology.clone()
     }
 
+    /// Get player secret (for RPC authentication)
+    pub fn player_secret(&self) -> Option<String> {
+        self.inner.borrow().config.player_secret.clone()
+    }
+
     // === Connection Control ===
 
     /// Connect to signaling server
@@ -335,7 +340,24 @@ impl P2pRoomHandle {
 
     /// Broadcast game start to all peers (host only)
     pub fn send_game_start(&self, seed: u64, initial_state: Vec<u8>, gamerule: String) {
-        self.send(Payload::GameStart(GameStart { seed, initial_state, gamerule }));
+        // Increment session version
+        let session_version = {
+            let mut inner = self.inner.borrow_mut();
+            inner.current_session_version += 1;
+            inner.current_session_version
+        };
+
+        self.send(Payload::GameStart(GameStart {
+            seed,
+            initial_state,
+            gamerule,
+            session_version,
+        }));
+    }
+
+    /// Get current session version
+    pub fn current_session_version(&self) -> u64 {
+        self.inner.borrow().current_session_version
     }
 
     /// Get last hash frame

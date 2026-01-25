@@ -55,6 +55,8 @@ pub struct P2pRoomState {
     pub last_sync_frame: u64,
     /// Last received host hash (frame, hash)
     pub last_host_hash: Option<(u64, u64)>,
+    /// Current session version (incremented on each game start)
+    pub current_session_version: u64,
 }
 
 impl P2pRoomState {
@@ -82,6 +84,7 @@ impl P2pRoomState {
             desync_count: 0,
             last_sync_frame: 0,
             last_host_hash: None,
+            current_session_version: 0,
         }
     }
 
@@ -146,6 +149,7 @@ impl P2pRoomState {
         self.desync_count = 0;
         self.last_sync_frame = 0;
         self.last_host_hash = None;
+        self.current_session_version = 0;
     }
 
     /// Set host status

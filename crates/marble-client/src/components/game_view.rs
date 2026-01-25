@@ -81,38 +81,75 @@ pub fn game_view(props: &GameViewProps) -> Html {
         })
     };
 
-    // Track if game start was already processed
-    let game_start_processed = use_mut_ref(|| false);
+    // Track last processed session version (instead of boolean flag)
+    let last_processed_session = use_mut_ref(|| 0u64);
+    // Track if host has started initial game
+    let host_started = use_mut_ref(|| false);
+    // Track previous peer count for detecting new peer joins
+    let prev_peer_count = use_mut_ref(|| 0usize);
 
     // Auto-start game when host connects
     {
         let game_loop = game_loop.clone();
         let is_host = props.is_host;
-        let game_start_processed = game_start_processed.clone();
+        let host_started = host_started.clone();
         use_effect_with(is_connected, move |is_connected| {
-            if is_host && *is_connected && !*game_start_processed.borrow() {
-                *game_start_processed.borrow_mut() = true;
+            if is_host && *is_connected && !*host_started.borrow() {
+                *host_started.borrow_mut() = true;
                 game_loop.start_game();
             }
         });
     }
 
-    // Process GameStart messages for non-host
+    // Host: resend GameStart when new peers join (so they can start simulation)
     {
         let game_loop = game_loop.clone();
         let is_host = props.is_host;
-        let game_start_processed = game_start_processed.clone();
-        let messages_for_game_start = messages.clone();
-        use_effect_with(messages.len(), move |_| {
-            if is_host || *game_start_processed.borrow() {
+        let p2p = p2p.clone();
+        let prev_peer_count = prev_peer_count.clone();
+        let peers_count = peers.len();
+        use_effect_with(peers_count, move |&current_count| {
+            if !is_host {
                 return;
             }
 
-            // Look for GameStart message
+            let prev = *prev_peer_count.borrow();
+            *prev_peer_count.borrow_mut() = current_count;
+
+            // If new peers joined and game is running, resend current state
+            if current_count > prev && game_loop.is_running() {
+                let game_state = game_loop.game_state.borrow();
+                let gamerule = game_state.gamerule().to_string();
+                let snapshot = game_state.create_snapshot();
+                if let Ok(state_bytes) = snapshot.to_bytes() {
+                    drop(game_state);
+                    p2p.send_game_start(snapshot.rng_seed, state_bytes, gamerule);
+                    tracing::info!("Resent GameStart to new peers (peer count: {} -> {})", prev, current_count);
+                }
+            }
+        });
+    }
+
+    // Process GameStart messages for non-host
+    // Uses session_version to detect new game starts (including respawns)
+    {
+        let game_loop = game_loop.clone();
+        let is_host = props.is_host;
+        let last_processed_session = last_processed_session.clone();
+        let messages_for_game_start = messages.clone();
+        use_effect_with(messages.len(), move |_| {
+            if is_host {
+                return;
+            }
+
+            // Look for the latest GameStart message with higher session version
             for msg in messages_for_game_start.iter().rev() {
                 if let Payload::GameStart(game_start) = &msg.payload {
-                    *game_start_processed.borrow_mut() = true;
-                    game_loop.init_from_game_start(game_start.seed, &game_start.initial_state, &game_start.gamerule);
+                    // Only process if session version is newer
+                    if game_start.session_version > *last_processed_session.borrow() {
+                        *last_processed_session.borrow_mut() = game_start.session_version;
+                        game_loop.init_from_game_start(game_start.seed, &game_start.initial_state, &game_start.gamerule);
+                    }
                     break;
                 }
             }
@@ -249,20 +286,26 @@ pub fn game_view(props: &GameViewProps) -> Html {
                 on_mode_change={on_camera_mode_change.clone()}
             />
 
-            // Spawn button (host only)
+            // Spawn button (host only, disabled after first spawn)
             if props.is_host && is_connected {
                 <div class="spawn-controls">
-                    <button
-                        class="spawn-btn"
-                        onclick={
-                            let game_loop = game_loop.clone();
-                            Callback::from(move |_: MouseEvent| {
-                                game_loop.spawn_marbles();
-                            })
-                        }
-                    >
-                        { format!("스폰 ({}명)", peers.len() + 1) }
-                    </button>
+                    if game_loop.is_spawned() {
+                        <button class="spawn-btn spawned" disabled={true}>
+                            { "게임 진행 중" }
+                        </button>
+                    } else {
+                        <button
+                            class="spawn-btn"
+                            onclick={
+                                let game_loop = game_loop.clone();
+                                Callback::from(move |_: MouseEvent| {
+                                    game_loop.spawn_marbles();
+                                })
+                            }
+                        >
+                            { format!("스폰 ({}명)", peers.len() + 1) }
+                        </button>
+                    }
                 </div>
             }
 

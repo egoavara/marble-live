@@ -283,12 +283,13 @@ impl MarbleManager {
     }
 
     /// Checks if a marble collides with any hole and marks it as eliminated.
-    /// Returns the IDs of newly eliminated marbles.
+    /// Returns (marble_id, trigger_index) pairs for newly eliminated marbles.
+    /// The caller decides how to handle based on trigger action.
     pub fn check_hole_collisions(
         &mut self,
         world: &PhysicsWorld,
         hole_handles: &[ColliderHandle],
-    ) -> Vec<MarbleId> {
+    ) -> Vec<(MarbleId, usize)> {
         let mut eliminated = Vec::new();
 
         for marble in &mut self.marbles {
@@ -297,7 +298,7 @@ impl MarbleManager {
             }
 
             // Check intersection with each hole
-            for &hole_handle in hole_handles {
+            for (trigger_idx, &hole_handle) in hole_handles.iter().enumerate() {
                 let Some(hole_collider) = world.collider_set.get(hole_handle) else {
                     continue;
                 };
@@ -319,7 +320,7 @@ impl MarbleManager {
                     let threshold = ball.radius;
                     if dist_sq < threshold * threshold {
                         marble.eliminated = true;
-                        eliminated.push(marble.id);
+                        eliminated.push((marble.id, trigger_idx));
                         break;
                     }
                 }
@@ -327,6 +328,14 @@ impl MarbleManager {
         }
 
         eliminated
+    }
+
+    /// Disables physics for a marble (keeps it in memory but stops collisions).
+    pub fn disable_marble_physics(&self, world: &mut PhysicsWorld, marble_id: MarbleId) {
+        if let Some(marble) = self.get_marble(marble_id) {
+            world.set_rigid_body_enabled(marble.body_handle, false);
+            world.set_collider_enabled(marble.collider_handle, false);
+        }
     }
 
     /// Gets the position of a marble.
@@ -443,7 +452,7 @@ mod tests {
         // Check collisions
         let eliminated = manager.check_hole_collisions(&world, &map_data.trigger_handles);
 
-        assert!(eliminated.contains(&id));
+        assert!(eliminated.iter().any(|(mid, _)| *mid == id));
         assert!(manager.get_marble(id).unwrap().eliminated);
     }
 

@@ -13,6 +13,12 @@ service RoomService {
   // Start the room
   rpc StartRoom(StartRoomRequest) returns (StartRoomResponse);
 
+  // Start the game (spawn marbles) - host only, once per room
+  rpc StartGame(StartGameRequest) returns (StartGameResponse);
+
+  // Report player arrival (marble reached hole) - host only
+  rpc ReportArrival(ReportArrivalRequest) returns (ReportArrivalResponse);
+
   // Kick a player from room
   rpc KickRoom(KickRoomRequest) returns (KickRoomResponse);
 
@@ -67,6 +73,34 @@ message StartRoomResponse {
   string started_at = 1;
 }
 
+// Start game (spawn marbles) - can only be called once per room
+message StartGameRequest {
+  string room_id = 1;
+  PlayerAuth player = 2;
+  uint64 start_frame = 3;
+  uint64 rng_seed = 4;
+}
+
+message StartGameResponse {
+  bool success = 1;
+  bool already_started = 2;
+  string started_at = 3;
+}
+
+// Report player arrival (when marble reaches hole)
+message ReportArrivalRequest {
+  string room_id = 1;
+  PlayerAuth player = 2;
+  string arrived_player_id = 3;
+  uint64 arrival_frame = 4;
+  uint32 rank = 5;
+}
+
+message ReportArrivalResponse {
+  bool success = 1;
+  bool game_ended = 2;  // True when all players have arrived
+}
+
 
 message KickRoomRequest {
   string room_id = 1;
@@ -104,12 +138,18 @@ message RoomInfo {
   uint32 gossip_ttl = 6;             // Gossip TTL (hop limit)
   uint32 mesh_group_size = 7;        // Mesh group size
   uint32 peer_connections = 8;       // Connections per peer (4~6)
+
+  // Game state
+  uint64 start_frame = 9;            // Frame when game started (spawn)
+  uint64 rng_seed = 10;              // RNG seed used for game
+  repeated PlayerResult results = 11; // Player arrival results
 }
 
 enum RoomState {
   UNDEFINED = 0;
   WAITING = 1;
   STARTED = 2;
+  ENDED = 3;
 }
 
 message PlayerAuth {
@@ -121,6 +161,13 @@ message PlayerInfo {
   string id = 1;
   bool is_host = 2;
   string display_id = 3;
+}
+
+// Player result (arrival info)
+message PlayerResult {
+  string player_id = 1;
+  uint32 rank = 2;
+  uint64 arrival_frame = 3;
 }
 
 // ========================================

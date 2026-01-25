@@ -13,6 +13,19 @@ pub struct Room {
     created_at: DateTime<Utc>,
     started_at: Option<DateTime<Utc>>,
     topology_manager: TopologyManager,
+
+    // Game state (set when game starts via StartGame RPC)
+    game_start_frame: Option<u64>,
+    game_rng_seed: Option<u64>,
+    game_results: Vec<PlayerResult>,
+}
+
+/// Player arrival result
+#[derive(Debug, Clone)]
+pub struct PlayerResult {
+    pub player_id: String,
+    pub rank: u32,
+    pub arrival_frame: u64,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -28,6 +41,15 @@ pub enum RoomError {
 
     #[error("Only the room host can perform this action: {0}")]
     RoomHostOnly(&'static str),
+
+    #[error("Game already started")]
+    GameAlreadyStarted,
+
+    #[error("Game not started yet")]
+    GameNotStarted,
+
+    #[error("Player already arrived: {0}")]
+    PlayerAlreadyArrived(String),
 }
 
 impl RoomError {
@@ -37,6 +59,9 @@ impl RoomError {
             RoomError::PlayerNotFound => tonic::Code::NotFound,
             RoomError::HostCanNotKick => tonic::Code::InvalidArgument,
             RoomError::RoomHostOnly(_) => tonic::Code::PermissionDenied,
+            RoomError::GameAlreadyStarted => tonic::Code::AlreadyExists,
+            RoomError::GameNotStarted => tonic::Code::FailedPrecondition,
+            RoomError::PlayerAlreadyArrived(_) => tonic::Code::AlreadyExists,
         }
     }
 }
@@ -71,6 +96,9 @@ impl Room {
             created_at: Utc::now(),
             started_at: None,
             topology_manager,
+            game_start_frame: None,
+            game_rng_seed: None,
+            game_results: Vec::new(),
         }
     }
 
@@ -156,9 +184,22 @@ impl Room {
     }
 
     pub fn state(&self) -> RoomState {
+        // WAITING → STARTED (game spawn) → ENDED (all players arrived)
         if self.started_at.is_none() {
             return RoomState::Waiting;
         }
+
+        // Check if game has started (spawn happened)
+        if self.game_start_frame.is_none() {
+            return RoomState::Started;
+        }
+
+        // Check if all players have arrived
+        let total_players = self.count_players() as usize;
+        if self.game_results.len() >= total_players {
+            return RoomState::Ended;
+        }
+
         RoomState::Started
     }
     pub fn started_at(&self) -> Option<DateTime<Utc>> {
@@ -222,6 +263,94 @@ impl Room {
     /// Resolve peer_ids to player_ids
     pub fn resolve_peer_ids(&self, peer_ids: &[String]) -> std::collections::HashMap<String, String> {
         self.topology_manager.resolve_peer_ids(peer_ids)
+    }
+
+    // ========================================
+    // Game state methods
+    // ========================================
+
+    /// Start the game (spawn marbles). Can only be called once.
+    /// Returns Ok(true) if newly started, Ok(false) if already started (idempotent).
+    pub fn start_game(
+        &mut self,
+        player_id: &str,
+        player_secret: &str,
+        start_frame: u64,
+        rng_seed: u64,
+    ) -> Result<bool, RoomError> {
+        // Only host can start the game
+        self.assert_host(player_id, player_secret, "start_game")?;
+
+        // Check if game already started (idempotent behavior)
+        if self.game_start_frame.is_some() {
+            return Ok(false);
+        }
+
+        // Also mark room as started if not already
+        if self.started_at.is_none() {
+            self.started_at = Some(Utc::now());
+        }
+
+        self.game_start_frame = Some(start_frame);
+        self.game_rng_seed = Some(rng_seed);
+        self.game_results.clear();
+
+        Ok(true)
+    }
+
+    /// Report a player's arrival at the hole.
+    /// Returns Ok(true) if all players have arrived (game ended).
+    pub fn report_arrival(
+        &mut self,
+        player_id: &str,
+        player_secret: &str,
+        arrived_player_id: &str,
+        arrival_frame: u64,
+        rank: u32,
+    ) -> Result<bool, RoomError> {
+        // Only host can report arrivals
+        self.assert_host(player_id, player_secret, "report_arrival")?;
+
+        // Game must be started
+        if self.game_start_frame.is_none() {
+            return Err(RoomError::GameNotStarted);
+        }
+
+        // Check if player already arrived
+        if self.game_results.iter().any(|r| r.player_id == arrived_player_id) {
+            return Err(RoomError::PlayerAlreadyArrived(arrived_player_id.to_string()));
+        }
+
+        // Add result
+        self.game_results.push(PlayerResult {
+            player_id: arrived_player_id.to_string(),
+            rank,
+            arrival_frame,
+        });
+
+        // Check if all players have arrived
+        let total_players = self.count_players() as usize;
+        Ok(self.game_results.len() >= total_players)
+    }
+
+    /// Check if game has started (spawn happened)
+    pub fn is_game_started(&self) -> bool {
+        self.game_start_frame.is_some()
+    }
+
+    /// Get game start frame
+    pub fn game_start_frame(&self) -> Option<u64> {
+        self.game_start_frame
+    }
+
+    /// Get game RNG seed
+    pub fn game_rng_seed(&self) -> Option<u64> {
+        self.game_rng_seed
+    }
+
+    /// Get game results
+    pub fn game_results(&self) -> &[PlayerResult] {
+        &self.game_results
     }
 }
 

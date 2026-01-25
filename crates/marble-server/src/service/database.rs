@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::common::{
     player::{self, Player},
-    room::{Room, RoomError},
+    room::{PlayerResult, Room, RoomError},
 };
 
 pub struct Database {
@@ -207,5 +207,72 @@ impl Database {
         }
 
         Ok(room.resolve_peer_ids(peer_ids))
+    }
+
+    // ========================================
+    // Game state methods
+    // ========================================
+
+    /// Start the game (spawn marbles). Host only, once per room.
+    /// Returns (newly_started: bool, started_at: DateTime)
+    pub fn start_game(
+        &self,
+        room_id: &uuid::Uuid,
+        player: &PlayerAuth,
+        start_frame: u64,
+        rng_seed: u64,
+    ) -> Result<(bool, DateTime<Utc>), DatabaseError> {
+        let mut rooms = self.rooms.write();
+        let Some(room) = rooms.get_mut(room_id) else {
+            return Err(DatabaseError::RoomNotFound);
+        };
+
+        let newly_started = room.start_game(&player.id, &player.secret, start_frame, rng_seed)?;
+        let started_at = room.started_at().unwrap_or_else(Utc::now);
+
+        Ok((newly_started, started_at))
+    }
+
+    /// Report player arrival. Host only.
+    /// Returns true if all players have arrived (game ended).
+    pub fn report_arrival(
+        &self,
+        room_id: &uuid::Uuid,
+        player: &PlayerAuth,
+        arrived_player_id: &str,
+        arrival_frame: u64,
+        rank: u32,
+    ) -> Result<bool, DatabaseError> {
+        let mut rooms = self.rooms.write();
+        let Some(room) = rooms.get_mut(room_id) else {
+            return Err(DatabaseError::RoomNotFound);
+        };
+
+        let game_ended = room.report_arrival(
+            &player.id,
+            &player.secret,
+            arrived_player_id,
+            arrival_frame,
+            rank,
+        )?;
+
+        Ok(game_ended)
+    }
+
+    /// Get game state info (start_frame, rng_seed, results)
+    pub fn get_game_state(
+        &self,
+        room_id: &uuid::Uuid,
+    ) -> Result<(Option<u64>, Option<u64>, Vec<PlayerResult>), DatabaseError> {
+        let rooms = self.rooms.read();
+        let Some(room) = rooms.get(room_id) else {
+            return Err(DatabaseError::RoomNotFound);
+        };
+
+        Ok((
+            room.game_start_frame(),
+            room.game_rng_seed(),
+            room.game_results().to_vec(),
+        ))
     }
 }

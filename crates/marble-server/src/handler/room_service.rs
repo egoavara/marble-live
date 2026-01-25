@@ -89,6 +89,70 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
         }))
     }
 
+    async fn start_game(
+        &self,
+        request: Request<StartGameRequest>,
+    ) -> Result<Response<StartGameResponse>, Status> {
+        let req = request.into_inner();
+        let room_id = util::tonic_uuid!(&req.room_id)?;
+        let player_auth = util::tonic_required!(req.player)?;
+
+        let (newly_started, started_at) = self.database.start_game(
+            &room_id,
+            &player_auth,
+            req.start_frame,
+            req.rng_seed,
+        )?;
+
+        if newly_started {
+            tracing::info!(
+                room_id = %room_id,
+                start_frame = req.start_frame,
+                rng_seed = req.rng_seed,
+                "Game started (marbles spawned)"
+            );
+        } else {
+            tracing::debug!(room_id = %room_id, "Game already started");
+        }
+
+        Ok(Response::new(StartGameResponse {
+            success: true,
+            already_started: !newly_started,
+            started_at: started_at.to_rfc3339(),
+        }))
+    }
+
+    async fn report_arrival(
+        &self,
+        request: Request<ReportArrivalRequest>,
+    ) -> Result<Response<ReportArrivalResponse>, Status> {
+        let req = request.into_inner();
+        let room_id = util::tonic_uuid!(&req.room_id)?;
+        let player_auth = util::tonic_required!(req.player)?;
+
+        let game_ended = self.database.report_arrival(
+            &room_id,
+            &player_auth,
+            &req.arrived_player_id,
+            req.arrival_frame,
+            req.rank,
+        )?;
+
+        tracing::info!(
+            room_id = %room_id,
+            arrived_player_id = %req.arrived_player_id,
+            arrival_frame = req.arrival_frame,
+            rank = req.rank,
+            game_ended = game_ended,
+            "Player arrived at hole"
+        );
+
+        Ok(Response::new(ReportArrivalResponse {
+            success: true,
+            game_ended,
+        }))
+    }
+
     async fn kick_room(
         &self,
         request: Request<KickRoomRequest>,
@@ -118,6 +182,16 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
         };
 
         let config = room.topology_config();
+        let results: Vec<room::PlayerResult> = room
+            .game_results()
+            .iter()
+            .map(|r| room::PlayerResult {
+                player_id: r.player_id.clone(),
+                rank: r.rank,
+                arrival_frame: r.arrival_frame,
+            })
+            .collect();
+
         Ok(Response::new(GetRoomResponse {
             room: Some(RoomInfo {
                 id: room.id().to_string(),
@@ -131,6 +205,9 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
                 gossip_ttl: config.gossip_ttl,
                 mesh_group_size: config.mesh_group_size,
                 peer_connections: config.peer_connections,
+                start_frame: room.game_start_frame().unwrap_or(0),
+                rng_seed: room.game_rng_seed().unwrap_or(0),
+                results,
             }),
         }))
     }

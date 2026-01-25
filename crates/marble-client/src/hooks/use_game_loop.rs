@@ -4,6 +4,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use marble_core::{GameState, PlayerId, RouletteConfig, SyncSnapshot};
+use marble_proto::room::room_service_client::RoomServiceClient;
+use marble_proto::room::{PlayerAuth, ReportArrivalRequest, StartGameRequest};
+use tonic_web_wasm_client::Client;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -38,6 +41,12 @@ pub struct GameLoopHandle {
     is_host: bool,
     p2p: P2pRoomHandle,
     my_player_id: Option<String>,
+    room_id: String,
+    player_secret: Option<String>,
+    /// Track which players have been reported as arrived
+    reported_arrivals: Rc<RefCell<Vec<PlayerId>>>,
+    /// Track if game start has been reported to server (only report once)
+    server_game_started: Rc<RefCell<bool>>,
 }
 
 impl GameLoopHandle {
@@ -136,6 +145,7 @@ impl GameLoopHandle {
 
     /// Spawn marbles for all connected players (host only).
     /// Call this after all peers have joined.
+    /// This also calls StartGame RPC to register the spawn with the server.
     pub fn spawn_marbles(&self) {
         use marble_core::Color;
 
@@ -166,7 +176,7 @@ impl GameLoopHandle {
         game.players.clear();
 
         // Add self first
-        game.add_player(my_player_id, colors[0]);
+        game.add_player(my_player_id.clone(), colors[0]);
 
         // Add peers
         for (i, peer) in peers.iter().enumerate() {
@@ -182,19 +192,95 @@ impl GameLoopHandle {
             return;
         }
 
-        // Broadcast updated state to peers
+        // Clear reported arrivals for new spawn (in-game respawn)
+        self.reported_arrivals.borrow_mut().clear();
+
+        // Check if this is the first spawn (need to report to server)
+        let should_report_to_server = !*self.server_game_started.borrow();
+
+        // Get game state info for RPC
+        let start_frame = game.current_frame();
+        let rng_seed = game.rng_seed;
         let gamerule = game.gamerule().to_string();
         let snapshot = game.create_snapshot();
+
+        // Broadcast updated state to peers (always do this for P2P sync)
         if let Ok(state_bytes) = snapshot.to_bytes() {
             drop(game);
             self.p2p.send_game_start(snapshot.rng_seed, state_bytes, gamerule);
             tracing::info!("Marbles spawned for {} players", peers.len() + 1);
+
+            // Call StartGame RPC to register with server (only first time)
+            if should_report_to_server {
+                if let Some(ref player_secret) = self.player_secret {
+                    // Mark as reported before async call
+                    *self.server_game_started.borrow_mut() = true;
+
+                    let room_id = self.room_id.clone();
+                    let player_id = my_player_id;
+                    let player_secret = player_secret.clone();
+
+                    spawn_local(async move {
+                        let Some(window) = web_sys::window() else {
+                            tracing::warn!("No window object available for StartGame RPC");
+                            return;
+                        };
+                        let Ok(origin) = window.location().origin() else {
+                            tracing::warn!("Failed to get origin for StartGame RPC");
+                            return;
+                        };
+                        let client = Client::new(format!("{}/grpc", origin));
+                        let mut grpc = RoomServiceClient::new(client);
+
+                        let req = StartGameRequest {
+                            room_id: room_id.clone(),
+                            player: Some(PlayerAuth {
+                                id: player_id.clone(),
+                                secret: player_secret,
+                            }),
+                            start_frame,
+                            rng_seed,
+                        };
+
+                        match grpc.start_game(req).await {
+                            Ok(resp) => {
+                                let resp = resp.into_inner();
+                                if resp.already_started {
+                                    tracing::info!(room_id = %room_id, "Game was already started on server");
+                                } else {
+                                    tracing::info!(
+                                        room_id = %room_id,
+                                        start_frame = start_frame,
+                                        rng_seed = rng_seed,
+                                        "Game started on server"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    room_id = %room_id,
+                                    error = %e,
+                                    "Failed to call StartGame RPC"
+                                );
+                            }
+                        }
+                    });
+                }
+            } else {
+                tracing::info!("Respawn (server already notified, P2P only)");
+            }
         }
     }
 
     /// Check if game is running
     pub fn is_running(&self) -> bool {
         matches!(*self.loop_state, GameLoopState::Running)
+    }
+
+    /// Check if game has been spawned (reported to server)
+    /// Once spawned, no more spawns are allowed in this room.
+    pub fn is_spawned(&self) -> bool {
+        *self.server_game_started.borrow()
     }
 
     /// Get camera state for external access (e.g., keyboard handlers)
@@ -277,6 +363,16 @@ pub fn use_game_loop(
 
     // Store my_player_id for the handle
     let my_player_id = p2p.my_player_id();
+
+    // Store room_id and player_secret for RPC calls
+    let room_id = p2p.room_id();
+    let player_secret = p2p.player_secret();
+
+    // Track reported arrivals (to avoid duplicate RPC calls)
+    let reported_arrivals: Rc<RefCell<Vec<PlayerId>>> = use_mut_ref(Vec::new);
+
+    // Track if game start has been reported to server
+    let server_game_started: Rc<RefCell<bool>> = use_mut_ref(|| false);
 
     // Share game state with P2P layer (run once on mount)
     {
@@ -371,6 +467,10 @@ pub fn use_game_loop(
         let last_time = last_time.clone();
         let animation_frame_id = animation_frame_id.clone();
         let my_player_id_for_camera = my_player_id.clone();
+        let reported_arrivals_for_loop = reported_arrivals.clone();
+        let room_id_for_loop = room_id.clone();
+        let player_secret_for_loop = player_secret.clone();
+        let my_player_id_for_rpc = my_player_id.clone();
 
         use_effect_with(
             ((*loop_state).clone(), *renderer_version),
@@ -394,6 +494,10 @@ pub fn use_game_loop(
                     let animation_frame_id = animation_frame_id.clone();
                     let renderer_ref = renderer_ref.clone();
                     let my_player_id_for_camera = my_player_id_for_camera.clone();
+                    let reported_arrivals = reported_arrivals_for_loop.clone();
+                    let room_id = room_id_for_loop.clone();
+                    let player_secret = player_secret_for_loop.clone();
+                    let my_player_id_for_rpc = my_player_id_for_rpc.clone();
 
                     *closure.borrow_mut() = Some(Closure::new(move |timestamp: f64| {
                         // Check if still running
@@ -425,10 +529,82 @@ pub fn use_game_loop(
                         while *accumulated_time.borrow() >= PHYSICS_DT_MS {
                             let mut game = game_state.borrow_mut();
 
-                            // Update physics
-                            game.update();
+                            // Update physics and get newly arrived players
+                            let newly_arrived = game.update();
 
                             let frame = game.current_frame();
+
+                            // Host: report arrivals to server
+                            if is_host && !newly_arrived.is_empty() {
+                                let mut reported = reported_arrivals.borrow_mut();
+                                for &player_id in &newly_arrived {
+                                    // Skip if already reported
+                                    if reported.contains(&player_id) {
+                                        continue;
+                                    }
+                                    reported.push(player_id);
+
+                                    // Get player name and rank
+                                    let player_name = game
+                                        .players
+                                        .iter()
+                                        .find(|p| p.id == player_id)
+                                        .map(|p| p.name.clone())
+                                        .unwrap_or_default();
+                                    let rank = reported.len() as u32;
+
+                                    // Call ReportArrival RPC
+                                    if let Some(ref secret) = player_secret {
+                                        let room_id = room_id.clone();
+                                        let my_player_id = my_player_id_for_rpc.clone();
+                                        let secret = secret.clone();
+                                        let arrival_frame = frame;
+
+                                        spawn_local(async move {
+                                            let Some(window) = web_sys::window() else {
+                                                return;
+                                            };
+                                            let Ok(origin) = window.location().origin() else {
+                                                return;
+                                            };
+                                            let client = Client::new(format!("{}/grpc", origin));
+                                            let mut grpc = RoomServiceClient::new(client);
+
+                                            let req = ReportArrivalRequest {
+                                                room_id: room_id.clone(),
+                                                player: Some(PlayerAuth {
+                                                    id: my_player_id,
+                                                    secret,
+                                                }),
+                                                arrived_player_id: player_name.clone(),
+                                                arrival_frame,
+                                                rank,
+                                            };
+
+                                            match grpc.report_arrival(req).await {
+                                                Ok(resp) => {
+                                                    let resp = resp.into_inner();
+                                                    tracing::info!(
+                                                        player = %player_name,
+                                                        rank = rank,
+                                                        frame = arrival_frame,
+                                                        game_ended = resp.game_ended,
+                                                        "Reported player arrival"
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        player = %player_name,
+                                                        error = %e,
+                                                        "Failed to report arrival"
+                                                    );
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+
                             drop(game);
 
                             current_frame.set(frame);
@@ -501,5 +677,9 @@ pub fn use_game_loop(
         is_host,
         p2p: p2p.clone(),
         my_player_id: Some(my_player_id),
+        room_id,
+        player_secret,
+        reported_arrivals,
+        server_game_started,
     }
 }
