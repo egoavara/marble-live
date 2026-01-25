@@ -25,6 +25,10 @@ pub enum GizmoHandle {
     BezierControl2,
     BezierEnd,
     BezierMoveFree,
+    // Line handles
+    LineStart,
+    LineEnd,
+    LineMoveFree,
 }
 
 impl GizmoHandle {
@@ -50,6 +54,12 @@ impl GizmoHandle {
             GizmoHandle::BezierStart | GizmoHandle::BezierControl1 |
             GizmoHandle::BezierControl2 | GizmoHandle::BezierEnd |
             GizmoHandle::BezierMoveFree
+        )
+    }
+
+    pub fn is_line(&self) -> bool {
+        matches!(self,
+            GizmoHandle::LineStart | GizmoHandle::LineEnd | GizmoHandle::LineMoveFree
         )
     }
 }
@@ -81,6 +91,23 @@ impl BezierTransform {
     }
 }
 
+/// Line transform data (2 endpoints).
+#[derive(Debug, Clone, Copy)]
+pub struct LineTransform {
+    pub start: (f32, f32),
+    pub end: (f32, f32),
+}
+
+impl LineTransform {
+    /// Calculate center point of the line.
+    pub fn center(&self) -> (f32, f32) {
+        (
+            (self.start.0 + self.end.0) / 2.0,
+            (self.start.1 + self.end.1) / 2.0,
+        )
+    }
+}
+
 /// Editor interaction state.
 #[derive(Debug, Clone)]
 pub struct EditorInteractionState {
@@ -95,6 +122,7 @@ pub struct EditorInteractionState {
     pub drag_start_world: Option<(f32, f32)>,
     pub original_transform: Option<ObjectTransform>,
     pub original_bezier_transform: Option<BezierTransform>,
+    pub original_line_transform: Option<LineTransform>,
 
     pub shift_held: bool,
     pub ctrl_held: bool,
@@ -119,6 +147,7 @@ impl EditorInteractionState {
             drag_start_world: None,
             original_transform: None,
             original_bezier_transform: None,
+            original_line_transform: None,
             shift_held: false,
             ctrl_held: false,
             alt_held: false,
@@ -142,6 +171,7 @@ impl EditorInteractionState {
         self.drag_start_world = Some(world_pos);
         self.original_transform = Some(transform);
         self.original_bezier_transform = None;
+        self.original_line_transform = None;
     }
 
     pub fn start_bezier_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: BezierTransform) {
@@ -149,6 +179,15 @@ impl EditorInteractionState {
         self.drag_start_world = Some(world_pos);
         self.original_transform = None;
         self.original_bezier_transform = Some(transform);
+        self.original_line_transform = None;
+    }
+
+    pub fn start_line_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: LineTransform) {
+        self.active_handle = Some(handle);
+        self.drag_start_world = Some(world_pos);
+        self.original_transform = None;
+        self.original_bezier_transform = None;
+        self.original_line_transform = Some(transform);
     }
 
     pub fn end_drag(&mut self) {
@@ -156,6 +195,7 @@ impl EditorInteractionState {
         self.drag_start_world = None;
         self.original_transform = None;
         self.original_bezier_transform = None;
+        self.original_line_transform = None;
     }
 
     pub fn cancel_drag(&mut self) {

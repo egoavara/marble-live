@@ -4,7 +4,7 @@
 
 use marble_core::Color;
 
-use super::interaction::{BezierTransform, GizmoHandle, ObjectTransform};
+use super::interaction::{BezierTransform, GizmoHandle, LineTransform, ObjectTransform};
 use crate::renderer::{CircleInstance, LineInstance, RectInstance};
 
 /// Gizmo visual constants.
@@ -534,6 +534,122 @@ pub fn apply_bezier_transform(
                 result.start = new_start;
                 result.control1 = new_ctrl1;
                 result.control2 = new_ctrl2;
+                result.end = new_end;
+            }
+        }
+        _ => {}
+    }
+
+    result
+}
+
+// ============================================================================
+// Line Gizmo Functions
+// ============================================================================
+
+/// Generate line gizmo with start/end point handles and center move handle.
+pub fn generate_line_gizmo(
+    transform: &LineTransform,
+    zoom: f32,
+    hovered_handle: Option<GizmoHandle>,
+) -> GizmoRenderData {
+    use constants::*;
+    let mut data = GizmoRenderData::default();
+    let scale = 1.0 / zoom;
+
+    let start = transform.start;
+    let end = transform.end;
+    let center = transform.center();
+
+    // Endpoint handles (squares)
+    let ep_size = BEZIER_ENDPOINT_SIZE * scale;
+    let start_color = if hovered_handle == Some(GizmoHandle::LineStart) { COLOR_HOVER } else { COLOR_BEZIER_ENDPOINT };
+    let end_color = if hovered_handle == Some(GizmoHandle::LineEnd) { COLOR_HOVER } else { COLOR_BEZIER_ENDPOINT };
+    data.rects.push(RectInstance::new(start, (ep_size / 2.0, ep_size / 2.0), 0.0, start_color, Color::new(50, 50, 50, 255), scale));
+    data.rects.push(RectInstance::new(end, (ep_size / 2.0, ep_size / 2.0), 0.0, end_color, Color::new(50, 50, 50, 255), scale));
+
+    // Center move handle (diamond - 45° rotated square)
+    let center_size = BEZIER_CENTER_SIZE * scale;
+    let center_color = if hovered_handle == Some(GizmoHandle::LineMoveFree) { COLOR_HOVER } else { COLOR_BEZIER_CENTER };
+    data.rects.push(RectInstance::new(center, (center_size / 2.0, center_size / 2.0), 45.0, center_color, Color::new(60, 60, 60, 255), 1.5 * scale));
+
+    data
+}
+
+/// Hit test line gizmo handles.
+pub fn hit_test_line_gizmo(transform: &LineTransform, mouse: (f32, f32), zoom: f32) -> Option<GizmoHandle> {
+    use constants::*;
+    let scale = 1.0 / zoom;
+    let tol = HIT_TOLERANCE * scale;
+
+    let start = transform.start;
+    let end = transform.end;
+    let center = transform.center();
+
+    // Center handle (highest priority for move)
+    let center_size = BEZIER_CENTER_SIZE * scale;
+    if dist(mouse, center) <= center_size / 2.0 + tol * 0.5 {
+        return Some(GizmoHandle::LineMoveFree);
+    }
+
+    // Start endpoint
+    let ep_size = BEZIER_ENDPOINT_SIZE * scale;
+    if (mouse.0 - start.0).abs() <= ep_size / 2.0 + tol * 0.5
+        && (mouse.1 - start.1).abs() <= ep_size / 2.0 + tol * 0.5
+    {
+        return Some(GizmoHandle::LineStart);
+    }
+
+    // End endpoint
+    if (mouse.0 - end.0).abs() <= ep_size / 2.0 + tol * 0.5
+        && (mouse.1 - end.1).abs() <= ep_size / 2.0 + tol * 0.5
+    {
+        return Some(GizmoHandle::LineEnd);
+    }
+
+    None
+}
+
+/// Apply transform to line based on handle and drag delta.
+pub fn apply_line_transform(
+    handle: GizmoHandle,
+    orig: &LineTransform,
+    delta: (f32, f32),
+    snap: bool,
+) -> LineTransform {
+    let mut result = *orig;
+
+    let snap_to_grid = |p: (f32, f32)| -> (f32, f32) {
+        if snap {
+            ((p.0 / 10.0).round() * 10.0, (p.1 / 10.0).round() * 10.0)
+        } else {
+            p
+        }
+    };
+
+    match handle {
+        GizmoHandle::LineStart => {
+            let new_pos = (orig.start.0 + delta.0, orig.start.1 + delta.1);
+            result.start = snap_to_grid(new_pos);
+        }
+        GizmoHandle::LineEnd => {
+            let new_pos = (orig.end.0 + delta.0, orig.end.1 + delta.1);
+            result.end = snap_to_grid(new_pos);
+        }
+        GizmoHandle::LineMoveFree => {
+            // Move both points together
+            let new_start = (orig.start.0 + delta.0, orig.start.1 + delta.1);
+            let new_end = (orig.end.0 + delta.0, orig.end.1 + delta.1);
+
+            if snap {
+                // Snap center, then move both points by the same delta
+                let old_center = orig.center();
+                let new_center = snap_to_grid((old_center.0 + delta.0, old_center.1 + delta.1));
+                let snap_delta = (new_center.0 - old_center.0, new_center.1 - old_center.1);
+                result.start = (orig.start.0 + snap_delta.0, orig.start.1 + snap_delta.1);
+                result.end = (orig.end.0 + snap_delta.0, orig.end.1 + snap_delta.1);
+            } else {
+                result.start = new_start;
                 result.end = new_end;
             }
         }

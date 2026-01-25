@@ -11,19 +11,21 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-use super::gizmo::{self, generate_bezier_gizmo, generate_gizmo, hit_test_bezier_gizmo, hit_test_gizmo};
-use super::interaction::{BezierTransform, EditorInteractionState, GizmoHandle, ObjectTransform};
+use super::context_menu::{ContextMenu, ContextMenuState};
+use super::gizmo::{self, generate_bezier_gizmo, generate_gizmo, generate_line_gizmo, hit_test_bezier_gizmo, hit_test_gizmo, hit_test_line_gizmo};
+use super::interaction::{BezierTransform, EditorInteractionState, GizmoHandle, LineTransform, ObjectTransform};
 use crate::camera::{CameraMode, CameraState};
 use crate::renderer::WgpuRenderer;
 
-/// Preview transform during drag (either standard or bezier).
+/// Preview transform during drag (standard, bezier, or line).
 #[derive(Debug, Clone, Copy)]
 pub enum PreviewTransform {
     Standard(usize, ObjectTransform),
     Bezier(usize, BezierTransform),
+    Line(usize, LineTransform),
 }
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties)]
 pub struct EditorCanvasProps {
     pub config: RouletteConfig,
     pub selected_index: Option<usize>,
@@ -31,6 +33,56 @@ pub struct EditorCanvasProps {
     pub on_object_update: Callback<(usize, MapObject)>,
     #[prop_or_default]
     pub on_select: Callback<Option<usize>>,
+    /// Simulation game state reference (for immediate access).
+    #[prop_or_default]
+    pub game_state_ref: Option<Rc<RefCell<Option<Rc<RefCell<GameState>>>>>>,
+    /// Whether simulation is running.
+    #[prop_or_default]
+    pub is_simulating: bool,
+    /// Version counter to trigger re-render when game_state changes.
+    #[prop_or_default]
+    pub game_state_version: u32,
+    /// Whether clipboard has content.
+    #[prop_or_default]
+    pub has_clipboard: bool,
+    /// Copy object callback.
+    #[prop_or_default]
+    pub on_copy: Callback<usize>,
+    /// Paste object callback (x, y world position).
+    #[prop_or_default]
+    pub on_paste: Callback<(f32, f32)>,
+    /// Delete object callback.
+    #[prop_or_default]
+    pub on_delete: Callback<usize>,
+    /// Mirror X callback.
+    #[prop_or_default]
+    pub on_mirror_x: Callback<usize>,
+    /// Mirror Y callback.
+    #[prop_or_default]
+    pub on_mirror_y: Callback<usize>,
+}
+
+impl PartialEq for EditorCanvasProps {
+    fn eq(&self, other: &Self) -> bool {
+        self.config == other.config
+            && self.selected_index == other.selected_index
+            && self.on_object_update == other.on_object_update
+            && self.on_select == other.on_select
+            && self.is_simulating == other.is_simulating
+            && self.game_state_version == other.game_state_version
+            && self.has_clipboard == other.has_clipboard
+            && self.on_copy == other.on_copy
+            && self.on_paste == other.on_paste
+            && self.on_delete == other.on_delete
+            && self.on_mirror_x == other.on_mirror_x
+            && self.on_mirror_y == other.on_mirror_y
+            // Compare game_state_ref by Rc pointer equality
+            && match (&self.game_state_ref, &other.game_state_ref) {
+                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
 }
 
 #[function_component(EditorCanvas)]
@@ -47,6 +99,8 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
     // Local preview transform during drag (doesn't trigger parent re-render)
     let preview_transform = use_mut_ref(|| None::<PreviewTransform>);
     let render_trigger = use_force_update();
+    // Context menu state
+    let context_menu_state = use_state(ContextMenuState::new);
 
     // Initialize renderer
     {
@@ -102,9 +156,26 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let selected_index = props.selected_index;
         let hovered_handle = hovered_handle.clone();
         let preview_transform = preview_transform.clone();
+        let game_state_ref = props.game_state_ref.clone();
+        let is_simulating = props.is_simulating;
 
         Rc::new(move || {
             if let Some(renderer) = &*renderer {
+                let cam = camera.borrow();
+                let hovered = *hovered_handle.borrow();
+
+                // Use simulation game state if simulating, otherwise create from config
+                if is_simulating {
+                    if let Some(gs_ref) = &game_state_ref {
+                        if let Some(gs) = &*gs_ref.borrow() {
+                            // Render simulation state (no gizmo overlays during simulation)
+                            renderer.borrow_mut().render_with_overlay(&gs.borrow(), &cam, &[], &[], &[]);
+                            return;
+                        }
+                    }
+                }
+
+                // Editor mode: render config with gizmo overlays
                 let mut render_config = config.clone();
                 let preview = preview_transform.borrow();
 
@@ -120,13 +191,16 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                             apply_bezier_transform_to_object(&mut render_config.objects[idx], &transform);
                         }
                     }
+                    Some(PreviewTransform::Line(idx, transform)) => {
+                        if idx < render_config.objects.len() {
+                            apply_line_transform_to_object(&mut render_config.objects[idx], &transform);
+                        }
+                    }
                     None => {}
                 }
 
                 let mut game_state = GameState::new(0);
                 game_state.load_map(render_config);
-                let cam = camera.borrow();
-                let hovered = *hovered_handle.borrow();
 
                 let (oc, ol, or) = if let Some(idx) = selected_index {
                     if idx < config.objects.len() {
@@ -143,8 +217,20 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                             } else {
                                 (vec![], vec![], vec![])
                             }
+                        } else if is_line_object(&config.objects[idx]) {
+                            // Use preview line transform if available
+                            let line_t = match *preview {
+                                Some(PreviewTransform::Line(preview_idx, t)) if preview_idx == idx => Some(t),
+                                _ => get_line_transform(&config.objects[idx]),
+                            };
+                            if let Some(t) = line_t {
+                                let gizmo = generate_line_gizmo(&t, cam.zoom, hovered);
+                                (gizmo.circles, gizmo.lines, gizmo.rects)
+                            } else {
+                                (vec![], vec![], vec![])
+                            }
                         } else {
-                            // Standard object
+                            // Standard object (Circle, Rect)
                             let transform = match *preview {
                                 Some(PreviewTransform::Standard(preview_idx, t)) if preview_idx == idx => Some(t),
                                 _ => get_object_transform(&config.objects[idx]),
@@ -200,6 +286,22 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         });
     }
 
+    // Render editor mode when simulation stops or game_state is reset
+    {
+        let do_render = do_render.clone();
+        let renderer = renderer.clone();
+        let is_simulating = props.is_simulating;
+        let game_state_version = props.game_state_version;
+        let has_renderer = renderer.is_some();
+
+        use_effect_with((is_simulating, game_state_version, has_renderer), move |(is_sim, _version, has_renderer)| {
+            // When simulation stops or game_state changes, render editor mode immediately
+            if !*is_sim && *has_renderer {
+                do_render();
+            }
+        });
+    }
+
     // Resize handler
     {
         let canvas_ref = canvas_ref.clone();
@@ -240,6 +342,127 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         });
     }
 
+    // Simulation loop (physics update + render)
+    {
+        let renderer = renderer.clone();
+        let camera = camera.clone();
+        let config = props.config.clone();
+        let game_state_ref = props.game_state_ref.clone();
+        let is_simulating = props.is_simulating;
+        let sim_frame_id = use_mut_ref(|| None::<i32>);
+        let accumulated_time = use_mut_ref(|| 0.0f64);
+        let last_time = use_mut_ref(|| None::<f64>);
+        // Flag to signal loop to stop immediately
+        let loop_running = use_mut_ref(|| false);
+
+        use_effect_with(is_simulating, move |is_running| {
+            let sim_frame_id_cleanup = sim_frame_id.clone();
+            let loop_running_cleanup = loop_running.clone();
+
+            // Stop any existing loop immediately
+            *loop_running.borrow_mut() = false;
+
+            if *is_running {
+                // Start new loop
+                *loop_running.borrow_mut() = true;
+                *accumulated_time.borrow_mut() = 0.0;
+                *last_time.borrow_mut() = None;
+
+                let renderer = renderer.clone();
+                let camera = camera.clone();
+                let config = config.clone();
+                let game_state_ref = game_state_ref.clone();
+                let sim_frame_id = sim_frame_id.clone();
+                let accumulated_time = accumulated_time.clone();
+                let last_time = last_time.clone();
+                let loop_running = loop_running.clone();
+
+                let closure: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
+                let closure_clone = closure.clone();
+
+                *closure.borrow_mut() = Some(Closure::new(move |timestamp: f64| {
+                    // Check if loop should stop
+                    if !*loop_running.borrow() {
+                        return;
+                    }
+
+                    // Get game state from ref - if None, render editor mode and stop loop
+                    let gs_opt = game_state_ref.as_ref().and_then(|r| r.borrow().clone());
+                    let Some(gs) = gs_opt else {
+                        // Game state was reset - render editor mode and stop loop
+                        if let Some(renderer) = &*renderer {
+                            let mut editor_gs = GameState::new(0);
+                            editor_gs.load_map(config.clone());
+                            let cam = camera.borrow();
+                            renderer.borrow_mut().render_with_overlay(&editor_gs, &cam, &[], &[], &[]);
+                        }
+                        *loop_running.borrow_mut() = false;
+                        return;
+                    };
+
+                    // Calculate delta time
+                    let last = *last_time.borrow();
+                    let dt = match last {
+                        Some(last_ts) => (timestamp - last_ts).min(100.0),
+                        None => 1000.0 / 60.0,
+                    };
+                    *last_time.borrow_mut() = Some(timestamp);
+
+                    // Fixed timestep: 60Hz (16.67ms)
+                    const FIXED_DT: f64 = 1000.0 / 60.0;
+                    *accumulated_time.borrow_mut() += dt;
+
+                    // Update physics and keyframes
+                    while *accumulated_time.borrow() >= FIXED_DT {
+                        gs.borrow_mut().update();
+                        *accumulated_time.borrow_mut() -= FIXED_DT;
+                    }
+
+                    // Render current simulation state
+                    if let Some(renderer) = &*renderer {
+                        let cam = camera.borrow();
+                        renderer.borrow_mut().render_with_overlay(&gs.borrow(), &cam, &[], &[], &[]);
+                    }
+
+                    // Request next frame only if still running
+                    if *loop_running.borrow() {
+                        if let Some(window) = web_sys::window() {
+                            if let Some(ref cb) = *closure_clone.borrow() {
+                                let id = window
+                                    .request_animation_frame(cb.as_ref().unchecked_ref())
+                                    .ok();
+                                *sim_frame_id.borrow_mut() = id;
+                            }
+                        }
+                    }
+                }));
+
+                // Start the loop
+                if let Some(window) = web_sys::window() {
+                    if let Some(ref cb) = *closure.borrow() {
+                        let id = window
+                            .request_animation_frame(cb.as_ref().unchecked_ref())
+                            .ok();
+                        *sim_frame_id_cleanup.borrow_mut() = id;
+                    }
+                }
+            }
+
+            // Cleanup
+            move || {
+                // Signal loop to stop
+                *loop_running_cleanup.borrow_mut() = false;
+                // Cancel pending animation frame
+                if let Some(id) = *sim_frame_id_cleanup.borrow() {
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.cancel_animation_frame(id);
+                    }
+                }
+                *sim_frame_id_cleanup.borrow_mut() = None;
+            }
+        });
+    }
+
     // Mouse wheel
     let onwheel = {
         let camera = camera.clone();
@@ -272,8 +495,13 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let config = props.config.clone();
         let selected_index = props.selected_index;
         let on_select = props.on_select.clone();
+        let context_menu_state = context_menu_state.clone();
 
         Callback::from(move |e: MouseEvent| {
+            // Close context menu on any click
+            if context_menu_state.visible {
+                context_menu_state.set(ContextMenuState::hide());
+            }
             let (sx, sy) = get_mouse_pos(&e);
             let cam = camera.borrow();
             let world = cam.screen_to_world(sx, sy);
@@ -319,8 +547,17 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                         return;
                                     }
                                 }
+                            } else if is_line_object(&config.objects[idx]) {
+                                // Line gizmo
+                                if let Some(transform) = get_line_transform(&config.objects[idx]) {
+                                    if let Some(handle) = hit_test_line_gizmo(&transform, world, cam.zoom) {
+                                        tracing::info!("line gizmo hit: {:?}", handle);
+                                        inter.start_line_drag(handle, world, transform);
+                                        return;
+                                    }
+                                }
                             } else {
-                                // Standard gizmo
+                                // Standard gizmo (Circle, Rect)
                                 if let Some(transform) = get_object_transform(&config.objects[idx]) {
                                     if let Some(handle) = hit_test_gizmo(&transform, world, cam.zoom) {
                                         tracing::info!("gizmo hit: {:?}", handle);
@@ -394,8 +631,16 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                         *preview_transform.borrow_mut() = Some(PreviewTransform::Bezier(idx, new_t));
                                     }
                                 }
+                            } else if handle.is_line() {
+                                // Line handle drag
+                                if let Some(orig) = inter.original_line_transform {
+                                    if let Some(d) = inter.drag_delta() {
+                                        let new_t = gizmo::apply_line_transform(handle, &orig, d, inter.shift_held);
+                                        *preview_transform.borrow_mut() = Some(PreviewTransform::Line(idx, new_t));
+                                    }
+                                }
                             } else if let Some(orig) = inter.original_transform {
-                                // Standard handle drag
+                                // Standard handle drag (Circle, Rect)
                                 let new_t = if handle.is_rotate() {
                                     if let (Some(start), Some(curr)) = (inter.drag_start_world, inter.mouse_world) {
                                         gizmo::apply_rotate_transform(&orig, start, curr, inter.shift_held)
@@ -425,6 +670,12 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                     let new_h = if is_bezier_object(&config.objects[idx]) {
                         if let Some(transform) = get_bezier_transform(&config.objects[idx]) {
                             hit_test_bezier_gizmo(&transform, world, zoom)
+                        } else {
+                            None
+                        }
+                    } else if is_line_object(&config.objects[idx]) {
+                        if let Some(transform) = get_line_transform(&config.objects[idx]) {
+                            hit_test_line_gizmo(&transform, world, zoom)
                         } else {
                             None
                         }
@@ -477,6 +728,13 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                         on_object_update.emit((idx, obj));
                     }
                 }
+                Some(PreviewTransform::Line(idx, transform)) => {
+                    if idx < config.objects.len() {
+                        let mut obj = config.objects[idx].clone();
+                        apply_line_transform_to_object(&mut obj, &transform);
+                        on_object_update.emit((idx, obj));
+                    }
+                }
                 None => {}
             }
             // Don't clear preview here - it will be cleared when config updates
@@ -523,7 +781,61 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         })
     };
 
-    let oncontextmenu = Callback::from(|e: MouseEvent| e.prevent_default());
+    let oncontextmenu = {
+        let camera = camera.clone();
+        let config = props.config.clone();
+        let context_menu_state = context_menu_state.clone();
+        let selected_index = props.selected_index;
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            // Canvas-relative position for world coordinate calculation
+            let (canvas_x, canvas_y) = get_mouse_pos(&e);
+            // Client position for fixed-position menu
+            let screen_x = e.client_x() as f32;
+            let screen_y = e.client_y() as f32;
+            let cam = camera.borrow();
+            let world = cam.screen_to_world(canvas_x, canvas_y);
+            drop(cam);
+
+            // Check if clicking on an object or selected gizmo
+            let target_index = if let Some(idx) = selected_index {
+                // If we have a selection, check if clicking on that object
+                if idx < config.objects.len() {
+                    let ctx = marble_core::GameContext::new(0.0, 0);
+                    let hit = match config.objects[idx].shape.evaluate(&ctx) {
+                        marble_core::map::EvaluatedShape::Circle { center, radius } => {
+                            let d = ((world.0 - center[0]).powi(2) + (world.1 - center[1]).powi(2)).sqrt();
+                            d <= radius
+                        }
+                        marble_core::map::EvaluatedShape::Rect { center, size, rotation } => {
+                            let r = -rotation.to_radians();
+                            let dx = world.0 - center[0];
+                            let dy = world.1 - center[1];
+                            let lx = dx * r.cos() - dy * r.sin();
+                            let ly = dx * r.sin() + dy * r.cos();
+                            lx.abs() <= size[0] / 2.0 && ly.abs() <= size[1] / 2.0
+                        }
+                        _ => false,
+                    };
+                    if hit { Some(idx) } else { hit_test_objects(&config, world) }
+                } else {
+                    hit_test_objects(&config, world)
+                }
+            } else {
+                hit_test_objects(&config, world)
+            };
+
+            context_menu_state.set(ContextMenuState::show((screen_x, screen_y), world, target_index));
+        })
+    };
+
+    // Context menu callbacks
+    let on_context_close = {
+        let context_menu_state = context_menu_state.clone();
+        Callback::from(move |_: ()| {
+            context_menu_state.set(ContextMenuState::hide());
+        })
+    };
 
     html! {
         <>
@@ -546,6 +858,16 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                     <span>{"Initializing renderer..."}</span>
                 </div>
             }
+            <ContextMenu
+                state={(*context_menu_state).clone()}
+                has_clipboard={props.has_clipboard}
+                on_close={on_context_close}
+                on_copy={props.on_copy.clone()}
+                on_paste={props.on_paste.clone()}
+                on_delete={props.on_delete.clone()}
+                on_mirror_x={props.on_mirror_x.clone()}
+                on_mirror_y={props.on_mirror_y.clone()}
+            />
         </>
     }
 }
@@ -572,18 +894,8 @@ fn get_object_transform(obj: &MapObject) -> Option<ObjectTransform> {
             size: (size[0], size[1]),
             rotation,
         }),
-        EvaluatedShape::Line { start, end } => {
-            let cx = (start[0] + end[0]) / 2.0;
-            let cy = (start[1] + end[1]) / 2.0;
-            let dx = end[0] - start[0];
-            let dy = end[1] - start[1];
-            Some(ObjectTransform {
-                center: (cx, cy),
-                size: ((dx * dx + dy * dy).sqrt(), 4.0),
-                rotation: dy.atan2(dx).to_degrees(),
-            })
-        }
-        EvaluatedShape::Bezier { .. } => None,
+        // Line and Bezier use their own transform types
+        EvaluatedShape::Line { .. } | EvaluatedShape::Bezier { .. } => None,
     }
 }
 
@@ -604,35 +916,55 @@ fn is_bezier_object(obj: &MapObject) -> bool {
     matches!(obj.shape, Shape::Bezier { .. })
 }
 
+fn is_line_object(obj: &MapObject) -> bool {
+    matches!(obj.shape, Shape::Line { .. })
+}
+
+fn get_line_transform(obj: &MapObject) -> Option<LineTransform> {
+    let ctx = GameContext::new(0.0, 0);
+    match obj.shape.evaluate(&ctx) {
+        EvaluatedShape::Line { start, end } => Some(LineTransform {
+            start: (start[0], start[1]),
+            end: (end[0], end[1]),
+        }),
+        _ => None,
+    }
+}
+
+/// Round coordinate to integer.
+fn snap(v: f32) -> f32 {
+    v.round()
+}
+
 fn apply_transform_to_object(obj: &mut MapObject, t: &ObjectTransform) {
     match &mut obj.shape {
         Shape::Circle { center, radius } => {
-            *center = Vec2OrExpr::Static([t.center.0, t.center.1]);
-            *radius = NumberOrExpr::Number(t.size.0 / 2.0);
+            *center = Vec2OrExpr::Static([snap(t.center.0), snap(t.center.1)]);
+            *radius = NumberOrExpr::Number(snap(t.size.0 / 2.0));
         }
         Shape::Rect { center, size, rotation } => {
-            *center = Vec2OrExpr::Static([t.center.0, t.center.1]);
-            *size = Vec2OrExpr::Static([t.size.0, t.size.1]);
-            *rotation = NumberOrExpr::Number(t.rotation);
+            *center = Vec2OrExpr::Static([snap(t.center.0), snap(t.center.1)]);
+            *size = Vec2OrExpr::Static([snap(t.size.0), snap(t.size.1)]);
+            *rotation = NumberOrExpr::Number(t.rotation.round());
         }
-        Shape::Line { start, end } => {
-            let hl = t.size.0 / 2.0;
-            let r = t.rotation.to_radians();
-            let dx = hl * r.cos();
-            let dy = hl * r.sin();
-            *start = Vec2OrExpr::Static([t.center.0 - dx, t.center.1 - dy]);
-            *end = Vec2OrExpr::Static([t.center.0 + dx, t.center.1 + dy]);
-        }
-        Shape::Bezier { .. } => {}
+        // Line and Bezier use their own transform functions
+        Shape::Line { .. } | Shape::Bezier { .. } => {}
     }
 }
 
 fn apply_bezier_transform_to_object(obj: &mut MapObject, t: &BezierTransform) {
     if let Shape::Bezier { start, control1, control2, end, .. } = &mut obj.shape {
-        *start = Vec2OrExpr::Static([t.start.0, t.start.1]);
-        *control1 = Vec2OrExpr::Static([t.control1.0, t.control1.1]);
-        *control2 = Vec2OrExpr::Static([t.control2.0, t.control2.1]);
-        *end = Vec2OrExpr::Static([t.end.0, t.end.1]);
+        *start = Vec2OrExpr::Static([snap(t.start.0), snap(t.start.1)]);
+        *control1 = Vec2OrExpr::Static([snap(t.control1.0), snap(t.control1.1)]);
+        *control2 = Vec2OrExpr::Static([snap(t.control2.0), snap(t.control2.1)]);
+        *end = Vec2OrExpr::Static([snap(t.end.0), snap(t.end.1)]);
+    }
+}
+
+fn apply_line_transform_to_object(obj: &mut MapObject, t: &LineTransform) {
+    if let Shape::Line { start, end } = &mut obj.shape {
+        *start = Vec2OrExpr::Static([snap(t.start.0), snap(t.start.1)]);
+        *end = Vec2OrExpr::Static([snap(t.end.0), snap(t.end.1)]);
     }
 }
 

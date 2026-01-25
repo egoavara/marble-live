@@ -15,10 +15,13 @@ pub struct EditorToolbarProps {
     pub on_new: Callback<()>,
     pub on_load: Callback<RouletteConfig>,
     pub on_save: Callback<()>,
-    pub show_object_list: bool,
-    pub show_property_panel: bool,
-    pub on_toggle_object_list: Callback<()>,
-    pub on_toggle_property_panel: Callback<()>,
+    // Simulation controls
+    pub is_simulating: bool,
+    pub on_toggle_simulation: Callback<()>,
+    pub spawn_count: u32,
+    pub on_spawn_count_change: Callback<u32>,
+    pub on_spawn: Callback<()>,
+    pub on_reset: Callback<()>,
 }
 
 /// Editor toolbar with meatball-style buttons.
@@ -137,17 +140,52 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
         })
     };
 
-    let on_toggle_objects = {
-        let on_toggle = props.on_toggle_object_list.clone();
+    // Simulation control callbacks
+    let show_spawn_input = use_state(|| false);
+
+    let on_play_pause_click = {
+        let on_toggle = props.on_toggle_simulation.clone();
         Callback::from(move |_: MouseEvent| {
             on_toggle.emit(());
         })
     };
 
-    let on_toggle_properties = {
-        let on_toggle = props.on_toggle_property_panel.clone();
+    let on_spawn_click = {
+        let on_spawn = props.on_spawn.clone();
         Callback::from(move |_: MouseEvent| {
-            on_toggle.emit(());
+            on_spawn.emit(());
+        })
+    };
+
+    let on_reset_click = {
+        let on_reset = props.on_reset.clone();
+        Callback::from(move |_: MouseEvent| {
+            on_reset.emit(());
+        })
+    };
+
+    let on_spawn_count_input = {
+        let on_change = props.on_spawn_count_change.clone();
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                if let Ok(count) = input.value().parse::<u32>() {
+                    on_change.emit(count.max(1).min(100));
+                }
+            }
+        })
+    };
+
+    let on_spawn_hover_enter = {
+        let show = show_spawn_input.clone();
+        Callback::from(move |_: MouseEvent| {
+            show.set(true);
+        })
+    };
+
+    let on_spawn_hover_leave = {
+        let show = show_spawn_input.clone();
+        Callback::from(move |_: MouseEvent| {
+            show.set(false);
         })
     };
 
@@ -196,27 +234,54 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
                 </span>
             </div>
 
-            // Right group: Panel toggles
+            // Right group: Simulation controls
             <div class="editor-toolbar-group">
                 <button
                     class={classes!(
                         "editor-meatball-btn",
-                        props.show_object_list.then_some("active")
+                        props.is_simulating.then_some("active")
                     )}
-                    onclick={on_toggle_objects}
-                    title="Toggle Object List"
+                    onclick={on_play_pause_click}
+                    title={if props.is_simulating { "Pause Simulation" } else { "Play Simulation" }}
                 >
-                    <Icon data={IconData::LUCIDE_LIST} width="18px" height="18px" />
+                    if props.is_simulating {
+                        <Icon data={IconData::LUCIDE_PAUSE} width="18px" height="18px" />
+                    } else {
+                        <Icon data={IconData::LUCIDE_PLAY} width="18px" height="18px" />
+                    }
                 </button>
-                <button
-                    class={classes!(
-                        "editor-meatball-btn",
-                        props.show_property_panel.then_some("active")
-                    )}
-                    onclick={on_toggle_properties}
-                    title="Toggle Properties"
+                <div
+                    class="editor-spawn-container"
+                    onmouseenter={on_spawn_hover_enter}
+                    onmouseleave={on_spawn_hover_leave}
                 >
-                    <Icon data={IconData::LUCIDE_SETTINGS_2} width="18px" height="18px" />
+                    <button
+                        class="editor-meatball-btn"
+                        onclick={on_spawn_click}
+                        title="Spawn Marbles"
+                    >
+                        <Icon data={IconData::LUCIDE_CIRCLE_DOT} width="18px" height="18px" />
+                        <span class="editor-spawn-arrow">{"▼"}</span>
+                    </button>
+                    if *show_spawn_input {
+                        <div class="editor-spawn-dropdown">
+                            <input
+                                type="number"
+                                class="editor-spawn-input"
+                                value={props.spawn_count.to_string()}
+                                min="1"
+                                max="100"
+                                oninput={on_spawn_count_input}
+                            />
+                        </div>
+                    }
+                </div>
+                <button
+                    class="editor-meatball-btn"
+                    onclick={on_reset_click}
+                    title="Reset Simulation"
+                >
+                    <Icon data={IconData::LUCIDE_ROTATE_CCW} width="18px" height="18px" />
                 </button>
             </div>
 
