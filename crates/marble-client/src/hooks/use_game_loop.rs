@@ -333,12 +333,13 @@ pub fn use_game_loop(
         Rc::new(RefCell::new(state))
     });
 
-    // Camera state - created once with initial mode
+    // Camera state - created once with initial mode and map bounds
     let camera_state = {
         let initial_mode = initial_camera_mode;
         use_memo((), move |_| {
-            // Default map size from classic config
-            let mut camera = CameraState::new((800.0, 600.0), (800.0, 600.0));
+            // Calculate map bounds from default map
+            let map_bounds = RouletteConfig::default_classic().calculate_bounds();
+            let mut camera = CameraState::new((800.0, 600.0), map_bounds);
             camera.set_mode(initial_mode);
             Rc::new(RefCell::new(camera))
         })

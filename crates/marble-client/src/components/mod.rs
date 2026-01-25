@@ -8,6 +8,7 @@ mod chat_panel;
 // mod controls;
 // mod debug_log;
 // mod debug_panel;
+pub mod editor;
 mod game_view;
 mod layout;
 // mod leaderboard;

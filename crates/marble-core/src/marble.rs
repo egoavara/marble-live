@@ -177,6 +177,31 @@ impl MarbleManager {
                     start[1] + (end[1] - start[1]) * t,
                 )
             }
+            EvaluatedShape::Bezier {
+                start,
+                control1,
+                control2,
+                end,
+                ..
+            } => {
+                // Random position along the bezier curve
+                let t = rng.random_range(0.0..1.0);
+                let t2 = t * t;
+                let t3 = t2 * t;
+                let mt = 1.0 - t;
+                let mt2 = mt * mt;
+                let mt3 = mt2 * mt;
+                (
+                    mt3 * start[0]
+                        + 3.0 * mt2 * t * control1[0]
+                        + 3.0 * mt * t2 * control2[0]
+                        + t3 * end[0],
+                    mt3 * start[1]
+                        + 3.0 * mt2 * t * control1[1]
+                        + 3.0 * mt * t2 * control2[1]
+                        + t3 * end[1],
+                )
+            }
         };
 
         self.spawn_marble_at(world, owner_id, color, x, y, DEFAULT_MARBLE_RADIUS)

@@ -83,7 +83,7 @@ impl GameState {
             trigger_actions: Vec::new(),
             spawners: Vec::new(),
             blackholes: Vec::new(),
-            game_context: GameContext::with_cache(),
+            game_context: GameContext::with_cache_and_seed(seed),
             kinematic_bodies: HashMap::new(),
             kinematic_initial_transforms: HashMap::new(),
             keyframe_executors: Vec::new(),
@@ -325,6 +325,7 @@ impl GameState {
                 EvaluatedShape::Circle { center, .. } => center,
                 EvaluatedShape::Rect { center, .. } => center,
                 EvaluatedShape::Line { .. } => continue,
+                EvaluatedShape::Bezier { .. } => continue,
             };
 
             // Apply force to all active marbles
@@ -397,7 +398,7 @@ impl GameState {
     /// Updates keyframe animations.
     fn update_keyframes(&mut self) {
         let config = match &self.map_config {
-            Some(c) => c,
+            Some(c) => c.clone(),
             None => return,
         };
 
@@ -416,6 +417,7 @@ impl GameState {
                 &config.keyframes,
                 &current_positions,
                 &self.kinematic_initial_transforms,
+                &mut self.game_context,
             );
 
             // Apply updates to kinematic bodies
@@ -471,6 +473,10 @@ impl GameState {
             EvaluatedShape::Rect { center, .. } => Some((center[0], center[1])),
             EvaluatedShape::Line { start, end } => {
                 // For Line, use midpoint
+                Some(((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0))
+            }
+            EvaluatedShape::Bezier { start, end, .. } => {
+                // For Bezier, use midpoint of start/end
                 Some(((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0))
             }
         }

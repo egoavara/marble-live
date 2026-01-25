@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::dsl::GameContext;
 use crate::map::{EasingType, Keyframe, KeyframeSequence};
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,11 @@ struct ActiveAnimation {
     duration: f32,
     elapsed: f32,
     easing: EasingType,
+    /// Optional pivot point for pivot rotation (flipper-style).
+    /// When set, the object rotates around this point.
+    pivot: Option<[f32; 2]>,
+    /// Initial offset from pivot (calculated once at animation start).
+    initial_pivot_offset: Option<[f32; 2]>,
 }
 
 impl ActiveAnimation {
@@ -29,13 +35,30 @@ impl ActiveAnimation {
         };
         let eased_t = self.easing.apply(t);
 
-        let pos = [
-            self.start_translation[0] + (self.end_translation[0] - self.start_translation[0]) * eased_t,
-            self.start_translation[1] + (self.end_translation[1] - self.start_translation[1]) * eased_t,
-        ];
-        let rot = self.start_rotation + (self.end_rotation - self.start_rotation) * eased_t;
+        // Check if this is a pivot rotation
+        if let (Some(pivot), Some(offset)) = (self.pivot, self.initial_pivot_offset) {
+            // Pivot rotation: rotate the offset vector around the pivot
+            let angle = self.start_rotation + (self.end_rotation - self.start_rotation) * eased_t;
+            let (sin, cos) = angle.sin_cos();
 
-        (pos, rot)
+            // Rotate the initial offset
+            let rotated_x = offset[0] * cos - offset[1] * sin;
+            let rotated_y = offset[0] * sin + offset[1] * cos;
+
+            // Calculate new position
+            let pos = [pivot[0] + rotated_x, pivot[1] + rotated_y];
+
+            (pos, angle)
+        } else {
+            // Standard translation + rotation interpolation
+            let pos = [
+                self.start_translation[0] + (self.end_translation[0] - self.start_translation[0]) * eased_t,
+                self.start_translation[1] + (self.end_translation[1] - self.start_translation[1]) * eased_t,
+            ];
+            let rot = self.start_rotation + (self.end_rotation - self.start_rotation) * eased_t;
+
+            (pos, rot)
+        }
     }
 
     /// Returns true if the animation has completed.
@@ -93,6 +116,7 @@ impl KeyframeExecutor {
         sequences: &[KeyframeSequence],
         current_positions: &HashMap<String, ([f32; 2], f32)>,
         initial_transforms: &HashMap<String, ([f32; 2], f32)>,
+        game_context: &mut GameContext,
     ) -> Vec<(String, [f32; 2], f32)> {
         if self.finished {
             return Vec::new();
@@ -169,7 +193,7 @@ impl KeyframeExecutor {
                     }
                 }
                 Keyframe::Delay { duration } => {
-                    self.delay_remaining = *duration;
+                    self.delay_remaining = duration.evaluate_with_random(game_context);
                     self.current_index += 1;
                     break;
                 }
@@ -203,6 +227,44 @@ impl KeyframeExecutor {
                                 duration: *duration,
                                 elapsed: 0.0,
                                 easing: *easing,
+                                pivot: None,
+                                initial_pivot_offset: None,
+                            });
+                        }
+                    }
+                    self.current_index += 1;
+                    break;
+                }
+                Keyframe::PivotRotate {
+                    target_ids,
+                    pivot,
+                    angle,
+                    duration,
+                    easing,
+                } => {
+                    // Start pivot rotation animations for each target
+                    for target_id in target_ids {
+                        let current = current_positions.get(target_id);
+                        let initial = initial_transforms.get(target_id);
+
+                        if let (Some(&(cur_pos, cur_rot)), Some(&(init_pos, init_rot))) = (current, initial) {
+                            // Calculate the initial offset from pivot (using initial position)
+                            let offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+
+                            // Target angle is initial rotation + angle offset
+                            let end_rotation = init_rot + angle.to_radians();
+
+                            self.active_animations.push(ActiveAnimation {
+                                target_id: target_id.clone(),
+                                start_translation: cur_pos,
+                                end_translation: cur_pos, // Will be calculated in interpolate()
+                                start_rotation: cur_rot,
+                                end_rotation,
+                                duration: *duration,
+                                elapsed: 0.0,
+                                easing: *easing,
+                                pivot: Some(*pivot),
+                                initial_pivot_offset: Some(offset),
                             });
                         }
                     }
@@ -250,6 +312,7 @@ impl KeyframeExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsl::NumberOrExpr;
 
     fn create_test_sequence() -> KeyframeSequence {
         KeyframeSequence {
@@ -262,7 +325,7 @@ mod tests {
                     duration: 1.0,
                     easing: EasingType::Linear,
                 },
-                Keyframe::Delay { duration: 0.5 },
+                Keyframe::Delay { duration: NumberOrExpr::Number(0.5) },
                 Keyframe::Apply {
                     target_ids: vec!["obj1".to_string()],
                     translation: Some([0.0, 0.0]),
@@ -305,17 +368,17 @@ mod tests {
         let mut executor = KeyframeExecutor::new("test".to_string());
         let sequences = vec![create_test_sequence()];
         let mut positions = HashMap::new();
-        let mut initials = HashMap::new();
+        let mut game_context = GameContext::with_cache_and_seed(12345);
         positions.insert("obj1".to_string(), ([0.0, 0.0], 0.0));
-        initials.insert("obj1".to_string(), ([0.0, 0.0], 0.0));
+        let initials = HashMap::from([("obj1".to_string(), ([0.0, 0.0], 0.0))]);
 
         // First update starts the animation
-        let updates = executor.update(0.0, &sequences, &positions, &initials);
+        let updates = executor.update(0.0, &sequences, &positions, &initials, &mut game_context);
         assert_eq!(updates.len(), 0); // No updates yet, just started
 
         // Simulate animation progress
         for _ in 0..10 {
-            let updates = executor.update(0.1, &sequences, &positions, &initials);
+            let updates = executor.update(0.1, &sequences, &positions, &initials, &mut game_context);
             if !updates.is_empty() {
                 positions.insert(updates[0].0.clone(), (updates[0].1, updates[0].2));
             }
@@ -342,6 +405,7 @@ mod tests {
         let sequences = vec![create_loop_sequence()];
         let mut positions = HashMap::new();
         let initials = HashMap::from([("obj1".to_string(), ([0.0, 0.0], 0.0))]);
+        let mut game_context = GameContext::with_cache_and_seed(12345);
         positions.insert("obj1".to_string(), ([0.0, 0.0], 0.0));
 
         // Run through the loop twice (each loop takes 0.5 seconds)
@@ -350,7 +414,7 @@ mod tests {
         let steps = (total_time / dt) as u32;
 
         for _ in 0..steps {
-            let updates = executor.update(dt, &sequences, &positions, &initials);
+            let updates = executor.update(dt, &sequences, &positions, &initials, &mut game_context);
             for (id, pos, rot) in updates {
                 positions.insert(id, (pos, rot));
             }
@@ -382,11 +446,12 @@ mod tests {
         let sequences = vec![sequence];
         let mut positions = HashMap::new();
         let initials = HashMap::from([("obj1".to_string(), ([0.0, 0.0], 0.0))]);
+        let mut game_context = GameContext::with_cache_and_seed(12345);
         positions.insert("obj1".to_string(), ([0.0, 0.0], 0.0));
 
         // Run for a while
         for _ in 0..100 {
-            let updates = executor.update(0.05, &sequences, &positions, &initials);
+            let updates = executor.update(0.05, &sequences, &positions, &initials, &mut game_context);
             for (id, pos, rot) in updates {
                 positions.insert(id, (pos, rot));
             }
@@ -394,5 +459,83 @@ mod tests {
 
         // Should still be running
         assert!(!executor.is_finished());
+    }
+
+    #[test]
+    fn test_pivot_rotation() {
+        // Test that pivot rotation correctly rotates around the pivot point
+        let sequence = KeyframeSequence {
+            name: "pivot_test".to_string(),
+            keyframes: vec![
+                Keyframe::PivotRotate {
+                    target_ids: vec!["flipper".to_string()],
+                    pivot: [0.0, 0.0],  // Pivot at origin
+                    angle: 90.0,         // Rotate 90 degrees
+                    duration: 1.0,
+                    easing: EasingType::Linear,
+                },
+            ],
+            autoplay: true,
+        };
+
+        let mut executor = KeyframeExecutor::new("pivot_test".to_string());
+        let sequences = vec![sequence];
+
+        // Object starts at (100, 0) with 0 rotation
+        let mut positions = HashMap::from([("flipper".to_string(), ([100.0, 0.0], 0.0))]);
+        let initials = HashMap::from([("flipper".to_string(), ([100.0, 0.0], 0.0))]);
+        let mut game_context = GameContext::with_cache_and_seed(12345);
+
+        // First update starts the animation
+        executor.update(0.0, &sequences, &positions, &initials, &mut game_context);
+
+        // Run animation to completion
+        for _ in 0..10 {
+            let updates = executor.update(0.1, &sequences, &positions, &initials, &mut game_context);
+            for (id, pos, rot) in updates {
+                positions.insert(id, (pos, rot));
+            }
+        }
+
+        // After 90 degree rotation around origin, (100, 0) should be at approximately (0, 100)
+        let (pos, rot) = positions.get("flipper").unwrap();
+        assert!(pos[0].abs() < 1.0, "X should be near 0, got {}", pos[0]);
+        assert!((pos[1] - 100.0).abs() < 1.0, "Y should be near 100, got {}", pos[1]);
+        assert!((*rot - std::f32::consts::FRAC_PI_2).abs() < 0.01, "Rotation should be 90 degrees");
+    }
+
+    #[test]
+    fn test_random_delay() {
+        // Test that random() in delay works
+        let sequence = KeyframeSequence {
+            name: "random_delay_test".to_string(),
+            keyframes: vec![
+                Keyframe::LoopStart { count: Some(3) },
+                Keyframe::Delay { duration: NumberOrExpr::Expr("random(0.1, 0.2)".to_string()) },
+                Keyframe::Apply {
+                    target_ids: vec!["obj1".to_string()],
+                    translation: Some([10.0, 0.0]),
+                    rotation: None,
+                    duration: 0.1,
+                    easing: EasingType::Linear,
+                },
+                Keyframe::LoopEnd,
+            ],
+            autoplay: true,
+        };
+
+        let mut executor = KeyframeExecutor::new("random_delay_test".to_string());
+        let sequences = vec![sequence];
+        let mut positions = HashMap::from([("obj1".to_string(), ([0.0, 0.0], 0.0))]);
+        let initials = HashMap::from([("obj1".to_string(), ([0.0, 0.0], 0.0))]);
+        let mut game_context = GameContext::with_cache_and_seed(42);
+
+        // Run for a while - the test just verifies it doesn't crash
+        for _ in 0..100 {
+            let updates = executor.update(0.05, &sequences, &positions, &initials, &mut game_context);
+            for (id, pos, rot) in updates {
+                positions.insert(id, (pos, rot));
+            }
+        }
     }
 }

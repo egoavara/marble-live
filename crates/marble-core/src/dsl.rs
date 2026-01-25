@@ -7,6 +7,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cel_interpreter::{Context, Program, Value};
+use rand::Rng;
+use rand_chacha::ChaCha8Rng;
+use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 
 /// Error type for CEL expression evaluation.
@@ -21,7 +24,7 @@ pub enum DslError {
 }
 
 /// A number or CEL expression that evaluates to a number.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum NumberOrExpr {
     Number(f32),
@@ -43,6 +46,15 @@ impl NumberOrExpr {
         }
     }
 
+    /// Evaluates the expression with random() macro support.
+    /// Use this for expressions that may contain random(min, max).
+    pub fn evaluate_with_random(&self, ctx: &mut GameContext) -> f32 {
+        match self {
+            Self::Number(n) => *n,
+            Self::Expr(expr) => ctx.eval_f32_with_random(expr).unwrap_or(0.0),
+        }
+    }
+
     /// Returns true if this is a dynamic expression (not a static number).
     pub fn is_dynamic(&self) -> bool {
         matches!(self, Self::Expr(_))
@@ -50,7 +62,7 @@ impl NumberOrExpr {
 }
 
 /// A 2D vector that can be static or dynamic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum Vec2OrExpr {
     /// Static [x, y] values.
@@ -84,6 +96,8 @@ pub struct GameContext {
     /// Cached compiled programs for expression reuse.
     #[allow(clippy::type_complexity)]
     program_cache: Option<Arc<parking_lot::RwLock<HashMap<String, Arc<Program>>>>>,
+    /// RNG for random() macro (deterministic).
+    rng: Option<ChaCha8Rng>,
 }
 
 impl Default for GameContext {
@@ -99,6 +113,7 @@ impl GameContext {
             time,
             frame,
             program_cache: None,
+            rng: None,
         }
     }
 
@@ -108,6 +123,17 @@ impl GameContext {
             time: 0.0,
             frame: 0,
             program_cache: Some(Arc::new(parking_lot::RwLock::new(HashMap::new()))),
+            rng: None,
+        }
+    }
+
+    /// Creates a game context with caching and deterministic RNG for random() macro.
+    pub fn with_cache_and_seed(seed: u64) -> Self {
+        Self {
+            time: 0.0,
+            frame: 0,
+            program_cache: Some(Arc::new(parking_lot::RwLock::new(HashMap::new()))),
+            rng: Some(ChaCha8Rng::seed_from_u64(seed)),
         }
     }
 
@@ -115,6 +141,43 @@ impl GameContext {
     pub fn update(&mut self, time: f32, frame: u64) {
         self.time = time;
         self.frame = frame;
+    }
+
+    /// Preprocesses an expression to replace random(min, max) with actual random values.
+    /// Returns the processed expression string.
+    pub fn preprocess_random(&mut self, expr: &str) -> String {
+        let Some(rng) = &mut self.rng else {
+            return expr.to_string();
+        };
+
+        let mut result = expr.to_string();
+
+        // Find and replace all random(min, max) patterns
+        while let Some(start) = result.find("random(") {
+            // Find the closing parenthesis
+            let after_open = start + 7; // length of "random("
+            let Some(rel_close) = result[after_open..].find(')') else {
+                break;
+            };
+            let end = after_open + rel_close;
+
+            // Extract the arguments
+            let args_str = &result[after_open..end];
+            let parts: Vec<&str> = args_str.split(',').collect();
+
+            if parts.len() == 2 {
+                let min: f32 = parts[0].trim().parse().unwrap_or(0.0);
+                let max: f32 = parts[1].trim().parse().unwrap_or(1.0);
+                let value = rng.random_range(min..max);
+
+                // Replace the random() call with the value
+                result = format!("{}{}{}", &result[..start], value, &result[end + 1..]);
+            } else {
+                break;
+            }
+        }
+
+        result
     }
 
     /// Converts to CEL context for expression evaluation.
@@ -169,6 +232,13 @@ impl GameContext {
             Value::UInt(u) => Ok(u as f32),
             other => Err(DslError::TypeMismatch(format!("{other:?}"))),
         }
+    }
+
+    /// Evaluates a CEL expression to an f32, with random() macro support.
+    /// Requires mutable access for RNG state.
+    pub fn eval_f32_with_random(&mut self, expr: &str) -> Result<f32, DslError> {
+        let processed = self.preprocess_random(expr);
+        self.eval_f32(&processed)
     }
 
     /// Evaluates a CEL expression to an f64.
@@ -251,5 +321,48 @@ mod tests {
         ctx.update(10.0, 600);
         let result2 = ctx.eval_f32("game.time * 2.0").unwrap();
         assert!((result2 - 20.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_random_macro_preprocessing() {
+        let mut ctx = GameContext::with_cache_and_seed(12345);
+
+        // Test random() preprocessing
+        let processed = ctx.preprocess_random("random(0.5, 1.5)");
+        let value: f32 = processed.parse().unwrap();
+        assert!(value >= 0.5 && value < 1.5);
+    }
+
+    #[test]
+    fn test_random_macro_deterministic() {
+        let mut ctx1 = GameContext::with_cache_and_seed(42);
+        let mut ctx2 = GameContext::with_cache_and_seed(42);
+
+        // Same seed should produce same results
+        let result1 = ctx1.eval_f32_with_random("random(0.0, 100.0)").unwrap();
+        let result2 = ctx2.eval_f32_with_random("random(0.0, 100.0)").unwrap();
+        assert!((result1 - result2).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_number_or_expr_with_random() {
+        let mut ctx = GameContext::with_cache_and_seed(42);
+
+        let value = NumberOrExpr::Expr("random(1.0, 2.0)".to_string());
+        let result = value.evaluate_with_random(&mut ctx);
+        assert!(result >= 1.0 && result < 2.0);
+
+        // Static number should work unchanged
+        let static_value = NumberOrExpr::Number(5.0);
+        assert!((static_value.evaluate_with_random(&mut ctx) - 5.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_random_in_expression() {
+        let mut ctx = GameContext::with_cache_and_seed(12345);
+
+        // random() can be part of a larger expression
+        let result = ctx.eval_f32_with_random("random(1.0, 2.0) + 10.0").unwrap();
+        assert!(result >= 11.0 && result < 12.0);
     }
 }

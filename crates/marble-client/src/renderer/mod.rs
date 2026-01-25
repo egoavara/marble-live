@@ -696,6 +696,156 @@ impl WgpuRenderer {
         output.present();
     }
 
+    /// Renders the game state with additional overlay instances (e.g., gizmos).
+    pub fn render_with_overlay(
+        &mut self,
+        game_state: &GameState,
+        camera: &CameraState,
+        overlay_circles: &[CircleInstance],
+        overlay_lines: &[LineInstance],
+        overlay_rects: &[RectInstance],
+    ) {
+        // Update camera uniform
+        let camera_uniform = CameraUniform {
+            view_proj: camera.view_projection_matrix(),
+        };
+        self.queue.write_buffer(
+            &self.camera_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[camera_uniform]),
+        );
+
+        // Collect base instances
+        let (base_circles, base_lines, base_rects) = self.collect_instances(game_state);
+
+        // Track base counts for separate draw calls
+        let base_circle_count = base_circles.len();
+        let base_line_count = base_lines.len();
+        let base_rect_count = base_rects.len();
+
+        // Combine base + overlay for buffer write
+        let mut circles = base_circles;
+        let mut lines = base_lines;
+        let mut rects = base_rects;
+        circles.extend_from_slice(overlay_circles);
+        lines.extend_from_slice(overlay_lines);
+        rects.extend_from_slice(overlay_rects);
+
+        // Ensure buffers are large enough
+        self.ensure_buffer_capacity(&circles, &lines, &rects);
+
+        // Write instance data
+        if !circles.is_empty() {
+            self.queue.write_buffer(
+                &self.circle_instance_buffer,
+                0,
+                bytemuck::cast_slice(&circles),
+            );
+        }
+        if !lines.is_empty() {
+            self.queue
+                .write_buffer(&self.line_instance_buffer, 0, bytemuck::cast_slice(&lines));
+        }
+        if !rects.is_empty() {
+            self.queue
+                .write_buffer(&self.rect_instance_buffer, 0, bytemuck::cast_slice(&rects));
+        }
+
+        let overlay_circle_count = overlay_circles.len();
+        let overlay_line_count = overlay_lines.len();
+        let overlay_rect_count = overlay_rects.len();
+
+        // Get surface texture
+        let output = match self.surface.get_current_texture() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!("Failed to get surface texture: {:?}", e);
+                return;
+            }
+        };
+
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.102,
+                            g: 0.102,
+                            b: 0.180,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            // === Draw base instances first ===
+            if base_line_count > 0 {
+                render_pass.set_pipeline(&self.line_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.line_instance_buffer.slice(..));
+                render_pass.draw(0..6, 0..base_line_count as u32);
+            }
+
+            if base_rect_count > 0 {
+                render_pass.set_pipeline(&self.rect_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.rect_instance_buffer.slice(..));
+                render_pass.draw(0..6, 0..base_rect_count as u32);
+            }
+
+            if base_circle_count > 0 {
+                render_pass.set_pipeline(&self.circle_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.circle_instance_buffer.slice(..));
+                render_pass.draw(0..6, 0..base_circle_count as u32);
+            }
+
+            // === Draw overlay (gizmo) on top ===
+            if overlay_line_count > 0 {
+                render_pass.set_pipeline(&self.line_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.line_instance_buffer.slice(..));
+                render_pass.draw(0..6, base_line_count as u32..(base_line_count + overlay_line_count) as u32);
+            }
+
+            if overlay_rect_count > 0 {
+                render_pass.set_pipeline(&self.rect_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.rect_instance_buffer.slice(..));
+                render_pass.draw(0..6, base_rect_count as u32..(base_rect_count + overlay_rect_count) as u32);
+            }
+
+            if overlay_circle_count > 0 {
+                render_pass.set_pipeline(&self.circle_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.circle_instance_buffer.slice(..));
+                render_pass.draw(0..6, base_circle_count as u32..(base_circle_count + overlay_circle_count) as u32);
+            }
+        }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+    }
+
     fn collect_instances(&self, game_state: &GameState) -> (Vec<CircleInstance>, Vec<LineInstance>, Vec<RectInstance>) {
         let mut circles = Vec::new();
         let mut lines = Vec::new();
@@ -753,6 +903,10 @@ impl WgpuRenderer {
                                 rotation: rot.to_degrees(),
                             }
                         }
+                        EvaluatedShape::Bezier { .. } => {
+                            // Bezier curves are not supported for kinematic objects
+                            obj.shape.evaluate(&ctx)
+                        }
                     }
                 } else {
                     obj.shape.evaluate(&ctx)
@@ -791,6 +945,7 @@ impl WgpuRenderer {
                                 ));
                             }
                             EvaluatedShape::Line { .. } => {}
+                            EvaluatedShape::Bezier { .. } => {}
                         }
                     }
                     ObjectRole::Obstacle => {
@@ -823,6 +978,19 @@ impl WgpuRenderer {
                                     2.0,
                                 ));
                             }
+                            EvaluatedShape::Bezier { .. } => {
+                                // Render bezier as multiple line segments
+                                if let Some(points) = shape.bezier_to_points() {
+                                    for i in 0..points.len() - 1 {
+                                        lines.push(LineInstance::new(
+                                            (points[i][0], points[i][1]),
+                                            (points[i + 1][0], points[i + 1][1]),
+                                            4.0,
+                                            Color::new(74, 74, 106, 255),
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     }
                     ObjectRole::Spawner => {
@@ -848,6 +1016,7 @@ impl WgpuRenderer {
                                 ));
                             }
                             EvaluatedShape::Line { .. } => {}
+                            EvaluatedShape::Bezier { .. } => {}
                         }
                     }
                 }

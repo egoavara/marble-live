@@ -1,6 +1,6 @@
 {
   "meta": {
-    "name": "Animated Example",
+    "name": "3D Pinball",
     "gamerule": ["top_n", "last_n"],
     "live_ranking": {
       "type": "distance",
@@ -10,72 +10,151 @@
   "objects": [
     {
       "role": "spawner",
-      "shape": { "type": "rect", "center": [400.0, 100.0], "size": [600.0, 100.0], "rotation": 0.0 },
+      "shape": { "type": "rect", "center": [300.0, 100.0], "size": [400.0, 80.0], "rotation": 0.0 },
       "properties": { "spawn": { "mode": "random", "initial_force": "random" } }
     },
-    { "role": "obstacle", "shape": { "type": "line", "start": [0.0, 0.0], "end": [800.0, 0.0] } },
-    { "role": "obstacle", "shape": { "type": "line", "start": [800.0, 0.0], "end": [800.0, 600.0] } },
-    { "role": "obstacle", "shape": { "type": "line", "start": [800.0, 600.0], "end": [0.0, 600.0] } },
-    { "role": "obstacle", "shape": { "type": "line", "start": [0.0, 600.0], "end": [0.0, 0.0] } },
+
+    { "role": "obstacle", "shape": { "type": "line", "start": [0.0, 0.0], "end": [600.0, 0.0] } },
+    { "role": "obstacle", "shape": { "type": "line", "start": [600.0, 0.0], "end": [600.0, 1000.0] } },
+    { "role": "obstacle", "shape": { "type": "line", "start": [600.0, 1000.0], "end": [0.0, 1000.0] } },
+    { "role": "obstacle", "shape": { "type": "line", "start": [0.0, 1000.0], "end": [0.0, 0.0] } },
+
     {
       "role": "obstacle",
-      "shape": { "type": "circle", "center": [400.0, 300.0], "radius": 30.0 },
+      "shape": { "type": "circle", "center": [150.0, 250.0], "radius": 25.0 },
+      "properties": { "bumper": { "force": 1.2 } }
+    },
+    {
+      "role": "obstacle",
+      "shape": { "type": "circle", "center": [300.0, 250.0], "radius": 25.0 },
+      "properties": { "bumper": { "force": 1.2 } }
+    },
+    {
+      "role": "obstacle",
+      "shape": { "type": "circle", "center": [450.0, 250.0], "radius": 25.0 },
+      "properties": { "bumper": { "force": 1.2 } }
+    },
+
+    {
+      "role": "obstacle",
+      "shape": { "type": "circle", "center": [200.0, 350.0], "radius": 22.0 },
       "properties": { "bumper": { "force": 1.0 } }
     },
     {
-      "id": "rotating_box",
       "role": "obstacle",
-      "shape": { "type": "rect", "center": [200.0, 200.0], "size": [80.0, 10.0], "rotation": 0.0 },
-      "properties": { "roll": { "direction": "clockwise", "speed": 45.0 } }
+      "shape": { "type": "circle", "center": [400.0, 350.0], "radius": 22.0 },
+      "properties": { "bumper": { "force": 1.0 } }
+    },
+
+    {
+      "role": "obstacle",
+      "shape": { "type": "circle", "center": [120.0, 450.0], "radius": 20.0 },
+      "properties": { "bumper": { "force": 0.9 } }
     },
     {
-      "id": "rotating_box_ccw",
       "role": "obstacle",
-      "shape": { "type": "rect", "center": [600.0, 200.0], "size": [80.0, 10.0], "rotation": 0.0 },
-      "properties": { "roll": { "direction": "counterclockwise", "speed": 60.0 } }
+      "shape": { "type": "circle", "center": [480.0, 450.0], "radius": 20.0 },
+      "properties": { "bumper": { "force": 0.9 } }
     },
     {
-      "id": "moving_wall",
       "role": "obstacle",
-      "shape": { "type": "line", "start": [150.0, 400.0], "end": [250.0, 400.0] }
+      "shape": { "type": "circle", "center": [300.0, 500.0], "radius": 18.0 },
+      "properties": { "bumper": { "force": 0.8 } }
+    },
+
+    {
+      "id": "spinner_left",
+      "role": "obstacle",
+      "shape": { "type": "rect", "center": [150.0, 550.0], "size": [100.0, 8.0], "rotation": 0.0 },
+      "properties": { "roll": { "direction": "clockwise", "speed": 90.0 } }
     },
     {
-      "id": "moving_wall_2",
+      "id": "spinner_right",
       "role": "obstacle",
-      "shape": { "type": "line", "start": [550.0, 400.0], "end": [650.0, 400.0] }
+      "shape": { "type": "rect", "center": [450.0, 550.0], "size": [100.0, 8.0], "rotation": 0.0 },
+      "properties": { "roll": { "direction": "counterclockwise", "speed": 90.0 } }
     },
+
+    {
+      "role": "obstacle",
+      "shape": { "type": "circle", "center": [220.0, 650.0], "radius": 18.0 },
+      "properties": { "bumper": { "force": 0.7 } }
+    },
+    {
+      "role": "obstacle",
+      "shape": { "type": "circle", "center": [380.0, 650.0], "radius": 18.0 },
+      "properties": { "bumper": { "force": 0.7 } }
+    },
+
+    {
+      "role": "obstacle",
+      "shape": {
+        "type": "bezier",
+        "start": [0.0, 700.0],
+        "control1": [0.0, 780.0],
+        "control2": [60.0, 830.0],
+        "end": [120.0, 830.0],
+        "segments": 12
+      }
+    },
+    {
+      "role": "obstacle",
+      "shape": {
+        "type": "bezier",
+        "start": [600.0, 700.0],
+        "control1": [600.0, 780.0],
+        "control2": [540.0, 830.0],
+        "end": [480.0, 830.0],
+        "segments": 12
+      }
+    },
+
+    {
+      "id": "flipper_left",
+      "role": "obstacle",
+      "shape": { "type": "rect", "center": [180.0, 830.0], "size": [80.0, 12.0], "rotation": -20.0 }
+    },
+    {
+      "id": "flipper_right",
+      "role": "obstacle",
+      "shape": { "type": "rect", "center": [420.0, 830.0], "size": [80.0, 12.0], "rotation": 20.0 }
+    },
+
+    { "role": "obstacle", "shape": { "type": "line", "start": [120.0, 880.0], "end": [200.0, 920.0] } },
+    { "role": "obstacle", "shape": { "type": "line", "start": [480.0, 880.0], "end": [400.0, 920.0] } },
+
     {
       "id": "goal",
       "role": "trigger",
-      "shape": { "type": "circle", "center": [400.0, 550.0], "radius": 40.0 },
+      "shape": { "type": "circle", "center": [300.0, 950.0], "radius": 45.0 },
       "properties": {
-        "blackhole": { "force": "0.2 + 0.1 * game.time" },
+        "blackhole": { "force": "0.15 + 0.05 * game.time" },
         "trigger": { "action": "gamerule" }
       }
     }
   ],
   "keyframes": [
     {
-      "name": "wall_oscillate",
+      "name": "flipper_left_cycle",
       "autoplay": true,
       "keyframes": [
         { "type": "loop_start" },
-        { "type": "apply", "target_ids": ["moving_wall"], "translation": [100.0, 0.0], "duration": 2.0, "easing": "ease_in_out" },
-        { "type": "delay", "duration": 0.5 },
-        { "type": "apply", "target_ids": ["moving_wall"], "translation": [0.0, 0.0], "duration": 2.0, "easing": "ease_in_out" },
-        { "type": "delay", "duration": 0.5 },
+        { "type": "delay", "duration": "random(0.5, 2.0)" },
+        { "type": "pivot_rotate", "target_ids": ["flipper_left"], "pivot": [140.0, 830.0], "angle": 35.0, "duration": 0.1, "easing": "ease_out" },
+        { "type": "delay", "duration": 0.1 },
+        { "type": "pivot_rotate", "target_ids": ["flipper_left"], "pivot": [140.0, 830.0], "angle": 0.0, "duration": 0.15, "easing": "ease_in" },
         { "type": "loop_end" }
       ]
     },
     {
-      "name": "wall_oscillate_2",
+      "name": "flipper_right_cycle",
       "autoplay": true,
       "keyframes": [
         { "type": "loop_start" },
-        { "type": "apply", "target_ids": ["moving_wall_2"], "translation": [-100.0, 0.0], "duration": 2.0, "easing": "ease_in_out" },
-        { "type": "delay", "duration": 0.5 },
-        { "type": "apply", "target_ids": ["moving_wall_2"], "translation": [0.0, 0.0], "duration": 2.0, "easing": "ease_in_out" },
-        { "type": "delay", "duration": 0.5 },
+        { "type": "delay", "duration": "random(0.5, 2.0)" },
+        { "type": "pivot_rotate", "target_ids": ["flipper_right"], "pivot": [460.0, 830.0], "angle": -35.0, "duration": 0.1, "easing": "ease_out" },
+        { "type": "delay", "duration": 0.1 },
+        { "type": "pivot_rotate", "target_ids": ["flipper_right"], "pivot": [460.0, 830.0], "angle": 0.0, "duration": 0.15, "easing": "ease_in" },
         { "type": "loop_end" }
       ]
     }

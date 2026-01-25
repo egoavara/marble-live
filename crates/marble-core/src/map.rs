@@ -12,8 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::dsl::{GameContext, NumberOrExpr, Vec2OrExpr};
 use crate::physics::PhysicsWorld;
 
+/// Default number of segments for bezier curve approximation.
+fn default_bezier_segments() -> u32 {
+    16
+}
+
 /// Shape definition supporting CEL expressions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Shape {
     Line {
@@ -29,6 +34,20 @@ pub enum Shape {
         size: Vec2OrExpr,
         #[serde(default)]
         rotation: NumberOrExpr,
+    },
+    /// Cubic bezier curve (4 control points).
+    Bezier {
+        /// Start point.
+        start: Vec2OrExpr,
+        /// First control point.
+        control1: Vec2OrExpr,
+        /// Second control point.
+        control2: Vec2OrExpr,
+        /// End point.
+        end: Vec2OrExpr,
+        /// Number of line segments to approximate the curve (default: 16).
+        #[serde(default = "default_bezier_segments")]
+        segments: u32,
     },
 }
 
@@ -53,6 +72,19 @@ impl Shape {
                 size: size.evaluate(ctx),
                 rotation: rotation.evaluate(ctx),
             },
+            Self::Bezier {
+                start,
+                control1,
+                control2,
+                end,
+                segments,
+            } => EvaluatedShape::Bezier {
+                start: start.evaluate(ctx),
+                control1: control1.evaluate(ctx),
+                control2: control2.evaluate(ctx),
+                end: end.evaluate(ctx),
+                segments: *segments,
+            },
         }
     }
 
@@ -66,6 +98,18 @@ impl Shape {
                 size,
                 rotation,
             } => center.is_dynamic() || size.is_dynamic() || rotation.is_dynamic(),
+            Self::Bezier {
+                start,
+                control1,
+                control2,
+                end,
+                ..
+            } => {
+                start.is_dynamic()
+                    || control1.is_dynamic()
+                    || control2.is_dynamic()
+                    || end.is_dynamic()
+            }
         }
     }
 }
@@ -86,6 +130,67 @@ pub enum EvaluatedShape {
         size: [f32; 2],
         rotation: f32,
     },
+    /// Cubic bezier curve.
+    Bezier {
+        start: [f32; 2],
+        control1: [f32; 2],
+        control2: [f32; 2],
+        end: [f32; 2],
+        segments: u32,
+    },
+}
+
+impl EvaluatedShape {
+    /// Samples a cubic bezier curve at parameter t (0.0 to 1.0).
+    fn sample_bezier(
+        start: [f32; 2],
+        control1: [f32; 2],
+        control2: [f32; 2],
+        end: [f32; 2],
+        t: f32,
+    ) -> [f32; 2] {
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let mt = 1.0 - t;
+        let mt2 = mt * mt;
+        let mt3 = mt2 * mt;
+
+        // B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+        [
+            mt3 * start[0]
+                + 3.0 * mt2 * t * control1[0]
+                + 3.0 * mt * t2 * control2[0]
+                + t3 * end[0],
+            mt3 * start[1]
+                + 3.0 * mt2 * t * control1[1]
+                + 3.0 * mt * t2 * control2[1]
+                + t3 * end[1],
+        ]
+    }
+
+    /// Converts a bezier curve to a list of points for polyline creation.
+    pub fn bezier_to_points(&self) -> Option<Vec<[f32; 2]>> {
+        match self {
+            Self::Bezier {
+                start,
+                control1,
+                control2,
+                end,
+                segments,
+            } => {
+                let n = (*segments).max(2) as usize;
+                let mut points = Vec::with_capacity(n + 1);
+
+                for i in 0..=n {
+                    let t = i as f32 / n as f32;
+                    points.push(Self::sample_bezier(*start, *control1, *control2, *end, t));
+                }
+
+                Some(points)
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Object role in the map.
@@ -98,7 +203,7 @@ pub enum ObjectRole {
 }
 
 /// Spawn properties for spawner objects.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct SpawnProperties {
     #[serde(default = "default_spawn_mode")]
     pub mode: String,
@@ -115,19 +220,19 @@ fn default_initial_force() -> String {
 }
 
 /// Bumper properties for bouncy obstacles.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BumperProperties {
     pub force: NumberOrExpr,
 }
 
 /// Blackhole properties for attractive forces.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BlackholeProperties {
     pub force: NumberOrExpr,
 }
 
 /// Trigger properties for game rule triggers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TriggerProperties {
     pub action: String,
 }
@@ -142,7 +247,7 @@ pub enum RollDirection {
 }
 
 /// Roll properties for continuous rotation animation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RollProperties {
     #[serde(default)]
     pub direction: RollDirection,
@@ -186,7 +291,7 @@ impl EasingType {
 }
 
 /// A single keyframe in an animation sequence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Keyframe {
     /// Marks the start of a loop block.
@@ -199,8 +304,8 @@ pub enum Keyframe {
     LoopEnd,
     /// Delays execution for a duration.
     Delay {
-        /// Duration in seconds.
-        duration: f32,
+        /// Duration in seconds. Supports CEL expressions including random(min, max).
+        duration: NumberOrExpr,
     },
     /// Applies a transformation to target objects.
     Apply {
@@ -218,10 +323,24 @@ pub enum Keyframe {
         #[serde(default)]
         easing: EasingType,
     },
+    /// Rotates objects around a pivot point (for flippers).
+    PivotRotate {
+        /// IDs of objects to animate.
+        target_ids: Vec<String>,
+        /// Pivot point in world coordinates.
+        pivot: [f32; 2],
+        /// Target angle offset from initial rotation (degrees).
+        angle: f32,
+        /// Duration of the animation in seconds.
+        duration: f32,
+        /// Easing function to use.
+        #[serde(default)]
+        easing: EasingType,
+    },
 }
 
 /// A sequence of keyframes forming an animation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct KeyframeSequence {
     /// Name of the sequence.
     pub name: String,
@@ -237,7 +356,7 @@ fn default_true() -> bool {
 }
 
 /// Combined object properties.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct ObjectProperties {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spawn: Option<SpawnProperties>,
@@ -252,7 +371,7 @@ pub struct ObjectProperties {
 }
 
 /// A map object with role, shape, and properties.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MapObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -263,7 +382,7 @@ pub struct MapObject {
 }
 
 /// Live ranking calculation method.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LiveRankingConfig {
     /// Y-axis position based (lower Y = higher rank, default)
@@ -276,7 +395,7 @@ pub enum LiveRankingConfig {
 }
 
 /// Map metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MapMeta {
     pub name: String,
     #[serde(default)]
@@ -286,7 +405,7 @@ pub struct MapMeta {
 }
 
 /// Complete roulette map configuration (V2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RouletteConfig {
     pub meta: MapMeta,
     pub objects: Vec<MapObject>,
@@ -347,13 +466,96 @@ impl RouletteConfig {
         Self::from_json(DEFAULT_MAP_JSON).expect("Failed to parse default map JSON")
     }
 
+    /// Calculates the bounding box of all objects in the map.
+    /// Returns ((min_x, min_y), (max_x, max_y)).
+    pub fn calculate_bounds(&self) -> ((f32, f32), (f32, f32)) {
+        let ctx = GameContext::new(0.0, 0);
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+
+        for obj in &self.objects {
+            let shape = obj.shape.evaluate(&ctx);
+            match shape {
+                EvaluatedShape::Line { start, end } => {
+                    min_x = min_x.min(start[0]).min(end[0]);
+                    min_y = min_y.min(start[1]).min(end[1]);
+                    max_x = max_x.max(start[0]).max(end[0]);
+                    max_y = max_y.max(start[1]).max(end[1]);
+                }
+                EvaluatedShape::Circle { center, radius } => {
+                    min_x = min_x.min(center[0] - radius);
+                    min_y = min_y.min(center[1] - radius);
+                    max_x = max_x.max(center[0] + radius);
+                    max_y = max_y.max(center[1] + radius);
+                }
+                EvaluatedShape::Rect { center, size, rotation } => {
+                    // For rotated rectangles, compute all 4 corners
+                    let (sin, cos) = rotation.to_radians().sin_cos();
+                    let hw = size[0] / 2.0;
+                    let hh = size[1] / 2.0;
+
+                    // Corners relative to center (before rotation)
+                    let corners = [
+                        (-hw, -hh),
+                        (hw, -hh),
+                        (hw, hh),
+                        (-hw, hh),
+                    ];
+
+                    for (dx, dy) in corners {
+                        // Rotate corner
+                        let rx = dx * cos - dy * sin;
+                        let ry = dx * sin + dy * cos;
+                        // Translate to world position
+                        let x = center[0] + rx;
+                        let y = center[1] + ry;
+
+                        min_x = min_x.min(x);
+                        min_y = min_y.min(y);
+                        max_x = max_x.max(x);
+                        max_y = max_y.max(y);
+                    }
+                }
+                EvaluatedShape::Bezier { .. } => {
+                    // Use sampled points to calculate bounds
+                    if let Some(points) = shape.bezier_to_points() {
+                        for p in points {
+                            min_x = min_x.min(p[0]);
+                            min_y = min_y.min(p[1]);
+                            max_x = max_x.max(p[0]);
+                            max_y = max_y.max(p[1]);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Default to (0,0) - (800, 600) if no objects
+        if min_x == f32::MAX {
+            ((0.0, 0.0), (800.0, 600.0))
+        } else {
+            ((min_x, min_y), (max_x, max_y))
+        }
+    }
+
+    /// Calculates the map size (width, height) based on object bounds.
+    pub fn calculate_map_size(&self) -> (f32, f32) {
+        let ((min_x, min_y), (max_x, max_y)) = self.calculate_bounds();
+        (max_x - min_x, max_y - min_y)
+    }
+
     /// Collects all object IDs that are targeted by keyframe animations.
     fn collect_keyframe_target_ids(&self) -> std::collections::HashSet<String> {
         let mut targets = std::collections::HashSet::new();
         for seq in &self.keyframes {
             for kf in &seq.keyframes {
-                if let Keyframe::Apply { target_ids, .. } = kf {
-                    targets.extend(target_ids.iter().cloned());
+                match kf {
+                    Keyframe::Apply { target_ids, .. } | Keyframe::PivotRotate { target_ids, .. } => {
+                        targets.extend(target_ids.iter().cloned());
+                    }
+                    _ => {}
                 }
             }
         }
@@ -515,6 +717,25 @@ impl RouletteConfig {
                     .restitution(0.6)
                     .build()
             }
+            EvaluatedShape::Bezier { .. } => {
+                // Convert bezier to polyline
+                let points = shape.bezier_to_points().unwrap();
+                let vertices: Vec<_> = points
+                    .iter()
+                    .map(|p| Vector::new(p[0], p[1]))
+                    .collect();
+
+                // Create indices for consecutive line segments
+                let indices: Vec<[u32; 2]> = (0..vertices.len() as u32 - 1)
+                    .map(|i| [i, i + 1])
+                    .collect();
+
+                // Use polyline with border radius for thickness
+                ColliderBuilder::polyline(vertices, Some(indices))
+                    .friction(0.3)
+                    .restitution(0.5)
+                    .build()
+            }
         };
 
         world.add_static_collider(collider)
@@ -571,6 +792,10 @@ impl RouletteConfig {
                     .build();
                 (*center, rotation_rad, collider)
             }
+            EvaluatedShape::Bezier { .. } => {
+                // Bezier curves are not supported for kinematic (animated) objects
+                panic!("Bezier shape not supported for kinematic/animated objects");
+            }
         };
 
         // Create kinematic body at the position (with id stored in user_data)
@@ -605,6 +830,9 @@ impl RouletteConfig {
             EvaluatedShape::Line { .. } => {
                 panic!("Line shape not supported for triggers");
             }
+            EvaluatedShape::Bezier { .. } => {
+                panic!("Bezier shape not supported for triggers");
+            }
         };
 
         world.add_static_collider(collider)
@@ -626,6 +854,7 @@ impl RouletteConfig {
                 EvaluatedShape::Circle { center, .. } => (center[0], center[1]),
                 EvaluatedShape::Rect { center, .. } => (center[0], center[1]),
                 EvaluatedShape::Line { .. } => continue,
+                EvaluatedShape::Bezier { .. } => continue,
             };
 
             // Find collider at this position
@@ -714,6 +943,7 @@ impl RouletteConfig {
                     let angle = dy.atan2(dx);
                     (mid_x, mid_y, angle)
                 }
+                EvaluatedShape::Bezier { .. } => continue, // Bezier not supported for kinematic
             };
 
             // Find kinematic body by ID stored in user_data
@@ -735,7 +965,7 @@ mod tests {
     fn test_default_classic_map() {
         let config = RouletteConfig::default_classic();
         // Map name comes from maps/default.json
-        assert_eq!(config.meta.name, "Animated Example");
+        assert_eq!(config.meta.name, "3D Pinball");
 
         // Count by role
         let spawners: Vec<_> = config
@@ -755,12 +985,13 @@ mod tests {
             .collect();
 
         assert_eq!(spawners.len(), 1);
-        // 4 walls + center bumper + 2 rotating boxes + 2 moving walls = 9
-        assert_eq!(obstacles.len(), 9);
+        // 4 walls + 10 bumpers + 2 spinners + 2 sloped walls + 2 flippers + 2 bottom walls = 22
+        assert_eq!(obstacles.len(), 22);
         assert_eq!(triggers.len(), 1);
 
-        // Verify keyframes are loaded
+        // Verify keyframes are loaded (flipper animations)
         assert!(!config.keyframes.is_empty());
+        assert_eq!(config.keyframes.len(), 2); // left and right flipper cycles
     }
 
     #[test]
@@ -788,8 +1019,8 @@ mod tests {
         assert_eq!(map_data.blackholes.len(), 1);
 
         // Verify colliders were created
-        // 9 obstacles + 1 trigger = 10 colliders
-        assert_eq!(world.collider_set.len(), 10);
+        // 22 obstacles + 1 trigger = 23 colliders
+        assert_eq!(world.collider_set.len(), 23);
     }
 
     #[test]

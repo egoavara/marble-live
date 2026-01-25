@@ -41,8 +41,8 @@ pub struct CameraState {
     pub zoom: f32,
     /// Viewport dimensions in pixels.
     pub viewport: (f32, f32),
-    /// Map dimensions in world units.
-    pub map_size: (f32, f32),
+    /// Map bounds ((min_x, min_y), (max_x, max_y)) in world units.
+    pub map_bounds: ((f32, f32), (f32, f32)),
     /// Smoothing factor for camera movement (0.0 = instant, 1.0 = never moves).
     pub smoothing: f32,
     /// Current leader position being tracked (for hysteresis)
@@ -53,7 +53,7 @@ pub struct CameraState {
 
 impl Default for CameraState {
     fn default() -> Self {
-        Self::new((800.0, 600.0), (800.0, 600.0))
+        Self::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)))
     }
 }
 
@@ -62,9 +62,10 @@ impl CameraState {
     ///
     /// # Arguments
     /// * `viewport` - Viewport dimensions (width, height) in pixels
-    /// * `map_size` - Map dimensions (width, height) in world units
-    pub fn new(viewport: (f32, f32), map_size: (f32, f32)) -> Self {
-        let center = (map_size.0 / 2.0, map_size.1 / 2.0);
+    /// * `map_bounds` - Map bounds ((min_x, min_y), (max_x, max_y)) in world units
+    pub fn new(viewport: (f32, f32), map_bounds: ((f32, f32), (f32, f32))) -> Self {
+        let ((min_x, min_y), (max_x, max_y)) = map_bounds;
+        let center = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
         Self {
             mode: CameraMode::Overview,
             previous_mode: CameraMode::FollowMe,
@@ -72,11 +73,23 @@ impl CameraState {
             target_center: center,
             zoom: 1.0,
             viewport,
-            map_size,
+            map_bounds,
             smoothing: 0.1, // 10% interpolation per frame
             current_leader_pos: None,
             leader_switch_cooldown: 0,
         }
+    }
+
+    /// Helper to get map size from bounds.
+    fn map_size(&self) -> (f32, f32) {
+        let ((min_x, min_y), (max_x, max_y)) = self.map_bounds;
+        (max_x - min_x, max_y - min_y)
+    }
+
+    /// Helper to get map center from bounds.
+    fn map_center(&self) -> (f32, f32) {
+        let ((min_x, min_y), (max_x, max_y)) = self.map_bounds;
+        ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
     }
 
     /// Toggle between FollowMe and FollowLeader modes.
@@ -116,7 +129,8 @@ impl CameraState {
     /// * `game_state` - Current game state
     /// * `my_player_id` - Local player's ID (for FollowMe mode)
     pub fn update(&mut self, game_state: &GameState, my_player_id: Option<PlayerId>) {
-        let map_center = (self.map_size.0 / 2.0, self.map_size.1 / 2.0);
+        let map_center = self.map_center();
+        let map_size = self.map_size();
 
         // Calculate target position based on mode
         // Note: Don't change mode automatically - just fall back to map center if target not found
@@ -143,8 +157,8 @@ impl CameraState {
         let target_zoom = match self.mode {
             CameraMode::Overview => {
                 // Fit entire map in viewport with some padding
-                let zoom_x = self.viewport.0 / (self.map_size.0 * 1.1);
-                let zoom_y = self.viewport.1 / (self.map_size.1 * 1.1);
+                let zoom_x = self.viewport.0 / (map_size.0 * 1.1);
+                let zoom_y = self.viewport.1 / (map_size.1 * 1.1);
                 zoom_x.min(zoom_y)
             }
             CameraMode::FollowMe | CameraMode::FollowLeader => {
@@ -289,9 +303,26 @@ impl CameraState {
         self.viewport = (width, height);
     }
 
-    /// Update map dimensions.
-    pub fn set_map_size(&mut self, width: f32, height: f32) {
-        self.map_size = (width, height);
+    /// Update map bounds.
+    pub fn set_map_bounds(&mut self, bounds: ((f32, f32), (f32, f32))) {
+        self.map_bounds = bounds;
+    }
+
+    /// Fit the camera to show the entire map (for editor use).
+    ///
+    /// Centers on the map and adjusts zoom to fit the map in the viewport.
+    pub fn fit_to_map(&mut self) {
+        let map_center = self.map_center();
+        let map_size = self.map_size();
+
+        // Center on map
+        self.center = map_center;
+        self.target_center = map_center;
+
+        // Calculate zoom to fit map in viewport with padding
+        let zoom_x = self.viewport.0 / (map_size.0 * 1.1);
+        let zoom_y = self.viewport.1 / (map_size.1 * 1.1);
+        self.zoom = zoom_x.min(zoom_y).max(0.1);
     }
 
     /// Get the current camera mode.
@@ -308,6 +339,116 @@ impl CameraState {
             self.mode = mode;
         }
     }
+
+    // === Editor interaction methods ===
+
+    /// Convert screen coordinates to world coordinates.
+    ///
+    /// # Arguments
+    /// * `screen_x` - Screen X coordinate in pixels
+    /// * `screen_y` - Screen Y coordinate in pixels
+    ///
+    /// # Returns
+    /// World coordinates as (x, y)
+    pub fn screen_to_world(&self, screen_x: f32, screen_y: f32) -> (f32, f32) {
+        let half_width = self.viewport.0 / (2.0 * self.zoom);
+        let half_height = self.viewport.1 / (2.0 * self.zoom);
+
+        // Convert from screen space [0, viewport] to normalized [-0.5, 0.5]
+        let norm_x = screen_x / self.viewport.0 - 0.5;
+        let norm_y = screen_y / self.viewport.1 - 0.5;
+
+        // Convert to world space
+        let world_x = self.center.0 + norm_x * 2.0 * half_width;
+        let world_y = self.center.1 + norm_y * 2.0 * half_height;
+
+        (world_x, world_y)
+    }
+
+    /// Convert world coordinates to screen coordinates.
+    ///
+    /// # Arguments
+    /// * `world_x` - World X coordinate
+    /// * `world_y` - World Y coordinate
+    ///
+    /// # Returns
+    /// Screen coordinates as (x, y) in pixels
+    pub fn world_to_screen(&self, world_x: f32, world_y: f32) -> (f32, f32) {
+        let half_width = self.viewport.0 / (2.0 * self.zoom);
+        let half_height = self.viewport.1 / (2.0 * self.zoom);
+
+        // Convert from world space to normalized [-0.5, 0.5]
+        let norm_x = (world_x - self.center.0) / (2.0 * half_width);
+        let norm_y = (world_y - self.center.1) / (2.0 * half_height);
+
+        // Convert to screen space [0, viewport]
+        let screen_x = (norm_x + 0.5) * self.viewport.0;
+        let screen_y = (norm_y + 0.5) * self.viewport.1;
+
+        (screen_x, screen_y)
+    }
+
+    /// Pan camera by screen delta (pixels).
+    ///
+    /// Moves the camera in the opposite direction of the delta,
+    /// so dragging right moves the view left (content moves right).
+    ///
+    /// # Arguments
+    /// * `dx` - Screen X delta in pixels
+    /// * `dy` - Screen Y delta in pixels
+    pub fn pan_by_screen_delta(&mut self, dx: f32, dy: f32) {
+        // Convert screen delta to world delta
+        let world_dx = dx / self.zoom;
+        let world_dy = dy / self.zoom;
+
+        // Move camera (opposite direction for natural panning feel)
+        self.center.0 -= world_dx;
+        self.center.1 -= world_dy;
+        self.target_center = self.center;
+    }
+
+    /// Zoom at a specific screen position.
+    ///
+    /// Zooms in/out while keeping the world point under the cursor fixed.
+    ///
+    /// # Arguments
+    /// * `screen_x` - Screen X coordinate (zoom center)
+    /// * `screen_y` - Screen Y coordinate (zoom center)
+    /// * `zoom_delta` - Zoom multiplier delta (positive = zoom in, negative = zoom out)
+    pub fn zoom_at_screen_pos(&mut self, screen_x: f32, screen_y: f32, zoom_delta: f32) {
+        // Get world position before zoom
+        let world_before = self.screen_to_world(screen_x, screen_y);
+
+        // Apply zoom with clamping
+        let new_zoom = (self.zoom * (1.0 + zoom_delta)).clamp(0.1, 10.0);
+        self.zoom = new_zoom;
+
+        // Get world position after zoom
+        let world_after = self.screen_to_world(screen_x, screen_y);
+
+        // Adjust center to keep the same world point under cursor
+        self.center.0 += world_before.0 - world_after.0;
+        self.center.1 += world_before.1 - world_after.1;
+        self.target_center = self.center;
+    }
+
+    /// Set zoom level directly.
+    ///
+    /// # Arguments
+    /// * `zoom` - New zoom level (clamped to 0.1..10.0)
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom.clamp(0.1, 10.0);
+    }
+
+    /// Set camera center directly.
+    ///
+    /// # Arguments
+    /// * `x` - World X coordinate
+    /// * `y` - World Y coordinate
+    pub fn set_center(&mut self, x: f32, y: f32) {
+        self.center = (x, y);
+        self.target_center = self.center;
+    }
 }
 
 #[cfg(test)]
@@ -316,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_camera_toggle_follow() {
-        let mut camera = CameraState::new((800.0, 600.0), (800.0, 600.0));
+        let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
 
         // Start in Overview (default)
         assert_eq!(camera.mode, CameraMode::Overview);
@@ -336,7 +477,7 @@ mod tests {
 
     #[test]
     fn test_camera_toggle_overview() {
-        let mut camera = CameraState::new((800.0, 600.0), (800.0, 600.0));
+        let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
 
         // Start in Overview, toggle to follow first
         camera.toggle_follow();
@@ -354,7 +495,7 @@ mod tests {
 
     #[test]
     fn test_view_projection_matrix() {
-        let camera = CameraState::new((800.0, 600.0), (800.0, 600.0));
+        let camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
         let matrix = camera.view_projection_matrix();
 
         // Matrix should be valid (non-zero diagonal elements)
@@ -362,5 +503,77 @@ mod tests {
         assert!(matrix[1][1] != 0.0);
         assert!(matrix[2][2] != 0.0);
         assert!(matrix[3][3] != 0.0);
+    }
+
+    #[test]
+    fn test_map_center_calculation() {
+        let camera = CameraState::new((800.0, 600.0), ((100.0, 200.0), (500.0, 800.0)));
+
+        // Map center should be (300, 500)
+        let center = camera.map_center();
+        assert!((center.0 - 300.0).abs() < 0.001);
+        assert!((center.1 - 500.0).abs() < 0.001);
+
+        // Map size should be (400, 600)
+        let size = camera.map_size();
+        assert!((size.0 - 400.0).abs() < 0.001);
+        assert!((size.1 - 600.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_screen_to_world_conversion() {
+        let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
+        camera.center = (400.0, 300.0);
+        camera.zoom = 1.0;
+
+        // Center of screen should map to camera center
+        let (wx, wy) = camera.screen_to_world(400.0, 300.0);
+        assert!((wx - 400.0).abs() < 0.001);
+        assert!((wy - 300.0).abs() < 0.001);
+
+        // Top-left corner
+        let (wx, wy) = camera.screen_to_world(0.0, 0.0);
+        assert!((wx - 0.0).abs() < 0.001);
+        assert!((wy - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_world_to_screen_conversion() {
+        let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
+        camera.center = (400.0, 300.0);
+        camera.zoom = 1.0;
+
+        // Camera center should map to screen center
+        let (sx, sy) = camera.world_to_screen(400.0, 300.0);
+        assert!((sx - 400.0).abs() < 0.001);
+        assert!((sy - 300.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_pan_by_screen_delta() {
+        let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
+        camera.center = (400.0, 300.0);
+        camera.zoom = 1.0;
+
+        // Pan right by 100 pixels should move camera left
+        camera.pan_by_screen_delta(100.0, 0.0);
+        assert!((camera.center.0 - 300.0).abs() < 0.001);
+        assert!((camera.center.1 - 300.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_zoom_at_screen_pos() {
+        let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
+        camera.center = (400.0, 300.0);
+        camera.zoom = 1.0;
+
+        // Zoom in at center should keep center fixed
+        let world_before = camera.screen_to_world(400.0, 300.0);
+        camera.zoom_at_screen_pos(400.0, 300.0, 0.5);
+        let world_after = camera.screen_to_world(400.0, 300.0);
+
+        assert!((world_before.0 - world_after.0).abs() < 0.01);
+        assert!((world_before.1 - world_after.1).abs() < 0.01);
+        assert!((camera.zoom - 1.5).abs() < 0.001);
     }
 }
