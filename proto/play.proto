@@ -114,4 +114,5 @@ message Reaction {
 message GameStart {
   uint64 seed = 1;            // RNG 시드
   bytes initial_state = 2;    // SyncSnapshot 직렬화 데이터
+  string gamerule = 3;        // 선택된 gamerule (예: "top_n", "last_n")
 }

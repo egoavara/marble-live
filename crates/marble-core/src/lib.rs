@@ -16,7 +16,7 @@ pub mod physics;
 pub mod sync;
 
 pub use dsl::{DslError, GameContext, NumberOrExpr, Vec2OrExpr};
-pub use game::{GamePhase, GameState, Player, COUNTDOWN_FRAMES};
+pub use game::{GameState, Player};
 pub use keyframe::KeyframeExecutor;
 pub use map::{
     BlackholeData, EasingType, EvaluatedShape, Keyframe, KeyframeSequence, MapMeta, MapObject,

@@ -4,8 +4,10 @@ use std::collections::HashMap;
 
 use crate::map::{EasingType, Keyframe, KeyframeSequence};
 
+use serde::{Deserialize, Serialize};
+
 /// Represents an active animation interpolation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ActiveAnimation {
     target_id: String,
     start_translation: [f32; 2],
@@ -43,14 +45,14 @@ impl ActiveAnimation {
 }
 
 /// Loop frame tracking for nested loops.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct LoopFrame {
     start_index: usize,
     remaining: Option<u32>,
 }
 
 /// Executes a keyframe animation sequence.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyframeExecutor {
     sequence_name: String,
     current_index: usize,

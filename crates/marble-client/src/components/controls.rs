@@ -1,7 +1,6 @@
 //! Control buttons component.
 
 use crate::state::{AppAction, AppStateContext};
-use marble_core::GamePhase;
 use yew::prelude::*;
 
 /// Properties for the Controls component.
@@ -35,11 +34,10 @@ pub fn controls(_props: &ControlsProps) -> Html {
     };
 
     let is_running = app_state.is_running;
-    let is_finished = matches!(app_state.phase(), GamePhase::Finished { .. });
 
     html! {
         <div class="controls">
-            if !is_running && !is_finished {
+            if !is_running {
                 <button class="btn btn-start" onclick={on_start}>
                     { "Start" }
                 </button>

@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use marble_core::{GamePhase, GameState, PlayerId, RouletteConfig, SyncSnapshot};
+use marble_core::{GameState, PlayerId, RouletteConfig, SyncSnapshot};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -26,8 +26,6 @@ pub enum GameLoopState {
     Running,
     /// Game is paused (e.g., waiting for sync)
     Paused,
-    /// Game has finished
-    Finished,
 }
 
 /// Handle returned by use_game_loop
@@ -45,6 +43,11 @@ pub struct GameLoopHandle {
 impl GameLoopHandle {
     /// Start the game (host only)
     pub fn start_game(&self) {
+        self.start_game_with_gamerule(String::new())
+    }
+
+    /// Start the game with a specific gamerule (host only)
+    pub fn start_game_with_gamerule(&self, gamerule: String) {
         use marble_core::Color;
 
         if !self.is_host {
@@ -58,6 +61,9 @@ impl GameLoopHandle {
         if game.map_config.is_none() {
             game.load_map(RouletteConfig::default_classic());
         }
+
+        // Set gamerule
+        game.set_gamerule(gamerule.clone());
 
         // Add players from P2P peers if not already added
         if game.players.is_empty() {
@@ -88,28 +94,18 @@ impl GameLoopHandle {
             }
         }
 
-        // Mark all players as ready
-        for i in 0..game.players.len() {
-            game.set_player_ready(i as u32, true);
-        }
-
-        // Start countdown
-        if game.start_countdown() {
-            // Create and broadcast game start message
-            let snapshot = game.create_snapshot();
-            if let Ok(state_bytes) = snapshot.to_bytes() {
-                drop(game);
-                self.p2p.send_game_start(snapshot.rng_seed, state_bytes);
-                self.loop_state.set(GameLoopState::Running);
-                tracing::info!("Game started, broadcasting to peers");
-            }
-        } else {
-            tracing::warn!("Failed to start countdown - players: {}", game.players.len());
+        // Create and broadcast game start message
+        let snapshot = game.create_snapshot();
+        if let Ok(state_bytes) = snapshot.to_bytes() {
+            drop(game);
+            self.p2p.send_game_start(snapshot.rng_seed, state_bytes, gamerule);
+            self.loop_state.set(GameLoopState::Running);
+            tracing::info!("Game started, broadcasting to peers");
         }
     }
 
     /// Initialize game from received GameStart message (non-host)
-    pub fn init_from_game_start(&self, seed: u64, initial_state: &[u8]) {
+    pub fn init_from_game_start(&self, seed: u64, initial_state: &[u8], gamerule: &str) {
         match SyncSnapshot::from_bytes(initial_state) {
             Ok(snapshot) => {
                 let mut game = self.game_state.borrow_mut();
@@ -119,12 +115,18 @@ impl GameLoopHandle {
                     game.load_map(RouletteConfig::default_classic());
                 }
 
-                // Restore state
+                // Restore state (includes gamerule from snapshot)
                 game.restore_from_snapshot(snapshot);
+
+                // Ensure gamerule is set (in case snapshot doesn't have it)
+                if game.gamerule().is_empty() && !gamerule.is_empty() {
+                    game.set_gamerule(gamerule.to_string());
+                }
+
                 drop(game);
 
                 self.loop_state.set(GameLoopState::Running);
-                tracing::info!(seed = seed, "Game initialized from host state");
+                tracing::info!(seed = seed, gamerule = gamerule, "Game initialized from host state");
             }
             Err(e) => {
                 tracing::error!(error = %e, "Failed to initialize game from host state");
@@ -132,22 +134,62 @@ impl GameLoopHandle {
         }
     }
 
-    /// Reset game to lobby
-    pub fn reset_to_lobby(&self) {
+    /// Spawn marbles for all connected players (host only).
+    /// Call this after all peers have joined.
+    pub fn spawn_marbles(&self) {
+        use marble_core::Color;
+
+        if !self.is_host {
+            tracing::warn!("Only host can spawn marbles");
+            return;
+        }
+
         let mut game = self.game_state.borrow_mut();
-        game.reset_to_lobby();
-        drop(game);
-        self.loop_state.set(GameLoopState::Idle);
-        self.current_frame.set(0);
 
-        // Reset camera to Overview
-        let mut camera = self.camera_state.borrow_mut();
-        camera.mode = CameraMode::Overview;
-    }
+        // Sync players from current peers
+        let peers = self.p2p.peers();
+        let my_player_id = self.p2p.my_player_id();
 
-    /// Get current game phase
-    pub fn game_phase(&self) -> GamePhase {
-        self.game_state.borrow().phase.clone()
+        // Predefined colors for players
+        let colors = [
+            Color::RED,
+            Color::BLUE,
+            Color::GREEN,
+            Color::ORANGE,
+            Color::PURPLE,
+            Color::PINK,
+            Color::CYAN,
+            Color::YELLOW,
+        ];
+
+        // Clear existing players and re-add from current peer list
+        game.players.clear();
+
+        // Add self first
+        game.add_player(my_player_id, colors[0]);
+
+        // Add peers
+        for (i, peer) in peers.iter().enumerate() {
+            if let Some(player_id) = &peer.player_id {
+                let color = colors.get(i + 1).copied().unwrap_or(Color::RED);
+                game.add_player(player_id.clone(), color);
+            }
+        }
+
+        // Spawn marbles
+        if !game.spawn_marbles() {
+            tracing::warn!("No spawners available");
+            return;
+        }
+
+        // Broadcast updated state to peers
+        let gamerule = game.gamerule().to_string();
+        let snapshot = game.create_snapshot();
+        if let Ok(state_bytes) = snapshot.to_bytes() {
+            drop(game);
+            self.p2p.send_game_start(snapshot.rng_seed, state_bytes, gamerule);
+            tracing::info!("Marbles spawned for {} players", peers.len() + 1);
+        }
     }
 
     /// Check if game is running
@@ -169,6 +211,16 @@ impl GameLoopHandle {
             .iter()
             .find(|p| &p.name == my_player_id)
             .map(|p| p.id)
+    }
+
+    /// Get available gamerules from the loaded map
+    pub fn available_gamerules(&self) -> Vec<String> {
+        self.game_state.borrow().available_gamerules()
+    }
+
+    /// Get current gamerule
+    pub fn current_gamerule(&self) -> String {
+        self.game_state.borrow().gamerule().to_string()
     }
 }
 
@@ -283,7 +335,7 @@ pub fn use_game_loop(
         });
     }
 
-    // Idle/Finished state rendering (single frame, no physics)
+    // Idle state rendering (single frame, no physics)
     {
         let game_state = game_state.clone();
         let camera_state = camera_state.clone();
@@ -300,7 +352,7 @@ pub fn use_game_loop(
                         let game = game_state.borrow();
                         let camera = camera_state.borrow();
                         renderer.render(&game, &camera);
-                        tracing::debug!("Rendered idle/finished state");
+                        tracing::debug!("Rendered idle state");
                     }
                 }
             },
@@ -377,7 +429,6 @@ pub fn use_game_loop(
                             game.update();
 
                             let frame = game.current_frame();
-                            let phase = game.phase.clone();
                             drop(game);
 
                             current_frame.set(frame);
@@ -389,12 +440,6 @@ pub fn use_game_loop(
                                 let hash = game.compute_hash();
                                 drop(game);
                                 p2p.send_frame_hash(frame, hash);
-                            }
-
-                            // Check for game finish
-                            if matches!(phase, GamePhase::Finished { .. }) {
-                                loop_state.set(GameLoopState::Finished);
-                                break;
                             }
                         }
 

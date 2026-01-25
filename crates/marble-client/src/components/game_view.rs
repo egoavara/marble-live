@@ -1,7 +1,6 @@
 //! GameView component - main game view with P2P integration.
 
 use gloo::events::EventListener;
-use marble_core::GamePhase;
 use marble_proto::play::p2p_message::Payload;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
@@ -11,7 +10,7 @@ use super::{CameraControls, ChatPanel, PeerList, ReactionDisplay};
 use crate::camera::CameraMode;
 use crate::hooks::{
     use_config_secret, use_config_username, use_game_loop, use_localstorage,
-    use_p2p_room_with_credentials, GameLoopState, P2pRoomConfig,
+    use_p2p_room_with_credentials, P2pRoomConfig,
 };
 
 /// Props for the GameView component.
@@ -85,6 +84,19 @@ pub fn game_view(props: &GameViewProps) -> Html {
     // Track if game start was already processed
     let game_start_processed = use_mut_ref(|| false);
 
+    // Auto-start game when host connects
+    {
+        let game_loop = game_loop.clone();
+        let is_host = props.is_host;
+        let game_start_processed = game_start_processed.clone();
+        use_effect_with(is_connected, move |is_connected| {
+            if is_host && *is_connected && !*game_start_processed.borrow() {
+                *game_start_processed.borrow_mut() = true;
+                game_loop.start_game();
+            }
+        });
+    }
+
     // Process GameStart messages for non-host
     {
         let game_loop = game_loop.clone();
@@ -100,7 +112,7 @@ pub fn game_view(props: &GameViewProps) -> Html {
             for msg in messages_for_game_start.iter().rev() {
                 if let Payload::GameStart(game_start) = &msg.payload {
                     *game_start_processed.borrow_mut() = true;
-                    game_loop.init_from_game_start(game_start.seed, &game_start.initial_state);
+                    game_loop.init_from_game_start(game_start.seed, &game_start.initial_state, &game_start.gamerule);
                     break;
                 }
             }
@@ -220,35 +232,6 @@ pub fn game_view(props: &GameViewProps) -> Html {
     // Calculate if reactions are on cooldown
     let reaction_disabled = *cooldown_active;
 
-    // Start game handler (host only)
-    let on_start_game = {
-        let game_loop = game_loop.clone();
-        Callback::from(move |_: MouseEvent| {
-            game_loop.start_game();
-        })
-    };
-
-    // Game state info for UI
-    let game_phase = game_loop.game_phase();
-    let loop_state = (*game_loop.loop_state).clone();
-
-    // Determine what to show
-    let show_start_button = props.is_host
-        && matches!(loop_state, GameLoopState::Idle)
-        && is_connected
-        && peers.len() >= 1; // At least one peer (besides self)
-
-    let show_waiting_message = !props.is_host && matches!(loop_state, GameLoopState::Idle);
-
-    let countdown_remaining = match &game_phase {
-        GamePhase::Countdown { remaining_frames } => Some(*remaining_frames),
-        _ => None,
-    };
-
-    let show_countdown = countdown_remaining.is_some();
-
-    let game_finished = matches!(loop_state, GameLoopState::Finished);
-
     html! {
         <div class="game-view fullscreen">
             // Game canvas
@@ -266,46 +249,20 @@ pub fn game_view(props: &GameViewProps) -> Html {
                 on_mode_change={on_camera_mode_change.clone()}
             />
 
-            // Countdown overlay
-            if show_countdown {
-                <div class="game-overlay countdown-overlay">
-                    <div class="countdown-number">
-                        { (countdown_remaining.unwrap_or(0) / 60) + 1 }
-                    </div>
-                </div>
-            }
-
-            // Start button (host only, in lobby)
-            if show_start_button {
-                <div class="game-overlay start-overlay">
-                    <button class="start-game-btn" onclick={on_start_game}>
-                        { "게임 시작" }
-                    </button>
-                    <p class="start-hint">{ format!("{} 플레이어 대기 중", peers.len() + 1) }</p>
-                </div>
-            }
-
-            // Waiting message (non-host, in lobby)
-            if show_waiting_message {
-                <div class="game-overlay waiting-overlay">
-                    <p class="waiting-text">{ "호스트의 게임 시작을 기다리는 중..." }</p>
-                </div>
-            }
-
-            // Game finished overlay
-            if game_finished {
-                <div class="game-overlay finished-overlay">
-                    <h2 class="finished-title">{ "게임 종료!" }</h2>
-                    if props.is_host {
-                        <button class="restart-btn" onclick={
+            // Spawn button (host only)
+            if props.is_host && is_connected {
+                <div class="spawn-controls">
+                    <button
+                        class="spawn-btn"
+                        onclick={
                             let game_loop = game_loop.clone();
                             Callback::from(move |_: MouseEvent| {
-                                game_loop.reset_to_lobby();
+                                game_loop.spawn_marbles();
                             })
-                        }>
-                            { "다시 시작" }
-                        </button>
-                    }
+                        }
+                    >
+                        { format!("스폰 ({}명)", peers.len() + 1) }
+                    </button>
                 </div>
             }
 

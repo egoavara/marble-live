@@ -2197,6 +2197,37 @@
     color: #888;
 }
 
+/* Spawn controls */
+.spawn-controls {
+    position: absolute;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+}
+
+.spawn-btn {
+    padding: 0.75rem 2rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 20px rgba(33, 150, 243, 0.4);
+}
+
+.spawn-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 25px rgba(33, 150, 243, 0.5);
+}
+
+.spawn-btn:active {
+    transform: translateY(0);
+}
+
 /* Waiting overlay */
 .waiting-overlay {
     background: rgba(0, 0, 0, 0.5);

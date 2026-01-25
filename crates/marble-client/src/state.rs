@@ -1,6 +1,6 @@
 //! Application state management.
 
-use marble_core::{GamePhase, GameState, RouletteConfig};
+use marble_core::{GameState, RouletteConfig};
 use std::rc::Rc;
 use yew::prelude::*;
 
@@ -45,11 +45,6 @@ impl AppState {
         }
     }
 
-    /// Returns the current game phase.
-    pub fn phase(&self) -> &GamePhase {
-        self.game_state.current_phase()
-    }
-
     /// Returns the current frame number.
     pub fn frame(&self) -> u64 {
         self.game_state.current_frame()
@@ -83,14 +78,12 @@ impl Reducible for AppState {
                 let mut new_state = (*self).clone();
                 new_state.is_running = true;
 
-                // If in lobby, start with test players
-                if matches!(new_state.game_state.current_phase(), GamePhase::Lobby) {
+                // Add test players and spawn marbles if not already done
+                if new_state.game_state.players.is_empty() {
                     let game = Rc::make_mut(&mut new_state.game_state);
-                    let _ = game.add_player("Player 1".to_string(), marble_core::Color::RED);
-                    let _ = game.add_player("Player 2".to_string(), marble_core::Color::BLUE);
-                    game.set_player_ready(0, true);
-                    game.set_player_ready(1, true);
-                    game.start_countdown();
+                    game.add_player("Player 1".to_string(), marble_core::Color::RED);
+                    game.add_player("Player 2".to_string(), marble_core::Color::BLUE);
+                    game.spawn_marbles();
                 }
 
                 Rc::new(new_state)

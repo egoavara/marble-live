@@ -1,7 +1,6 @@
 //! Debug panel component for displaying simulation state.
 
 use crate::state::AppStateContext;
-use marble_core::GamePhase;
 use yew::prelude::*;
 
 /// Properties for the DebugPanel component.
@@ -13,31 +12,15 @@ pub struct DebugPanelProps {}
 pub fn debug_panel(_props: &DebugPanelProps) -> Html {
     let app_state = use_context::<AppStateContext>().expect("AppStateContext not found");
 
-    let phase_str = match app_state.phase() {
-        GamePhase::Lobby => "Lobby".to_string(),
-        GamePhase::Countdown { remaining_frames } => {
-            let seconds = *remaining_frames as f32 / 60.0;
-            format!("Countdown: {seconds:.1}s")
-        }
-        GamePhase::Running => "Running".to_string(),
-        GamePhase::Finished { winner } => match winner {
-            Some(id) => format!("Finished - Winner: Player {}", id + 1),
-            None => "Finished - No Winner".to_string(),
-        },
-    };
-
     let frame = app_state.frame();
     let marble_count = app_state.game_state.marble_manager.marbles().len();
     let active_count = app_state.game_state.marble_manager.active_count();
     let hash = app_state.game_state.compute_hash();
+    let gamerule = app_state.game_state.gamerule();
 
     html! {
         <div class="debug-panel">
             <h3>{ "Debug Info" }</h3>
-            <div class="debug-row">
-                <span class="debug-label">{ "Phase:" }</span>
-                <span class="debug-value">{ phase_str }</span>
-            </div>
             <div class="debug-row">
                 <span class="debug-label">{ "Frame:" }</span>
                 <span class="debug-value">{ frame }</span>
@@ -54,6 +37,12 @@ pub fn debug_panel(_props: &DebugPanelProps) -> Html {
                 <span class="debug-label">{ "Running:" }</span>
                 <span class="debug-value">{ if app_state.is_running { "Yes" } else { "No" } }</span>
             </div>
+            if !gamerule.is_empty() {
+                <div class="debug-row">
+                    <span class="debug-label">{ "Gamerule:" }</span>
+                    <span class="debug-value">{ gamerule }</span>
+                </div>
+            }
         </div>
     }
 }

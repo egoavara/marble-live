@@ -1,4 +1,4 @@
-//! Game state machine and round management.
+//! Game state machine and physics simulation management.
 
 use std::collections::HashMap;
 
@@ -11,61 +11,38 @@ use crate::map::{BlackholeData, EvaluatedShape, RollDirection, RouletteConfig, S
 use crate::marble::{Color, MarbleManager, PlayerId};
 use crate::physics::{PhysicsWorld, PHYSICS_DT};
 
-/// Countdown duration in frames (3 seconds at 60Hz).
-pub const COUNTDOWN_FRAMES: u32 = 180;
-
-/// Game phase representing the current state of the game.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum GamePhase {
-    /// Waiting for players to join.
-    Lobby,
-    /// Countdown before the round starts.
-    Countdown { remaining_frames: u32 },
-    /// Game is actively running.
-    Running,
-    /// Round has finished with a winner.
-    Finished { winner: Option<PlayerId> },
-}
-
-impl Default for GamePhase {
-    fn default() -> Self {
-        Self::Lobby
-    }
-}
-
 /// Player information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Player {
     pub id: PlayerId,
     pub name: String,
     pub color: Color,
-    pub ready: bool,
 }
 
 impl Player {
     pub fn new(id: PlayerId, name: String, color: Color) -> Self {
-        Self {
-            id,
-            name,
-            color,
-            ready: false,
-        }
+        Self { id, name, color }
     }
 }
 
 /// Complete game state containing all game data.
+///
+/// This represents a sandbox physics simulation that runs continuously.
+/// Players and marbles can be added/removed at any time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
-    pub phase: GamePhase,
     pub players: Vec<Player>,
-    pub eliminated_order: Vec<PlayerId>,
+    /// Order in which marbles arrived at triggers.
+    pub arrival_order: Vec<PlayerId>,
     pub rng_seed: u64,
+    /// Selected gamerule (e.g., "top_n", "last_n").
+    pub selected_gamerule: String,
     #[serde(skip)]
     pub physics_world: PhysicsWorld,
     pub marble_manager: MarbleManager,
     #[serde(skip)]
     pub map_config: Option<RouletteConfig>,
-    /// Trigger (hole) handles for elimination detection.
+    /// Trigger (hole) handles for arrival detection.
     #[serde(skip)]
     pub trigger_handles: Vec<ColliderHandle>,
     /// Spawner data from the map.
@@ -84,18 +61,17 @@ pub struct GameState {
     #[serde(skip)]
     pub kinematic_initial_transforms: HashMap<String, ([f32; 2], f32)>,
     /// Active keyframe animation executors.
-    #[serde(skip)]
-    keyframe_executors: Vec<KeyframeExecutor>,
+    pub keyframe_executors: Vec<KeyframeExecutor>,
 }
 
 impl GameState {
     /// Creates a new game state with the given RNG seed.
     pub fn new(seed: u64) -> Self {
         Self {
-            phase: GamePhase::Lobby,
             players: Vec::new(),
-            eliminated_order: Vec::new(),
+            arrival_order: Vec::new(),
             rng_seed: seed,
+            selected_gamerule: String::new(),
             physics_world: PhysicsWorld::new(),
             marble_manager: MarbleManager::new(seed),
             map_config: None,
@@ -109,7 +85,7 @@ impl GameState {
         }
     }
 
-    /// Loads a map configuration.
+    /// Loads a map configuration and initializes the physics world.
     pub fn load_map(&mut self, config: RouletteConfig) {
         // Reset physics world
         self.physics_world.reset();
@@ -121,29 +97,29 @@ impl GameState {
         self.blackholes = map_data.blackholes;
         self.kinematic_bodies = map_data.kinematic_bodies;
         self.kinematic_initial_transforms = map_data.kinematic_initial_transforms;
+
+        // Initialize keyframe executors for autoplay sequences
         self.keyframe_executors.clear();
+        for seq in &config.keyframes {
+            if seq.autoplay {
+                self.keyframe_executors.push(KeyframeExecutor::new(seq.name.clone()));
+            }
+        }
+
         self.map_config = Some(config);
     }
 
     /// Adds a player to the game.
-    /// Returns false if the game is not in Lobby phase.
-    pub fn add_player(&mut self, name: String, color: Color) -> Option<PlayerId> {
-        if self.phase != GamePhase::Lobby {
-            return None;
-        }
-
+    /// Returns the player ID.
+    pub fn add_player(&mut self, name: String, color: Color) -> PlayerId {
         #[allow(clippy::cast_possible_truncation)]
         let id = self.players.len() as PlayerId;
         self.players.push(Player::new(id, name, color));
-        Some(id)
+        id
     }
 
     /// Removes a player from the game.
     pub fn remove_player(&mut self, player_id: PlayerId) -> bool {
-        if self.phase != GamePhase::Lobby {
-            return false;
-        }
-
         if let Some(pos) = self.players.iter().position(|p| p.id == player_id) {
             self.players.remove(pos);
             true
@@ -152,59 +128,20 @@ impl GameState {
         }
     }
 
-    /// Sets a player's ready status.
-    pub fn set_player_ready(&mut self, player_id: PlayerId, ready: bool) -> bool {
-        if self.phase != GamePhase::Lobby {
-            return false;
-        }
-
-        if let Some(player) = self.players.iter_mut().find(|p| p.id == player_id) {
-            player.ready = ready;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Checks if all players are ready.
-    pub fn all_players_ready(&self) -> bool {
-        !self.players.is_empty() && self.players.iter().all(|p| p.ready)
-    }
-
-    /// Starts the countdown phase.
-    /// Returns false if conditions are not met.
-    pub fn start_countdown(&mut self) -> bool {
-        if self.phase != GamePhase::Lobby {
-            return false;
-        }
-
-        if !self.all_players_ready() {
-            return false;
-        }
-
-        if self.map_config.is_none() {
-            return false;
-        }
-
-        self.phase = GamePhase::Countdown {
-            remaining_frames: COUNTDOWN_FRAMES,
-        };
-        true
-    }
-
-    /// Starts the running phase and spawns marbles.
-    fn start_running(&mut self) {
-        // Clear any existing marbles
+    /// Spawns marbles for all players.
+    /// Clears existing marbles first.
+    /// Returns false if no spawners are available or no players.
+    pub fn spawn_marbles(&mut self) -> bool {
+        // Clear existing marbles
         self.marble_manager.clear(&mut self.physics_world);
-        self.eliminated_order.clear();
+        self.arrival_order.clear();
 
-        // Get the first spawner (or panic if none)
-        let spawner = self
-            .spawners
-            .first()
-            .expect("Map must have at least one spawner");
+        if self.spawners.is_empty() || self.players.is_empty() {
+            return false;
+        }
 
-        // Spawn a marble for each player using the spawner
+        let spawner = &self.spawners[0];
+
         for player in &self.players {
             self.marble_manager.spawn_from_spawner(
                 &mut self.physics_world,
@@ -213,116 +150,56 @@ impl GameState {
                 spawner,
             );
         }
-
-        // Initialize keyframe executors for autoplay sequences
-        self.keyframe_executors.clear();
-        if let Some(config) = &self.map_config {
-            for seq in &config.keyframes {
-                if seq.autoplay {
-                    self.keyframe_executors.push(KeyframeExecutor::new(seq.name.clone()));
-                }
-            }
-        }
-
-        self.phase = GamePhase::Running;
+        true
     }
 
     /// Advances the game by one frame.
-    /// Returns a list of newly eliminated player IDs.
+    /// Returns a list of newly arrived player IDs.
     pub fn update(&mut self) -> Vec<PlayerId> {
-        match &self.phase {
-            GamePhase::Lobby | GamePhase::Finished { .. } => Vec::new(),
-            GamePhase::Countdown { remaining_frames } => {
-                let remaining = *remaining_frames;
-                if remaining <= 1 {
-                    self.start_running();
-                } else {
-                    self.phase = GamePhase::Countdown {
-                        remaining_frames: remaining - 1,
-                    };
+        // If no map is loaded, do nothing
+        if self.map_config.is_none() {
+            return Vec::new();
+        }
+
+        // Update game context for CEL expressions
+        let time = self.physics_world.current_frame() as f32 / 60.0;
+        self.game_context.update(time, self.physics_world.current_frame());
+
+        // Apply roll rotations to animated objects
+        self.apply_roll_rotations();
+
+        // Update keyframe animations
+        self.update_keyframes();
+
+        // Apply blackhole forces before physics step
+        self.apply_blackhole_forces();
+
+        // Step physics
+        self.physics_world.step();
+
+        // Check for arrivals at triggers
+        self.check_arrivals()
+    }
+
+    /// Checks for marbles arriving at triggers.
+    fn check_arrivals(&mut self) -> Vec<PlayerId> {
+        let arrived_marble_ids = self
+            .marble_manager
+            .check_hole_collisions(&self.physics_world, &self.trigger_handles);
+
+        // Map marble IDs to player IDs
+        let mut newly_arrived = Vec::new();
+        for marble_id in arrived_marble_ids {
+            if let Some(marble) = self.marble_manager.get_marble(marble_id) {
+                let player_id = marble.owner_id;
+                if !self.arrival_order.contains(&player_id) {
+                    self.arrival_order.push(player_id);
+                    newly_arrived.push(player_id);
                 }
-                Vec::new()
-            }
-            GamePhase::Running => {
-                // Update game context for CEL expressions
-                let time = self.physics_world.current_frame() as f32 / 60.0;
-                self.game_context.update(time, self.physics_world.current_frame());
-
-                // Apply roll rotations to animated objects
-                self.apply_roll_rotations();
-
-                // Update keyframe animations
-                self.update_keyframes();
-
-                // Apply blackhole forces before physics step
-                self.apply_blackhole_forces();
-
-                // Step physics
-                self.physics_world.step();
-
-                // Check for eliminations
-                let eliminated_marble_ids = self
-                    .marble_manager
-                    .check_hole_collisions(&self.physics_world, &self.trigger_handles);
-
-                // Map marble IDs to player IDs
-                let mut newly_eliminated = Vec::new();
-                for marble_id in eliminated_marble_ids {
-                    if let Some(marble) = self.marble_manager.get_marble(marble_id) {
-                        let player_id = marble.owner_id;
-                        if !self.eliminated_order.contains(&player_id) {
-                            self.eliminated_order.push(player_id);
-                            newly_eliminated.push(player_id);
-                        }
-                    }
-                }
-
-                // Check for game end
-                let active_count = self.marble_manager.active_count();
-                if active_count <= 1 {
-                    // Find the winner (last remaining or none if all eliminated)
-                    let winner = self
-                        .marble_manager
-                        .active_marbles()
-                        .first()
-                        .map(|m| m.owner_id);
-
-                    self.phase = GamePhase::Finished { winner };
-                }
-
-                newly_eliminated
             }
         }
-    }
 
-    /// Returns the current game phase.
-    pub fn current_phase(&self) -> &GamePhase {
-        &self.phase
-    }
-
-    /// Returns the winner if the game is finished.
-    pub fn winner(&self) -> Option<PlayerId> {
-        match &self.phase {
-            GamePhase::Finished { winner } => *winner,
-            _ => None,
-        }
-    }
-
-    /// Resets the game to lobby state.
-    pub fn reset_to_lobby(&mut self) {
-        self.phase = GamePhase::Lobby;
-        self.eliminated_order.clear();
-        self.marble_manager.clear(&mut self.physics_world);
-
-        // Mark all players as not ready
-        for player in &mut self.players {
-            player.ready = false;
-        }
-
-        // Re-apply map if exists
-        if let Some(config) = self.map_config.take() {
-            self.load_map(config);
-        }
+        newly_arrived
     }
 
     /// Returns the current frame number.
@@ -343,8 +220,8 @@ impl GameState {
     /// Eliminates a player's marble (e.g., when they disconnect).
     /// Returns true if the player was eliminated, false if already eliminated or not found.
     pub fn eliminate_player(&mut self, player_id: PlayerId) -> bool {
-        // Check if already eliminated
-        if self.eliminated_order.contains(&player_id) {
+        // Check if already in arrival order
+        if self.arrival_order.contains(&player_id) {
             return false;
         }
 
@@ -352,19 +229,7 @@ impl GameState {
         if let Some(marble) = self.marble_manager.get_marble_by_owner_mut(player_id) {
             if !marble.eliminated {
                 marble.eliminate();
-                self.eliminated_order.push(player_id);
-
-                // Check for game end
-                let active_count = self.marble_manager.active_count();
-                if active_count <= 1 {
-                    let winner = self
-                        .marble_manager
-                        .active_marbles()
-                        .first()
-                        .map(|m| m.owner_id);
-                    self.phase = GamePhase::Finished { winner };
-                }
-
+                self.arrival_order.push(player_id);
                 return true;
             }
         }
@@ -372,20 +237,38 @@ impl GameState {
         false
     }
 
-    /// Gets the ranking of eliminated players (first eliminated = last place).
-    pub fn get_rankings(&self) -> Vec<PlayerId> {
-        let mut rankings: Vec<PlayerId> = self.eliminated_order.clone();
+    /// Returns the current arrival order.
+    pub fn arrival_order(&self) -> &[PlayerId] {
+        &self.arrival_order
+    }
 
-        // Add active players at the end (if any)
-        for marble in self.marble_manager.active_marbles() {
-            if !rankings.contains(&marble.owner_id) {
-                rankings.push(marble.owner_id);
-            }
+    /// Returns the leaderboard based on the selected gamerule.
+    ///
+    /// - `top_n`: First to arrive = highest rank (arrival_order as-is)
+    /// - `last_n`: Last to arrive = highest rank (arrival_order reversed)
+    pub fn leaderboard(&self) -> Vec<PlayerId> {
+        match self.selected_gamerule.as_str() {
+            "last_n" => self.arrival_order.iter().copied().rev().collect(),
+            _ => self.arrival_order.clone(), // "top_n" or default
         }
+    }
 
-        // Reverse so winner is first
-        rankings.reverse();
-        rankings
+    /// Returns the available gamerules from the loaded map.
+    pub fn available_gamerules(&self) -> Vec<String> {
+        self.map_config
+            .as_ref()
+            .map(|c| c.meta.gamerule.clone())
+            .unwrap_or_default()
+    }
+
+    /// Sets the selected gamerule.
+    pub fn set_gamerule(&mut self, gamerule: String) {
+        self.selected_gamerule = gamerule;
+    }
+
+    /// Returns the selected gamerule.
+    pub fn gamerule(&self) -> &str {
+        &self.selected_gamerule
     }
 
     /// Applies blackhole forces to all active marbles.
@@ -535,8 +418,8 @@ mod tests {
     #[test]
     fn test_game_state_creation() {
         let game = setup_game();
-        assert_eq!(game.phase, GamePhase::Lobby);
         assert!(game.players.is_empty());
+        assert!(game.arrival_order.is_empty());
     }
 
     #[test]
@@ -546,117 +429,64 @@ mod tests {
         let p1 = game.add_player("Player 1".to_string(), Color::RED);
         let p2 = game.add_player("Player 2".to_string(), Color::BLUE);
 
-        assert!(p1.is_some());
-        assert!(p2.is_some());
+        assert_eq!(p1, 0);
+        assert_eq!(p2, 1);
         assert_eq!(game.players.len(), 2);
 
-        game.remove_player(p1.unwrap());
+        game.remove_player(p1);
         assert_eq!(game.players.len(), 1);
     }
 
     #[test]
-    fn test_ready_and_countdown() {
+    fn test_spawn_marbles() {
         let mut game = setup_game();
 
         game.add_player("Player 1".to_string(), Color::RED);
         game.add_player("Player 2".to_string(), Color::BLUE);
 
-        // Can't start without ready
-        assert!(!game.start_countdown());
-
-        // Set ready
-        game.set_player_ready(0, true);
-        game.set_player_ready(1, true);
-
-        assert!(game.all_players_ready());
-        assert!(game.start_countdown());
-
-        assert!(matches!(game.phase, GamePhase::Countdown { .. }));
-    }
-
-    #[test]
-    fn test_countdown_to_running() {
-        let mut game = setup_game();
-
-        game.add_player("Player 1".to_string(), Color::RED);
-        game.add_player("Player 2".to_string(), Color::BLUE);
-        game.set_player_ready(0, true);
-        game.set_player_ready(1, true);
-        game.start_countdown();
-
-        // Fast-forward countdown
-        for _ in 0..COUNTDOWN_FRAMES {
-            game.update();
-        }
-
-        assert_eq!(game.phase, GamePhase::Running);
+        assert!(game.spawn_marbles());
         assert_eq!(game.marble_manager.marbles().len(), 2);
     }
 
     #[test]
-    fn test_game_finish() {
+    fn test_physics_runs_immediately() {
         let mut game = setup_game();
 
         game.add_player("Player 1".to_string(), Color::RED);
         game.add_player("Player 2".to_string(), Color::BLUE);
-        game.set_player_ready(0, true);
-        game.set_player_ready(1, true);
-        game.start_countdown();
 
-        // Fast-forward to running
-        for _ in 0..COUNTDOWN_FRAMES {
+        game.spawn_marbles();
+
+        // Physics should update without any phase transitions
+        for _ in 0..60 {
             game.update();
         }
 
-        // Manually eliminate one player
-        game.marble_manager.get_marble_mut(0).unwrap().eliminate();
-        game.eliminated_order.push(0);
-
-        // Update should detect finish
-        game.update();
-
-        assert!(matches!(game.phase, GamePhase::Finished { winner: Some(1) }));
-        assert_eq!(game.winner(), Some(1));
+        assert_eq!(game.current_frame(), 60);
     }
 
     #[test]
-    fn test_reset_to_lobby() {
+    fn test_leaderboard_top_n() {
         let mut game = setup_game();
+        game.set_gamerule("top_n".to_string());
 
-        game.add_player("Player 1".to_string(), Color::RED);
-        game.set_player_ready(0, true);
+        game.arrival_order = vec![0, 1, 2];
 
-        game.reset_to_lobby();
-
-        assert_eq!(game.phase, GamePhase::Lobby);
-        assert!(!game.players[0].ready);
+        let leaderboard = game.leaderboard();
+        // top_n: first to arrive = first in leaderboard
+        assert_eq!(leaderboard, vec![0, 1, 2]);
     }
 
     #[test]
-    fn test_rankings() {
+    fn test_leaderboard_last_n() {
         let mut game = setup_game();
+        game.set_gamerule("last_n".to_string());
 
-        game.add_player("P1".to_string(), Color::RED);
-        game.add_player("P2".to_string(), Color::BLUE);
-        game.add_player("P3".to_string(), Color::GREEN);
-        game.set_player_ready(0, true);
-        game.set_player_ready(1, true);
-        game.set_player_ready(2, true);
-        game.start_countdown();
+        game.arrival_order = vec![0, 1, 2];
 
-        for _ in 0..COUNTDOWN_FRAMES {
-            game.update();
-        }
-
-        // Simulate elimination order: P1, then P3
-        game.marble_manager.get_marble_mut(0).unwrap().eliminate();
-        game.eliminated_order.push(0);
-        game.marble_manager.get_marble_mut(2).unwrap().eliminate();
-        game.eliminated_order.push(2);
-
-        let rankings = game.get_rankings();
-        // Winner (P2) first, then P3 (2nd eliminated), then P1 (1st eliminated)
-        assert_eq!(rankings, vec![1, 2, 0]);
+        let leaderboard = game.leaderboard();
+        // last_n: last to arrive = first in leaderboard
+        assert_eq!(leaderboard, vec![2, 1, 0]);
     }
 
     #[test]
@@ -671,20 +501,16 @@ mod tests {
         // Add same players
         game1.add_player("P1".to_string(), Color::RED);
         game1.add_player("P2".to_string(), Color::BLUE);
-        game1.set_player_ready(0, true);
-        game1.set_player_ready(1, true);
 
         game2.add_player("P1".to_string(), Color::RED);
         game2.add_player("P2".to_string(), Color::BLUE);
-        game2.set_player_ready(0, true);
-        game2.set_player_ready(1, true);
 
-        // Start both
-        game1.start_countdown();
-        game2.start_countdown();
+        // Spawn marbles
+        game1.spawn_marbles();
+        game2.spawn_marbles();
 
         // Run for same number of frames
-        for _ in 0..300 {
+        for _ in 0..120 {
             game1.update();
             game2.update();
         }

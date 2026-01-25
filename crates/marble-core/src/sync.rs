@@ -2,37 +2,41 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::game::{GamePhase, GameState, Player};
+use crate::game::{GameState, Player};
+use crate::keyframe::KeyframeExecutor;
 use crate::marble::MarbleManager;
 use crate::physics::PhysicsWorld;
 
 /// A snapshot of game state for P2P synchronization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncSnapshot {
-    /// Current game phase.
-    pub phase: GamePhase,
     /// Players in the game.
     pub players: Vec<Player>,
-    /// Elimination order.
-    pub eliminated_order: Vec<u32>,
+    /// Arrival order (marbles that reached triggers).
+    pub arrival_order: Vec<u32>,
     /// RNG seed.
     pub rng_seed: u64,
+    /// Selected gamerule.
+    pub selected_gamerule: String,
     /// Physics world state.
     pub physics_world: PhysicsWorld,
     /// Marble manager state.
     pub marble_manager: MarbleManager,
+    /// Keyframe animation executors.
+    pub keyframe_executors: Vec<KeyframeExecutor>,
 }
 
 impl SyncSnapshot {
     /// Create a snapshot from the current game state.
     pub fn from_game_state(state: &GameState) -> Self {
         Self {
-            phase: state.phase.clone(),
             players: state.players.clone(),
-            eliminated_order: state.eliminated_order.clone(),
+            arrival_order: state.arrival_order.clone(),
             rng_seed: state.rng_seed,
+            selected_gamerule: state.selected_gamerule.clone(),
             physics_world: state.physics_world.clone(),
             marble_manager: state.marble_manager.clone(),
+            keyframe_executors: state.keyframe_executors.clone(),
         }
     }
 
@@ -65,12 +69,13 @@ impl GameState {
 
     /// Restore state from a sync snapshot.
     pub fn restore_from_snapshot(&mut self, snapshot: SyncSnapshot) {
-        self.phase = snapshot.phase;
         self.players = snapshot.players;
-        self.eliminated_order = snapshot.eliminated_order;
+        self.arrival_order = snapshot.arrival_order;
         self.rng_seed = snapshot.rng_seed;
+        self.selected_gamerule = snapshot.selected_gamerule;
         self.physics_world = snapshot.physics_world;
         self.marble_manager = snapshot.marble_manager;
+        self.keyframe_executors = snapshot.keyframe_executors;
 
         // Reinitialize RNG after deserialization
         self.marble_manager.reinit_rng();
@@ -88,9 +93,6 @@ impl GameState {
                 config.find_kinematic_handles(&self.physics_world);
             self.kinematic_bodies = kinematic_bodies;
             self.kinematic_initial_transforms = kinematic_initial_transforms;
-
-            // Note: keyframe_executors are not restored from snapshot
-            // They will be reinitialized if needed based on the current phase
         }
     }
 }

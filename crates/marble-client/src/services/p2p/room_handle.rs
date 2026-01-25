@@ -334,8 +334,8 @@ impl P2pRoomHandle {
     }
 
     /// Broadcast game start to all peers (host only)
-    pub fn send_game_start(&self, seed: u64, initial_state: Vec<u8>) {
-        self.send(Payload::GameStart(GameStart { seed, initial_state }));
+    pub fn send_game_start(&self, seed: u64, initial_state: Vec<u8>, gamerule: String) {
+        self.send(Payload::GameStart(GameStart { seed, initial_state, gamerule }));
     }
 
     /// Get last hash frame
