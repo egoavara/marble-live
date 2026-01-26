@@ -10,8 +10,10 @@ clt:
 
 # Run server development (watch mode)
 svr:
-    trunk build --release
     SKIP_CLIENT_BUILD=1 watchexec -r -e rs,toml,proto -- cargo run -p marble-server
+
+check-clt:
+    cargo check -p marble-client --target wasm32-unknown-unknown
 
 # Force rebuild proto
 build-proto:

@@ -1,9 +1,17 @@
-//! Object list panel component.
+//! Object list panel component with tabbed interface.
 
-use marble_core::map::{MapObject, ObjectRole, Shape};
+use marble_core::map::{KeyframeSequence, MapObject, ObjectRole, Shape};
 use yew::prelude::*;
 
+use super::sequence_list::SequenceList;
 use crate::hooks::{create_default_obstacle, create_default_spawner, create_default_trigger};
+
+/// Tab selection for the object list panel.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ObjectListTab {
+    Objects,
+    Keyframes,
+}
 
 /// Props for the ObjectList component.
 #[derive(Properties, PartialEq)]
@@ -13,12 +21,40 @@ pub struct ObjectListProps {
     pub on_select: Callback<Option<usize>>,
     pub on_add: Callback<MapObject>,
     pub on_delete: Callback<usize>,
+    // Sequence props
+    #[prop_or_default]
+    pub sequences: Vec<KeyframeSequence>,
+    #[prop_or_default]
+    pub selected_sequence: Option<usize>,
+    #[prop_or_default]
+    pub on_select_sequence: Callback<Option<usize>>,
+    #[prop_or_default]
+    pub on_add_sequence: Callback<KeyframeSequence>,
+    #[prop_or_default]
+    pub on_delete_sequence: Callback<usize>,
+    #[prop_or_default]
+    pub on_update_sequence: Callback<(usize, KeyframeSequence)>,
 }
 
-/// Object list component.
+/// Object list component with tabbed interface.
 #[function_component(ObjectList)]
 pub fn object_list(props: &ObjectListProps) -> Html {
+    let current_tab = use_state(|| ObjectListTab::Objects);
     let show_add_menu = use_state(|| false);
+
+    let on_objects_tab = {
+        let current_tab = current_tab.clone();
+        Callback::from(move |_: MouseEvent| {
+            current_tab.set(ObjectListTab::Objects);
+        })
+    };
+
+    let on_keyframes_tab = {
+        let current_tab = current_tab.clone();
+        Callback::from(move |_: MouseEvent| {
+            current_tab.set(ObjectListTab::Keyframes);
+        })
+    };
 
     let toggle_add_menu = {
         let show_add_menu = show_add_menu.clone();
@@ -56,11 +92,30 @@ pub fn object_list(props: &ObjectListProps) -> Html {
 
     html! {
         <div class="object-list">
-            <div class="object-list-header">
-                <span class="object-list-title">{"Objects"}</span>
-                <span class="object-list-count">{format!("({})", props.objects.len())}</span>
+            // Tab header
+            <div class="object-list-tabs">
+                <button
+                    class={classes!("tab-btn", (*current_tab == ObjectListTab::Objects).then_some("active"))}
+                    onclick={on_objects_tab}
+                >
+                    {"Objects"}
+                </button>
+                <button
+                    class={classes!("tab-btn", (*current_tab == ObjectListTab::Keyframes).then_some("active"))}
+                    onclick={on_keyframes_tab}
+                >
+                    {"Keyframes"}
+                </button>
             </div>
-            <div class="object-list-items">
+
+            // Tab content
+            if *current_tab == ObjectListTab::Objects {
+                // Objects tab content
+                <div class="object-list-header">
+                    <span class="object-list-title">{"Objects"}</span>
+                    <span class="object-list-count">{format!("({})", props.objects.len())}</span>
+                </div>
+                <div class="object-list-items">
                 {for props.objects.iter().enumerate().map(|(i, obj)| {
                     let on_select = props.on_select.clone();
                     let on_delete = props.on_delete.clone();
@@ -148,6 +203,17 @@ pub fn object_list(props: &ObjectListProps) -> Html {
                     }
                 </div>
             </div>
+            } else {
+                // Keyframes tab content
+                <SequenceList
+                    sequences={props.sequences.clone()}
+                    selected_index={props.selected_sequence}
+                    on_select={props.on_select_sequence.clone()}
+                    on_add={props.on_add_sequence.clone()}
+                    on_delete={props.on_delete_sequence.clone()}
+                    on_update={props.on_update_sequence.clone()}
+                />
+            }
         </div>
     }
 }

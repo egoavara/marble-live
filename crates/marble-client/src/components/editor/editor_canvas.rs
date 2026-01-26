@@ -4,7 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
-use marble_core::map::{EvaluatedShape, MapObject, RouletteConfig, Shape};
+use marble_core::keyframe::KeyframeExecutor;
+use marble_core::map::{EvaluatedShape, KeyframeSequence, MapObject, RouletteConfig, Shape};
 use marble_core::{GameContext, GameState};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -15,7 +16,7 @@ use super::context_menu::{ContextMenu, ContextMenuState};
 use super::gizmo::{self, generate_bezier_gizmo, generate_gizmo, generate_line_gizmo, hit_test_bezier_gizmo, hit_test_gizmo, hit_test_line_gizmo};
 use super::interaction::{BezierTransform, EditorInteractionState, GizmoHandle, LineTransform, ObjectTransform};
 use crate::camera::{CameraMode, CameraState};
-use crate::renderer::WgpuRenderer;
+use crate::renderer::{CircleInstance, LineInstance, RectInstance, WgpuRenderer};
 
 /// Preview transform during drag (standard, bezier, or line).
 #[derive(Debug, Clone, Copy)]
@@ -60,6 +61,15 @@ pub struct EditorCanvasProps {
     /// Mirror Y callback.
     #[prop_or_default]
     pub on_mirror_y: Callback<usize>,
+    /// Target object IDs from selected keyframe sequence (for highlighting).
+    #[prop_or_default]
+    pub sequence_target_ids: Vec<String>,
+    /// Preview keyframe sequence (single keyframe to preview).
+    #[prop_or_default]
+    pub preview_sequence: Option<KeyframeSequence>,
+    /// Callback when preview animation completes.
+    #[prop_or_default]
+    pub on_preview_complete: Callback<()>,
 }
 
 impl PartialEq for EditorCanvasProps {
@@ -76,6 +86,9 @@ impl PartialEq for EditorCanvasProps {
             && self.on_delete == other.on_delete
             && self.on_mirror_x == other.on_mirror_x
             && self.on_mirror_y == other.on_mirror_y
+            && self.sequence_target_ids == other.sequence_target_ids
+            && self.preview_sequence == other.preview_sequence
+            && self.on_preview_complete == other.on_preview_complete
             // Compare game_state_ref by Rc pointer equality
             && match (&self.game_state_ref, &other.game_state_ref) {
                 (Some(a), Some(b)) => Rc::ptr_eq(a, b),
@@ -101,6 +114,15 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
     let render_trigger = use_force_update();
     // Context menu state
     let context_menu_state = use_state(ContextMenuState::new);
+    // Track if dragging is active (for document-level event listeners)
+    let is_dragging_state = use_state(|| false);
+
+    // Keyframe preview state
+    let preview_game_state: Rc<RefCell<Option<GameState>>> = use_mut_ref(|| None);
+    let preview_executor: Rc<RefCell<Option<KeyframeExecutor>>> = use_mut_ref(|| None);
+    let preview_initial_transforms: Rc<RefCell<std::collections::HashMap<String, ([f32; 2], f32)>>> =
+        use_mut_ref(std::collections::HashMap::new);
+    let is_preview_active = use_state(|| false);
 
     // Initialize renderer
     {
@@ -148,6 +170,58 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         });
     }
 
+    // Start keyframe preview when preview_sequence changes
+    {
+        let preview_sequence = props.preview_sequence.clone();
+        let config = props.config.clone();
+        let preview_game_state = preview_game_state.clone();
+        let preview_executor = preview_executor.clone();
+        let preview_initial_transforms = preview_initial_transforms.clone();
+        let is_preview_active = is_preview_active.clone();
+
+        use_effect_with(preview_sequence.clone(), move |seq| {
+            if let Some(seq) = seq.clone() {
+                // Create preview game state from config
+                let mut gs = GameState::new(0);
+                gs.load_map(config.clone());
+
+                // Store initial transforms for target objects
+                let mut initials = std::collections::HashMap::new();
+                let ctx = GameContext::new(0.0, 0);
+                for target_id in &seq.target_ids {
+                    for obj in &config.objects {
+                        if obj.id.as_ref() == Some(target_id) {
+                            let shape = obj.shape.evaluate(&ctx);
+                            let (pos, rot) = match shape {
+                                EvaluatedShape::Circle { center, .. } => (center, 0.0),
+                                EvaluatedShape::Rect { center, rotation, .. } => (center, rotation),
+                                EvaluatedShape::Line { start, end } => {
+                                    ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
+                                }
+                                EvaluatedShape::Bezier { start, end, .. } => {
+                                    ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
+                                }
+                            };
+                            initials.insert(target_id.clone(), (pos, rot));
+                            break;
+                        }
+                    }
+                }
+
+                *preview_initial_transforms.borrow_mut() = initials;
+                *preview_game_state.borrow_mut() = Some(gs);
+                *preview_executor.borrow_mut() = Some(KeyframeExecutor::new("__preview__".to_string()));
+                is_preview_active.set(true);
+            } else {
+                // Clear preview state
+                *preview_game_state.borrow_mut() = None;
+                *preview_executor.borrow_mut() = None;
+                preview_initial_transforms.borrow_mut().clear();
+                is_preview_active.set(false);
+            }
+        });
+    }
+
     // Render helper
     let do_render = {
         let renderer = renderer.clone();
@@ -158,11 +232,22 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let preview_transform = preview_transform.clone();
         let game_state_ref = props.game_state_ref.clone();
         let is_simulating = props.is_simulating;
+        let sequence_target_ids = props.sequence_target_ids.clone();
+        let preview_game_state_render = preview_game_state.clone();
+        let is_preview_active_render = *is_preview_active;
 
         Rc::new(move || {
             if let Some(renderer) = &*renderer {
                 let cam = camera.borrow();
                 let hovered = *hovered_handle.borrow();
+
+                // Use preview game state if previewing
+                if is_preview_active_render {
+                    if let Some(gs) = &*preview_game_state_render.borrow() {
+                        renderer.borrow_mut().render_with_overlay(gs, &cam, &[], &[], &[]);
+                        return;
+                    }
+                }
 
                 // Use simulation game state if simulating, otherwise create from config
                 if is_simulating {
@@ -202,7 +287,8 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                 let mut game_state = GameState::new(0);
                 game_state.load_map(render_config);
 
-                let (oc, ol, or) = if let Some(idx) = selected_index {
+                // Generate gizmo overlays for selected object
+                let (mut oc, mut ol, mut or) = if let Some(idx) = selected_index {
                     if idx < config.objects.len() {
                         // Check if it's a bezier object
                         if is_bezier_object(&config.objects[idx]) {
@@ -248,6 +334,92 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                 } else {
                     (vec![], vec![], vec![])
                 };
+
+                // Generate highlight overlays for sequence target objects
+                if !sequence_target_ids.is_empty() {
+                    let ctx = GameContext::new(0.0, 0);
+                    // Orange highlight color
+                    let highlight_color = marble_core::Color::new(255, 152, 0, 200); // #ff9800 with alpha
+
+                    for (idx, obj) in config.objects.iter().enumerate() {
+                        // Skip if this object is selected (gizmo takes priority)
+                        if selected_index == Some(idx) {
+                            continue;
+                        }
+
+                        // Check if object is a sequence target
+                        let is_target = obj.id.as_ref()
+                            .map(|id| sequence_target_ids.contains(id))
+                            .unwrap_or(false);
+
+                        if is_target {
+                            // Generate highlight overlay based on object shape
+                            let highlight_width = 3.0 / cam.zoom; // Scale-independent border width
+                            match obj.shape.evaluate(&ctx) {
+                                EvaluatedShape::Circle { center, radius } => {
+                                    // Draw a slightly larger circle as highlight
+                                    oc.push(CircleInstance::new(
+                                        (center[0], center[1]),
+                                        radius + highlight_width,
+                                        marble_core::Color::new(0, 0, 0, 0), // Transparent fill
+                                        highlight_color,
+                                        highlight_width,
+                                    ));
+                                }
+                                EvaluatedShape::Rect { center, size, rotation } => {
+                                    // Draw a slightly larger rect as highlight
+                                    or.push(RectInstance::new(
+                                        (center[0], center[1]),
+                                        (size[0] / 2.0 + highlight_width, size[1] / 2.0 + highlight_width),
+                                        rotation,
+                                        marble_core::Color::new(0, 0, 0, 0), // Transparent fill
+                                        highlight_color,
+                                        highlight_width,
+                                    ));
+                                }
+                                EvaluatedShape::Line { start, end } => {
+                                    // Draw parallel lines as highlight
+                                    let dx = end[0] - start[0];
+                                    let dy = end[1] - start[1];
+                                    let len = (dx * dx + dy * dy).sqrt();
+                                    if len > 0.001 {
+                                        let nx = -dy / len * highlight_width;
+                                        let ny = dx / len * highlight_width;
+                                        // Two parallel lines
+                                        ol.push(LineInstance::new(
+                                            (start[0] + nx, start[1] + ny),
+                                            (end[0] + nx, end[1] + ny),
+                                            2.0 / cam.zoom,
+                                            highlight_color,
+                                        ));
+                                        ol.push(LineInstance::new(
+                                            (start[0] - nx, start[1] - ny),
+                                            (end[0] - nx, end[1] - ny),
+                                            2.0 / cam.zoom,
+                                            highlight_color,
+                                        ));
+                                    }
+                                }
+                                EvaluatedShape::Bezier { start, control1, control2, end, .. } => {
+                                    // Draw bezier curve approximation as highlight
+                                    const SEGMENTS: usize = 20;
+                                    for i in 0..SEGMENTS {
+                                        let t0 = i as f32 / SEGMENTS as f32;
+                                        let t1 = (i + 1) as f32 / SEGMENTS as f32;
+                                        let p0 = evaluate_bezier(t0, start, control1, control2, end);
+                                        let p1 = evaluate_bezier(t1, start, control1, control2, end);
+                                        ol.push(LineInstance::new(
+                                            p0,
+                                            p1,
+                                            4.0 / cam.zoom,
+                                            highlight_color,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 renderer.borrow_mut().render_with_overlay(&game_state, &cam, &oc, &ol, &or);
             }
@@ -339,6 +511,177 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                 resize_cb.as_ref().unchecked_ref::<js_sys::Function>().call0(&JsValue::NULL).ok();
             }
             resize_cb.forget();
+        });
+    }
+
+    // Keyframe preview loop
+    {
+        let renderer = renderer.clone();
+        let camera = camera.clone();
+        let config = props.config.clone();
+        let preview_sequence = props.preview_sequence.clone();
+        let on_preview_complete = props.on_preview_complete.clone();
+        let preview_game_state = preview_game_state.clone();
+        let preview_executor = preview_executor.clone();
+        let preview_initial_transforms = preview_initial_transforms.clone();
+        let is_preview_active = is_preview_active.clone();
+        let preview_frame_id = use_mut_ref(|| None::<i32>);
+        let preview_last_time = use_mut_ref(|| None::<f64>);
+        let preview_loop_running = use_mut_ref(|| false);
+
+        use_effect_with((*is_preview_active, preview_sequence.clone()), move |(is_active, seq)| {
+            let preview_frame_id_cleanup = preview_frame_id.clone();
+            let preview_loop_running_cleanup = preview_loop_running.clone();
+
+            // Stop any existing loop
+            *preview_loop_running.borrow_mut() = false;
+
+            if *is_active && seq.is_some() {
+                let seq = seq.clone().unwrap();
+                // Start preview loop
+                *preview_loop_running.borrow_mut() = true;
+                *preview_last_time.borrow_mut() = None;
+
+                let renderer = renderer.clone();
+                let camera = camera.clone();
+                let config = config.clone();
+                let preview_game_state = preview_game_state.clone();
+                let preview_executor = preview_executor.clone();
+                let preview_initial_transforms = preview_initial_transforms.clone();
+                let preview_frame_id = preview_frame_id.clone();
+                let preview_last_time = preview_last_time.clone();
+                let preview_loop_running = preview_loop_running.clone();
+                let is_preview_active = is_preview_active.clone();
+                let on_preview_complete = on_preview_complete.clone();
+
+                let closure: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
+                let closure_clone = closure.clone();
+
+                *closure.borrow_mut() = Some(Closure::new(move |timestamp: f64| {
+                    if !*preview_loop_running.borrow() {
+                        return;
+                    }
+
+                    // Calculate delta time
+                    let last = *preview_last_time.borrow();
+                    let dt = match last {
+                        Some(last_ts) => ((timestamp - last_ts) / 1000.0).min(0.1) as f32,
+                        None => 1.0 / 60.0,
+                    };
+                    *preview_last_time.borrow_mut() = Some(timestamp);
+
+                    // Update keyframe executor
+                    let mut finished = false;
+                    {
+                        let mut executor_opt = preview_executor.borrow_mut();
+                        let gs_opt = preview_game_state.borrow();
+                        let initials = preview_initial_transforms.borrow();
+
+                        if let (Some(executor), Some(gs)) = (executor_opt.as_mut(), gs_opt.as_ref()) {
+                            // Get current positions from game state
+                            let mut current_positions = std::collections::HashMap::new();
+                            let ctx = GameContext::new(0.0, 0);
+                            for target_id in &seq.target_ids {
+                                for obj in &config.objects {
+                                    if obj.id.as_ref() == Some(target_id) {
+                                        let shape = obj.shape.evaluate(&ctx);
+                                        let (pos, rot) = match shape {
+                                            EvaluatedShape::Circle { center, .. } => (center, 0.0),
+                                            EvaluatedShape::Rect { center, rotation, .. } => (center, rotation),
+                                            EvaluatedShape::Line { start, end } => {
+                                                ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
+                                            }
+                                            EvaluatedShape::Bezier { start, end, .. } => {
+                                                ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
+                                            }
+                                        };
+                                        current_positions.insert(target_id.clone(), (pos, rot));
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // If we have previous positions, use them
+                            for (id, (pos, rot)) in &*initials {
+                                if !current_positions.contains_key(id) {
+                                    current_positions.insert(id.clone(), (*pos, *rot));
+                                }
+                            }
+
+                            // Create temporary sequence for preview
+                            let preview_sequences = vec![seq.clone()];
+                            let mut game_ctx = GameContext::new(0.0, 0);
+
+                            let updates = executor.update(
+                                dt,
+                                &preview_sequences,
+                                &current_positions,
+                                &initials,
+                                &mut game_ctx,
+                            );
+
+                            // Apply updates to game state objects
+                            drop(gs_opt);
+                            if let Some(gs) = &mut *preview_game_state.borrow_mut() {
+                                for (id, pos, rot) in &updates {
+                                    gs.set_kinematic_position(id, *pos, *rot);
+                                }
+                            }
+
+                            finished = executor.is_finished();
+                        }
+                    }
+
+                    // Render preview state
+                    if let Some(renderer) = &*renderer {
+                        if let Some(gs) = &*preview_game_state.borrow() {
+                            let cam = camera.borrow();
+                            renderer.borrow_mut().render_with_overlay(gs, &cam, &[], &[], &[]);
+                        }
+                    }
+
+                    // Check if finished
+                    if finished {
+                        *preview_loop_running.borrow_mut() = false;
+                        is_preview_active.set(false);
+                        on_preview_complete.emit(());
+                        return;
+                    }
+
+                    // Request next frame
+                    if *preview_loop_running.borrow() {
+                        if let Some(window) = web_sys::window() {
+                            if let Some(ref cb) = *closure_clone.borrow() {
+                                let id = window
+                                    .request_animation_frame(cb.as_ref().unchecked_ref())
+                                    .ok();
+                                *preview_frame_id.borrow_mut() = id;
+                            }
+                        }
+                    }
+                }));
+
+                // Start the loop
+                if let Some(window) = web_sys::window() {
+                    if let Some(ref cb) = *closure.borrow() {
+                        let id = window
+                            .request_animation_frame(cb.as_ref().unchecked_ref())
+                            .ok();
+                        *preview_frame_id_cleanup.borrow_mut() = id;
+                    }
+                }
+            }
+
+            // Cleanup
+            move || {
+                *preview_loop_running_cleanup.borrow_mut() = false;
+                if let Some(id) = *preview_frame_id_cleanup.borrow() {
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.cancel_animation_frame(id);
+                    }
+                }
+                *preview_frame_id_cleanup.borrow_mut() = None;
+            }
         });
     }
 
@@ -463,6 +806,201 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         });
     }
 
+    // Document-level mouse events for drag outside canvas
+    {
+        let camera = camera.clone();
+        let interaction = interaction.clone();
+        let config = props.config.clone();
+        let selected_index = props.selected_index;
+        let preview_transform = preview_transform.clone();
+        let on_object_update = props.on_object_update.clone();
+        let do_render = do_render.clone();
+        let is_dragging = *is_dragging_state;
+        let is_dragging_state = is_dragging_state.clone();
+        let canvas_ref = canvas_ref.clone();
+
+        use_effect_with(is_dragging, move |is_dragging| {
+            // 클린업에 필요한 데이터를 Option으로 감싸서 동일한 클로저 타입 반환
+            type ClosureType = Closure<dyn FnMut(web_sys::MouseEvent)>;
+            let cleanup_data: Option<(Rc<ClosureType>, Rc<ClosureType>)> = if *is_dragging {
+                let camera = camera.clone();
+                let interaction = interaction.clone();
+                let config = config.clone();
+                let selected_index = selected_index;
+                let preview_transform = preview_transform.clone();
+                let on_object_update = on_object_update.clone();
+                let do_render = do_render.clone();
+                let is_dragging_state = is_dragging_state.clone();
+                let canvas_ref = canvas_ref.clone();
+
+                // Document mousemove handler
+                let mousemove_cb = {
+                    let camera = camera.clone();
+                    let interaction = interaction.clone();
+                    let config = config.clone();
+                    let preview_transform = preview_transform.clone();
+                    let do_render = do_render.clone();
+                    let canvas_ref = canvas_ref.clone();
+
+                    Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
+                        let mut inter = interaction.borrow_mut();
+                        if !inter.is_dragging() {
+                            return;
+                        }
+
+                        // Get canvas-relative position
+                        let (sx, sy) = if let Some(canvas) = canvas_ref.cast::<web_sys::HtmlElement>() {
+                            let rect = canvas.get_bounding_client_rect();
+                            ((e.client_x() as f64 - rect.left()) as f32, (e.client_y() as f64 - rect.top()) as f32)
+                        } else {
+                            (e.client_x() as f32, e.client_y() as f32)
+                        };
+
+                        let cam_ref = camera.borrow();
+                        let world = cam_ref.screen_to_world(sx, sy);
+                        let viewport = cam_ref.viewport;
+                        drop(cam_ref);
+
+                        inter.update_mouse((sx, sy), world);
+                        inter.update_modifiers(e.shift_key(), e.ctrl_key(), e.alt_key());
+
+                        // Auto-pan when near screen edges during drag
+                        // pan_by_screen_delta moves camera opposite to delta (natural panning)
+                        // So positive delta moves camera left/up, negative moves right/down
+                        const EDGE_MARGIN: f32 = 40.0;
+                        const PAN_SPEED: f32 = 8.0;
+                        let mut pan_x = 0.0f32;
+                        let mut pan_y = 0.0f32;
+
+                        // Left edge: move camera left (positive delta)
+                        if sx < EDGE_MARGIN { pan_x = PAN_SPEED; }
+                        // Right edge: move camera right (negative delta)
+                        else if sx > viewport.0 - EDGE_MARGIN { pan_x = -PAN_SPEED; }
+                        // Top edge: move camera up (positive delta)
+                        if sy < EDGE_MARGIN { pan_y = PAN_SPEED; }
+                        // Bottom edge: move camera down (negative delta)
+                        else if sy > viewport.1 - EDGE_MARGIN { pan_y = -PAN_SPEED; }
+
+                        if pan_x != 0.0 || pan_y != 0.0 {
+                            let mut cam = camera.borrow_mut();
+                            let z = cam.zoom;
+                            cam.pan_by_screen_delta(pan_x, pan_y);
+                            // Camera moves by -pan/zoom in world coords, so drag start moves same amount
+                            if let Some(start) = inter.drag_start_world {
+                                inter.drag_start_world = Some((start.0 - pan_x / z, start.1 - pan_y / z));
+                            }
+                        }
+
+                        if let Some(handle) = inter.active_handle {
+                            if let Some(idx) = selected_index {
+                                if idx < config.objects.len() {
+                                    if handle.is_bezier() {
+                                        if let Some(orig) = inter.original_bezier_transform {
+                                            if let Some(d) = inter.drag_delta() {
+                                                let new_t = gizmo::apply_bezier_transform(handle, &orig, d, inter.shift_held, inter.alt_held);
+                                                *preview_transform.borrow_mut() = Some(PreviewTransform::Bezier(idx, new_t));
+                                            }
+                                        }
+                                    } else if handle.is_line() {
+                                        if let Some(orig) = inter.original_line_transform {
+                                            if let Some(d) = inter.drag_delta() {
+                                                let new_t = gizmo::apply_line_transform(handle, &orig, d, inter.shift_held);
+                                                *preview_transform.borrow_mut() = Some(PreviewTransform::Line(idx, new_t));
+                                            }
+                                        }
+                                    } else if let Some(orig) = inter.original_transform {
+                                        let new_t = if handle.is_rotate() {
+                                            if let (Some(start), Some(curr)) = (inter.drag_start_world, inter.mouse_world) {
+                                                gizmo::apply_rotate_transform(&orig, start, curr, inter.shift_held)
+                                            } else { orig }
+                                        } else if handle.is_scale() {
+                                            if let Some(d) = inter.drag_delta() {
+                                                gizmo::apply_scale_transform(handle, &orig, d, inter.shift_held)
+                                            } else { orig }
+                                        } else {
+                                            if let Some(d) = inter.drag_delta() {
+                                                gizmo::apply_move_transform(handle, &orig, d, inter.shift_held)
+                                            } else { orig }
+                                        };
+                                        *preview_transform.borrow_mut() = Some(PreviewTransform::Standard(idx, new_t));
+                                    }
+                                }
+                            }
+                        }
+                        drop(inter);
+                        do_render();
+                    }) as Box<dyn FnMut(web_sys::MouseEvent)>)
+                };
+
+                // Document mouseup handler
+                let mouseup_cb = {
+                    let interaction = interaction.clone();
+                    let preview_transform = preview_transform.clone();
+                    let config = config.clone();
+                    let on_object_update = on_object_update.clone();
+                    let is_dragging_state = is_dragging_state.clone();
+
+                    Closure::wrap(Box::new(move |_: web_sys::MouseEvent| {
+                        let mut inter = interaction.borrow_mut();
+                        inter.end_drag();
+                        drop(inter);
+                        is_dragging_state.set(false);
+
+                        let preview = *preview_transform.borrow();
+                        match preview {
+                            Some(PreviewTransform::Standard(idx, transform)) => {
+                                if idx < config.objects.len() {
+                                    let mut obj = config.objects[idx].clone();
+                                    apply_transform_to_object(&mut obj, &transform);
+                                    on_object_update.emit((idx, obj));
+                                }
+                            }
+                            Some(PreviewTransform::Bezier(idx, transform)) => {
+                                if idx < config.objects.len() {
+                                    let mut obj = config.objects[idx].clone();
+                                    apply_bezier_transform_to_object(&mut obj, &transform);
+                                    on_object_update.emit((idx, obj));
+                                }
+                            }
+                            Some(PreviewTransform::Line(idx, transform)) => {
+                                if idx < config.objects.len() {
+                                    let mut obj = config.objects[idx].clone();
+                                    apply_line_transform_to_object(&mut obj, &transform);
+                                    on_object_update.emit((idx, obj));
+                                }
+                            }
+                            None => {}
+                        }
+                    }) as Box<dyn FnMut(web_sys::MouseEvent)>)
+                };
+
+                // Add document listeners
+                if let Some(window) = web_sys::window() {
+                    if let Some(document) = window.document() {
+                        let _ = document.add_event_listener_with_callback("mousemove", mousemove_cb.as_ref().unchecked_ref());
+                        let _ = document.add_event_listener_with_callback("mouseup", mouseup_cb.as_ref().unchecked_ref());
+                    }
+                }
+
+                Some((Rc::new(mousemove_cb), Rc::new(mouseup_cb)))
+            } else {
+                None
+            };
+
+            // Return cleanup closure
+            move || {
+                if let Some((mousemove_cleanup, mouseup_cleanup)) = cleanup_data.as_ref() {
+                    if let Some(window) = web_sys::window() {
+                        if let Some(document) = window.document() {
+                            let _ = document.remove_event_listener_with_callback("mousemove", mousemove_cleanup.as_ref().as_ref().unchecked_ref());
+                            let _ = document.remove_event_listener_with_callback("mouseup", mouseup_cleanup.as_ref().as_ref().unchecked_ref());
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Mouse wheel
     let onwheel = {
         let camera = camera.clone();
@@ -496,8 +1034,15 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let selected_index = props.selected_index;
         let on_select = props.on_select.clone();
         let context_menu_state = context_menu_state.clone();
+        let is_dragging_state = is_dragging_state.clone();
+        let canvas_ref = canvas_ref.clone();
 
         Callback::from(move |e: MouseEvent| {
+            // 캔버스에 포커스를 주어 키보드 이벤트 수신
+            if let Some(canvas) = canvas_ref.cast::<web_sys::HtmlCanvasElement>() {
+                let _ = canvas.focus();
+            }
+
             // Close context menu on any click
             if context_menu_state.visible {
                 context_menu_state.set(ContextMenuState::hide());
@@ -544,6 +1089,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                     if let Some(handle) = hit_test_bezier_gizmo(&transform, world, cam.zoom) {
                                         tracing::info!("bezier gizmo hit: {:?}", handle);
                                         inter.start_bezier_drag(handle, world, transform);
+                                        is_dragging_state.set(true);
                                         return;
                                     }
                                 }
@@ -553,6 +1099,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                     if let Some(handle) = hit_test_line_gizmo(&transform, world, cam.zoom) {
                                         tracing::info!("line gizmo hit: {:?}", handle);
                                         inter.start_line_drag(handle, world, transform);
+                                        is_dragging_state.set(true);
                                         return;
                                     }
                                 }
@@ -562,6 +1109,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                     if let Some(handle) = hit_test_gizmo(&transform, world, cam.zoom) {
                                         tracing::info!("gizmo hit: {:?}", handle);
                                         inter.start_drag(handle, world, transform);
+                                        is_dragging_state.set(true);
                                         return;
                                     }
                                 }
@@ -600,6 +1148,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
             let cam_ref = camera.borrow();
             let world = cam_ref.screen_to_world(sx, sy);
             let zoom = cam_ref.zoom;
+            let viewport = cam_ref.viewport;
             drop(cam_ref);
 
             let mut inter = interaction.borrow_mut();
@@ -620,6 +1169,32 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
 
             // Gizmo drag - update preview only (no parent re-render)
             if inter.is_dragging() {
+                // Auto-pan when near screen edges during drag
+                // pan_by_screen_delta moves camera opposite to delta (natural panning)
+                const EDGE_MARGIN: f32 = 40.0;
+                const PAN_SPEED: f32 = 8.0;
+                let mut pan_x = 0.0f32;
+                let mut pan_y = 0.0f32;
+
+                // Left edge: move camera left (positive delta)
+                if sx < EDGE_MARGIN { pan_x = PAN_SPEED; }
+                // Right edge: move camera right (negative delta)
+                else if sx > viewport.0 - EDGE_MARGIN { pan_x = -PAN_SPEED; }
+                // Top edge: move camera up (positive delta)
+                if sy < EDGE_MARGIN { pan_y = PAN_SPEED; }
+                // Bottom edge: move camera down (negative delta)
+                else if sy > viewport.1 - EDGE_MARGIN { pan_y = -PAN_SPEED; }
+
+                if pan_x != 0.0 || pan_y != 0.0 {
+                    let mut cam = camera.borrow_mut();
+                    let z = cam.zoom;
+                    cam.pan_by_screen_delta(pan_x, pan_y);
+                    // Camera moves by -pan/zoom in world coords, so drag start moves same amount
+                    if let Some(start) = inter.drag_start_world {
+                        inter.drag_start_world = Some((start.0 - pan_x / z, start.1 - pan_y / z));
+                    }
+                }
+
                 if let Some(handle) = inter.active_handle {
                     if let Some(idx) = selected_index {
                         if idx < config.objects.len() {
@@ -704,12 +1279,14 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let preview_transform = preview_transform.clone();
         let config = props.config.clone();
         let on_object_update = props.on_object_update.clone();
+        let is_dragging_state = is_dragging_state.clone();
 
         Callback::from(move |_: MouseEvent| {
             let mut inter = interaction.borrow_mut();
             inter.end_panning();
             inter.end_drag();
             drop(inter);
+            is_dragging_state.set(false);
 
             // Commit preview transform to parent (keep preview for smooth transition)
             let preview = *preview_transform.borrow();
@@ -741,22 +1318,20 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         })
     };
 
-    // Mouse leave
+    // Mouse leave - don't cancel drag, just clear hover
     let onmouseleave = {
         let interaction = interaction.clone();
         let hovered_handle = hovered_handle.clone();
-        let preview_transform = preview_transform.clone();
         let do_render = do_render.clone();
 
         Callback::from(move |_: MouseEvent| {
-            let mut inter = interaction.borrow_mut();
-            inter.end_panning();
-            inter.end_drag();
-            inter.mouse_screen = None;
-            inter.mouse_world = None;
+            let inter = interaction.borrow();
+            // If dragging, don't do anything - let the drag continue
+            if inter.is_dragging() || inter.is_panning {
+                return;
+            }
             drop(inter);
             *hovered_handle.borrow_mut() = None;
-            *preview_transform.borrow_mut() = None;
             do_render();
         })
     };
@@ -765,10 +1340,48 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
     let onkeydown = {
         let interaction = interaction.clone();
         let render_trigger = render_trigger.clone();
+        let selected_index = props.selected_index;
+        let on_copy = props.on_copy.clone();
+        let on_paste = props.on_paste.clone();
+        let on_delete = props.on_delete.clone();
+        let camera = camera.clone();
+
         Callback::from(move |e: KeyboardEvent| {
             let mut inter = interaction.borrow_mut();
             inter.update_modifiers(e.shift_key(), e.ctrl_key(), e.alt_key());
-            if e.key() == "Escape" { inter.cancel_drag(); }
+
+            // Escape - 드래그 취소
+            if e.key() == "Escape" {
+                inter.cancel_drag();
+            }
+
+            // Ctrl+C - 복사
+            if e.ctrl_key() && e.key() == "c" {
+                if let Some(idx) = selected_index {
+                    e.prevent_default();
+                    on_copy.emit(idx);
+                }
+            }
+
+            // Ctrl+V - 붙여넣기
+            if e.ctrl_key() && e.key() == "v" {
+                e.prevent_default();
+                // 마우스 월드 좌표 사용, 없으면 카메라 중심
+                let pos = inter.mouse_world.unwrap_or_else(|| {
+                    let cam = camera.borrow();
+                    cam.center
+                });
+                on_paste.emit(pos);
+            }
+
+            // Delete - 삭제
+            if e.key() == "Delete" {
+                if let Some(idx) = selected_index {
+                    e.prevent_default();
+                    on_delete.emit(idx);
+                }
+            }
+
             drop(inter);
             render_trigger.force_update();
         })

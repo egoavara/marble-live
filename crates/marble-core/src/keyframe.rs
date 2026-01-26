@@ -198,14 +198,13 @@ impl KeyframeExecutor {
                     break;
                 }
                 Keyframe::Apply {
-                    target_ids,
                     translation,
                     rotation,
                     duration,
                     easing,
                 } => {
-                    // Start animations for each target
-                    for target_id in target_ids {
+                    // Start animations for each target (using sequence-level target_ids)
+                    for target_id in &sequence.target_ids {
                         let current = current_positions.get(target_id);
                         let initial = initial_transforms.get(target_id);
 
@@ -236,14 +235,13 @@ impl KeyframeExecutor {
                     break;
                 }
                 Keyframe::PivotRotate {
-                    target_ids,
                     pivot,
                     angle,
                     duration,
                     easing,
                 } => {
-                    // Start pivot rotation animations for each target
-                    for target_id in target_ids {
+                    // Start pivot rotation animations for each target (using sequence-level target_ids)
+                    for target_id in &sequence.target_ids {
                         let current = current_positions.get(target_id);
                         let initial = initial_transforms.get(target_id);
 
@@ -317,9 +315,9 @@ mod tests {
     fn create_test_sequence() -> KeyframeSequence {
         KeyframeSequence {
             name: "test".to_string(),
+            target_ids: vec!["obj1".to_string()],
             keyframes: vec![
                 Keyframe::Apply {
-                    target_ids: vec!["obj1".to_string()],
                     translation: Some([100.0, 0.0]),
                     rotation: None,
                     duration: 1.0,
@@ -327,7 +325,6 @@ mod tests {
                 },
                 Keyframe::Delay { duration: NumberOrExpr::Number(0.5) },
                 Keyframe::Apply {
-                    target_ids: vec!["obj1".to_string()],
                     translation: Some([0.0, 0.0]),
                     rotation: None,
                     duration: 1.0,
@@ -341,10 +338,10 @@ mod tests {
     fn create_loop_sequence() -> KeyframeSequence {
         KeyframeSequence {
             name: "loop_test".to_string(),
+            target_ids: vec!["obj1".to_string()],
             keyframes: vec![
                 Keyframe::LoopStart { count: Some(2) },
                 Keyframe::Apply {
-                    target_ids: vec!["obj1".to_string()],
                     translation: Some([50.0, 0.0]),
                     rotation: None,
                     duration: 0.5,
@@ -428,10 +425,10 @@ mod tests {
     fn test_infinite_loop() {
         let sequence = KeyframeSequence {
             name: "infinite".to_string(),
+            target_ids: vec!["obj1".to_string()],
             keyframes: vec![
                 Keyframe::LoopStart { count: None },
                 Keyframe::Apply {
-                    target_ids: vec!["obj1".to_string()],
                     translation: Some([10.0, 0.0]),
                     rotation: None,
                     duration: 0.1,
@@ -466,9 +463,9 @@ mod tests {
         // Test that pivot rotation correctly rotates around the pivot point
         let sequence = KeyframeSequence {
             name: "pivot_test".to_string(),
+            target_ids: vec!["flipper".to_string()],
             keyframes: vec![
                 Keyframe::PivotRotate {
-                    target_ids: vec!["flipper".to_string()],
                     pivot: [0.0, 0.0],  // Pivot at origin
                     angle: 90.0,         // Rotate 90 degrees
                     duration: 1.0,
@@ -509,11 +506,11 @@ mod tests {
         // Test that random() in delay works
         let sequence = KeyframeSequence {
             name: "random_delay_test".to_string(),
+            target_ids: vec!["obj1".to_string()],
             keyframes: vec![
                 Keyframe::LoopStart { count: Some(3) },
                 Keyframe::Delay { duration: NumberOrExpr::Expr("random(0.1, 0.2)".to_string()) },
                 Keyframe::Apply {
-                    target_ids: vec!["obj1".to_string()],
                     translation: Some([10.0, 0.0]),
                     rotation: None,
                     duration: 0.1,

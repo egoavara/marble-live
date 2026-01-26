@@ -112,25 +112,27 @@
   "keyframes": [
     {
       "name": "flipper_left_cycle",
+      "target_ids": ["flipper_left"],
       "autoplay": true,
       "keyframes": [
         { "type": "loop_start" },
         { "type": "delay", "duration": "random(1, 3.0)" },
-        { "type": "pivot_rotate", "target_ids": ["flipper_left"], "pivot": [80.0, 850.0], "angle": 35.0, "duration": 0.1, "easing": "ease_out" },
+        { "type": "pivot_rotate", "pivot": [80.0, 850.0], "angle": 35.0, "duration": 0.1, "easing": "ease_out" },
         { "type": "delay", "duration": 0.1 },
-        { "type": "pivot_rotate", "target_ids": ["flipper_left"], "pivot": [80.0, 850.0], "angle": 0.0, "duration": 0.15, "easing": "ease_in" },
+        { "type": "pivot_rotate", "pivot": [80.0, 850.0], "angle": 0.0, "duration": 0.15, "easing": "ease_in" },
         { "type": "loop_end" }
       ]
     },
     {
       "name": "flipper_right_cycle",
+      "target_ids": ["flipper_right"],
       "autoplay": true,
       "keyframes": [
         { "type": "loop_start" },
         { "type": "delay", "duration": "random(1, 3.0)" },
-        { "type": "pivot_rotate", "target_ids": ["flipper_right"], "pivot": [480.0, 850.0], "angle": -35.0, "duration": 0.1, "easing": "ease_out" },
+        { "type": "pivot_rotate", "pivot": [480.0, 850.0], "angle": -35.0, "duration": 0.1, "easing": "ease_out" },
         { "type": "delay", "duration": 0.1 },
-        { "type": "pivot_rotate", "target_ids": ["flipper_right"], "pivot": [480.0, 850.0], "angle": 0.0, "duration": 0.15, "easing": "ease_in" },
+        { "type": "pivot_rotate", "pivot": [480.0, 850.0], "angle": 0.0, "duration": 0.15, "easing": "ease_in" },
         { "type": "loop_end" }
       ]
     }

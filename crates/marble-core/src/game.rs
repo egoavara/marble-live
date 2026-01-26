@@ -441,6 +441,18 @@ impl GameState {
         &self.game_context
     }
 
+    /// Sets the position and rotation of a kinematic body by object ID.
+    /// Used for keyframe animation preview.
+    pub fn set_kinematic_position(&mut self, object_id: &str, pos: [f32; 2], rot: f32) {
+        if let Some(&handle) = self.kinematic_bodies.get(object_id) {
+            self.physics_world.set_kinematic_target(
+                handle,
+                Vector::new(pos[0], pos[1]),
+                rot,
+            );
+        }
+    }
+
     /// Calculates ranking score based on live_ranking configuration.
     /// Lower score = higher rank.
     pub fn calculate_ranking_score(&self, marble_pos: (f32, f32)) -> f32 {

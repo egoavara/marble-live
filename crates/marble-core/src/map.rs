@@ -309,8 +309,6 @@ pub enum Keyframe {
     },
     /// Applies a transformation to target objects.
     Apply {
-        /// IDs of objects to animate.
-        target_ids: Vec<String>,
         /// Translation offset from the initial position.
         #[serde(default)]
         translation: Option<[f32; 2]>,
@@ -325,8 +323,6 @@ pub enum Keyframe {
     },
     /// Rotates objects around a pivot point (for flippers).
     PivotRotate {
-        /// IDs of objects to animate.
-        target_ids: Vec<String>,
         /// Pivot point in world coordinates.
         pivot: [f32; 2],
         /// Target angle offset from initial rotation (degrees).
@@ -344,6 +340,9 @@ pub enum Keyframe {
 pub struct KeyframeSequence {
     /// Name of the sequence.
     pub name: String,
+    /// IDs of objects to animate. All keyframes in this sequence will target these objects.
+    #[serde(default)]
+    pub target_ids: Vec<String>,
     /// List of keyframes.
     pub keyframes: Vec<Keyframe>,
     /// Whether to automatically start this animation.
@@ -550,14 +549,7 @@ impl RouletteConfig {
     fn collect_keyframe_target_ids(&self) -> std::collections::HashSet<String> {
         let mut targets = std::collections::HashSet::new();
         for seq in &self.keyframes {
-            for kf in &seq.keyframes {
-                match kf {
-                    Keyframe::Apply { target_ids, .. } | Keyframe::PivotRotate { target_ids, .. } => {
-                        targets.extend(target_ids.iter().cloned());
-                    }
-                    _ => {}
-                }
-            }
+            targets.extend(seq.target_ids.iter().cloned());
         }
         targets
     }
@@ -985,8 +977,8 @@ mod tests {
             .collect();
 
         assert_eq!(spawners.len(), 1);
-        // 4 walls + 10 bumpers + 2 spinners + 2 sloped walls + 2 flippers + 2 bottom walls = 22
-        assert_eq!(obstacles.len(), 22);
+        // 4 walls + 10 bumpers + 2 spinners + 2 flippers + 2 sloped walls = 20
+        assert_eq!(obstacles.len(), 20);
         assert_eq!(triggers.len(), 1);
 
         // Verify keyframes are loaded (flipper animations)
@@ -1019,8 +1011,8 @@ mod tests {
         assert_eq!(map_data.blackholes.len(), 1);
 
         // Verify colliders were created
-        // 22 obstacles + 1 trigger = 23 colliders
-        assert_eq!(world.collider_set.len(), 23);
+        // 20 obstacles + 1 trigger = 21 colliders
+        assert_eq!(world.collider_set.len(), 21);
     }
 
     #[test]

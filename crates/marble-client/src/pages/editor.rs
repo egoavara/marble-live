@@ -3,11 +3,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use marble_core::map::{Keyframe, KeyframeSequence};
 use marble_core::marble::Color;
 use marble_core::GameState;
 use yew::prelude::*;
 
-use crate::components::editor::{EditorCanvas, EditorToolbar, ObjectList, PropertyPanel};
+use crate::components::editor::{EditorCanvas, EditorToolbar, ObjectList, PropertyPanel, TimelinePanel};
 use crate::components::Layout;
 use crate::hooks::use_editor_state;
 
@@ -24,6 +25,10 @@ pub fn editor_page() -> Html {
         use_mut_ref(|| None).clone();
     // Trigger for re-rendering when game_state changes
     let game_state_version = use_state(|| 0u32);
+
+    // Keyframe preview state
+    let preview_sequence: UseStateHandle<Option<KeyframeSequence>> = use_state(|| None);
+    let is_previewing = preview_sequence.is_some();
 
 
     // Toggle simulation (Play/Pause)
@@ -115,6 +120,37 @@ pub fn editor_page() -> Html {
         })
     };
 
+    // Preview keyframe callback
+    let on_preview_keyframe = {
+        let preview_sequence = preview_sequence.clone();
+        let config = editor_state.config.clone();
+        let selected_sequence = editor_state.selected_sequence;
+        Callback::from(move |kf_idx: usize| {
+            if let Some(seq_idx) = selected_sequence {
+                if let Some(seq) = config.keyframes.get(seq_idx) {
+                    if let Some(keyframe) = seq.keyframes.get(kf_idx) {
+                        // Create a single-keyframe sequence for preview
+                        let preview_seq = KeyframeSequence {
+                            name: "__preview__".to_string(),
+                            target_ids: seq.target_ids.clone(),
+                            keyframes: vec![keyframe.clone()],
+                            autoplay: true,
+                        };
+                        preview_sequence.set(Some(preview_seq));
+                    }
+                }
+            }
+        })
+    };
+
+    // Preview complete callback
+    let on_preview_complete = {
+        let preview_sequence = preview_sequence.clone();
+        Callback::from(move |_: ()| {
+            preview_sequence.set(None);
+        })
+    };
+
     // Physics update is handled in EditorCanvas simulation loop
 
     html! {
@@ -135,6 +171,14 @@ pub fn editor_page() -> Html {
                     on_delete={editor_state.on_delete.clone()}
                     on_mirror_x={editor_state.on_mirror_x.clone()}
                     on_mirror_y={editor_state.on_mirror_y.clone()}
+                    sequence_target_ids={
+                        editor_state.selected_sequence
+                            .and_then(|idx| editor_state.config.keyframes.get(idx))
+                            .map(|seq| seq.target_ids.clone())
+                            .unwrap_or_default()
+                    }
+                    preview_sequence={(*preview_sequence).clone()}
+                    on_preview_complete={on_preview_complete.clone()}
                 />
 
                 // Toolbar (top-center)
@@ -160,6 +204,13 @@ pub fn editor_page() -> Html {
                         on_select={editor_state.on_select.clone()}
                         on_add={editor_state.on_add.clone()}
                         on_delete={editor_state.on_delete.clone()}
+                        // Sequence props
+                        sequences={editor_state.config.keyframes.clone()}
+                        selected_sequence={editor_state.selected_sequence}
+                        on_select_sequence={editor_state.on_select_sequence.clone()}
+                        on_add_sequence={editor_state.on_add_sequence.clone()}
+                        on_delete_sequence={editor_state.on_delete_sequence.clone()}
+                        on_update_sequence={editor_state.on_update_sequence.clone()}
                     />
                 </div>
 
@@ -170,6 +221,64 @@ pub fn editor_page() -> Html {
                         selected_index={editor_state.selected_object}
                         on_update_meta={editor_state.on_update_meta.clone()}
                         on_update_object={editor_state.on_update_object.clone()}
+                    />
+                </div>
+
+                // Timeline Panel (bottom) - for keyframe editing
+                <div class="editor-floating-panel editor-panel-bottom">
+                    <TimelinePanel
+                        sequence={editor_state.selected_sequence.and_then(|idx| editor_state.config.keyframes.get(idx).cloned())}
+                        sequence_index={editor_state.selected_sequence}
+                        selected_keyframe={editor_state.selected_keyframe}
+                        on_select_keyframe={editor_state.on_select_keyframe.clone()}
+                        on_add_keyframe={{
+                            let cb = editor_state.on_add_keyframe.clone();
+                            let seq_idx = editor_state.selected_sequence;
+                            Callback::from(move |kf| {
+                                if let Some(idx) = seq_idx {
+                                    cb.emit((idx, kf));
+                                }
+                            })
+                        }}
+                        on_update_keyframe={{
+                            let cb = editor_state.on_update_keyframe.clone();
+                            let seq_idx = editor_state.selected_sequence;
+                            Callback::from(move |(kf_idx, kf)| {
+                                if let Some(idx) = seq_idx {
+                                    cb.emit((idx, kf_idx, kf));
+                                }
+                            })
+                        }}
+                        on_delete_keyframe={{
+                            let cb = editor_state.on_delete_keyframe.clone();
+                            let seq_idx = editor_state.selected_sequence;
+                            Callback::from(move |kf_idx| {
+                                if let Some(idx) = seq_idx {
+                                    cb.emit((idx, kf_idx));
+                                }
+                            })
+                        }}
+                        on_move_keyframe={{
+                            let cb = editor_state.on_move_keyframe.clone();
+                            let seq_idx = editor_state.selected_sequence;
+                            Callback::from(move |(from, to)| {
+                                if let Some(idx) = seq_idx {
+                                    cb.emit((idx, from, to));
+                                }
+                            })
+                        }}
+                        on_update_sequence={{
+                            let cb = editor_state.on_update_sequence.clone();
+                            let seq_idx = editor_state.selected_sequence;
+                            Callback::from(move |seq| {
+                                if let Some(idx) = seq_idx {
+                                    cb.emit((idx, seq));
+                                }
+                            })
+                        }}
+                        available_object_ids={editor_state.config.objects.iter().filter_map(|o| o.id.clone()).collect::<Vec<_>>()}
+                        on_preview_keyframe={on_preview_keyframe.clone()}
+                        is_previewing={is_previewing}
                     />
                 </div>
             </div>

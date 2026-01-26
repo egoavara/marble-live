@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use marble_core::map::{MapMeta, MapObject, ObjectRole, RouletteConfig, Shape};
+use marble_core::map::{Keyframe, KeyframeSequence, MapMeta, MapObject, ObjectRole, RouletteConfig, Shape};
 use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
 use yew::prelude::*;
 
@@ -19,6 +19,10 @@ pub struct EditorState {
     pub is_dirty: bool,
     /// Clipboard for copy/paste operations.
     pub clipboard: Option<MapObject>,
+    /// Currently selected keyframe sequence index.
+    pub selected_sequence: Option<usize>,
+    /// Currently selected keyframe index within the selected sequence.
+    pub selected_keyframe: Option<usize>,
 }
 
 impl Default for EditorState {
@@ -28,6 +32,8 @@ impl Default for EditorState {
             selected_object: None,
             is_dirty: false,
             clipboard: None,
+            selected_sequence: None,
+            selected_keyframe: None,
         }
     }
 }
@@ -58,6 +64,28 @@ pub enum EditorAction {
     MirrorObjectX(usize),
     /// Mirror object Y-axis (top-bottom flip).
     MirrorObjectY(usize),
+
+    // Sequence actions
+    /// Select a keyframe sequence by index.
+    SelectSequence(Option<usize>),
+    /// Add a new keyframe sequence.
+    AddSequence(KeyframeSequence),
+    /// Update a keyframe sequence at the given index.
+    UpdateSequence { index: usize, sequence: KeyframeSequence },
+    /// Delete a keyframe sequence by index.
+    DeleteSequence(usize),
+
+    // Keyframe actions (within selected sequence)
+    /// Select a keyframe within the selected sequence.
+    SelectKeyframe(Option<usize>),
+    /// Add a keyframe to a sequence.
+    AddKeyframe { sequence_index: usize, keyframe: Keyframe },
+    /// Update a keyframe within a sequence.
+    UpdateKeyframe { sequence_index: usize, keyframe_index: usize, keyframe: Keyframe },
+    /// Delete a keyframe from a sequence.
+    DeleteKeyframe { sequence_index: usize, keyframe_index: usize },
+    /// Move a keyframe within a sequence.
+    MoveKeyframe { sequence_index: usize, from: usize, to: usize },
 }
 
 impl Reducible for EditorState {
@@ -70,6 +98,8 @@ impl Reducible for EditorState {
                 selected_object: None,
                 is_dirty: false,
                 clipboard: None,
+                selected_sequence: None,
+                selected_keyframe: None,
             }),
             EditorAction::SelectObject(index) => Rc::new(Self {
                 selected_object: index,
@@ -95,6 +125,8 @@ impl Reducible for EditorState {
                     selected_object: Some(new_index),
                     is_dirty: true,
                     clipboard: self.clipboard.clone(),
+                    selected_sequence: self.selected_sequence,
+                    selected_keyframe: self.selected_keyframe,
                 })
             }
             EditorAction::DeleteObject(index) => {
@@ -122,6 +154,8 @@ impl Reducible for EditorState {
                     selected_object: selected,
                     is_dirty: true,
                     clipboard: self.clipboard.clone(),
+                    selected_sequence: self.selected_sequence,
+                    selected_keyframe: self.selected_keyframe,
                 })
             }
             EditorAction::UpdateMeta(meta) => {
@@ -148,6 +182,8 @@ impl Reducible for EditorState {
                     selected_object: None,
                     is_dirty: true,
                     clipboard: None,
+                    selected_sequence: None,
+                    selected_keyframe: None,
                 })
             }
             EditorAction::MarkSaved => Rc::new(Self {
@@ -208,6 +244,151 @@ impl Reducible for EditorState {
                     Rc::new((*self).clone())
                 }
             }
+
+            // Sequence actions
+            EditorAction::SelectSequence(index) => Rc::new(Self {
+                selected_sequence: index,
+                selected_keyframe: None, // Clear keyframe selection when changing sequence
+                ..(*self).clone()
+            }),
+            EditorAction::AddSequence(sequence) => {
+                let mut config = self.config.clone();
+                config.keyframes.push(sequence);
+                let new_index = config.keyframes.len() - 1;
+                Rc::new(Self {
+                    config,
+                    selected_sequence: Some(new_index),
+                    selected_keyframe: None,
+                    is_dirty: true,
+                    ..(*self).clone()
+                })
+            }
+            EditorAction::UpdateSequence { index, sequence } => {
+                let mut config = self.config.clone();
+                if index < config.keyframes.len() {
+                    config.keyframes[index] = sequence;
+                }
+                Rc::new(Self {
+                    config,
+                    is_dirty: true,
+                    ..(*self).clone()
+                })
+            }
+            EditorAction::DeleteSequence(index) => {
+                let mut config = self.config.clone();
+                if index < config.keyframes.len() {
+                    config.keyframes.remove(index);
+                }
+                let selected = if config.keyframes.is_empty() {
+                    None
+                } else if let Some(sel) = self.selected_sequence {
+                    if sel >= config.keyframes.len() {
+                        Some(config.keyframes.len().saturating_sub(1))
+                    } else if sel > index {
+                        Some(sel - 1)
+                    } else if sel == index {
+                        if sel > 0 { Some(sel - 1) } else if config.keyframes.is_empty() { None } else { Some(0) }
+                    } else {
+                        Some(sel)
+                    }
+                } else {
+                    None
+                };
+                Rc::new(Self {
+                    config,
+                    selected_sequence: selected,
+                    selected_keyframe: None,
+                    is_dirty: true,
+                    ..(*self).clone()
+                })
+            }
+
+            // Keyframe actions
+            EditorAction::SelectKeyframe(index) => Rc::new(Self {
+                selected_keyframe: index,
+                ..(*self).clone()
+            }),
+            EditorAction::AddKeyframe { sequence_index, keyframe } => {
+                let mut config = self.config.clone();
+                if sequence_index < config.keyframes.len() {
+                    config.keyframes[sequence_index].keyframes.push(keyframe);
+                    let new_index = config.keyframes[sequence_index].keyframes.len() - 1;
+                    Rc::new(Self {
+                        config,
+                        selected_keyframe: Some(new_index),
+                        is_dirty: true,
+                        ..(*self).clone()
+                    })
+                } else {
+                    Rc::new((*self).clone())
+                }
+            }
+            EditorAction::UpdateKeyframe { sequence_index, keyframe_index, keyframe } => {
+                let mut config = self.config.clone();
+                if sequence_index < config.keyframes.len() {
+                    let seq = &mut config.keyframes[sequence_index];
+                    if keyframe_index < seq.keyframes.len() {
+                        seq.keyframes[keyframe_index] = keyframe;
+                    }
+                }
+                Rc::new(Self {
+                    config,
+                    is_dirty: true,
+                    ..(*self).clone()
+                })
+            }
+            EditorAction::DeleteKeyframe { sequence_index, keyframe_index } => {
+                let mut config = self.config.clone();
+                if sequence_index < config.keyframes.len() {
+                    let seq = &mut config.keyframes[sequence_index];
+                    if keyframe_index < seq.keyframes.len() {
+                        seq.keyframes.remove(keyframe_index);
+                    }
+                    let selected = if seq.keyframes.is_empty() {
+                        None
+                    } else if let Some(sel) = self.selected_keyframe {
+                        if sel >= seq.keyframes.len() {
+                            Some(seq.keyframes.len().saturating_sub(1))
+                        } else if sel > keyframe_index {
+                            Some(sel - 1)
+                        } else if sel == keyframe_index {
+                            if sel > 0 { Some(sel - 1) } else if seq.keyframes.is_empty() { None } else { Some(0) }
+                        } else {
+                            Some(sel)
+                        }
+                    } else {
+                        None
+                    };
+                    Rc::new(Self {
+                        config,
+                        selected_keyframe: selected,
+                        is_dirty: true,
+                        ..(*self).clone()
+                    })
+                } else {
+                    Rc::new((*self).clone())
+                }
+            }
+            EditorAction::MoveKeyframe { sequence_index, from, to } => {
+                let mut config = self.config.clone();
+                if sequence_index < config.keyframes.len() {
+                    let seq = &mut config.keyframes[sequence_index];
+                    if from < seq.keyframes.len() && to < seq.keyframes.len() && from != to {
+                        let keyframe = seq.keyframes.remove(from);
+                        seq.keyframes.insert(to, keyframe);
+                        Rc::new(Self {
+                            config,
+                            selected_keyframe: Some(to),
+                            is_dirty: true,
+                            ..(*self).clone()
+                        })
+                    } else {
+                        Rc::new((*self).clone())
+                    }
+                } else {
+                    Rc::new((*self).clone())
+                }
+            }
         }
     }
 }
@@ -219,6 +400,8 @@ pub struct EditorStateHandle {
     pub selected_object: Option<usize>,
     pub is_dirty: bool,
     pub clipboard: Option<MapObject>,
+    pub selected_sequence: Option<usize>,
+    pub selected_keyframe: Option<usize>,
     pub on_new: Callback<()>,
     pub on_load: Callback<RouletteConfig>,
     pub on_save: Callback<()>,
@@ -231,6 +414,17 @@ pub struct EditorStateHandle {
     pub on_paste: Callback<(f32, f32)>,
     pub on_mirror_x: Callback<usize>,
     pub on_mirror_y: Callback<usize>,
+    // Sequence callbacks
+    pub on_select_sequence: Callback<Option<usize>>,
+    pub on_add_sequence: Callback<KeyframeSequence>,
+    pub on_update_sequence: Callback<(usize, KeyframeSequence)>,
+    pub on_delete_sequence: Callback<usize>,
+    // Keyframe callbacks
+    pub on_select_keyframe: Callback<Option<usize>>,
+    pub on_add_keyframe: Callback<(usize, Keyframe)>,
+    pub on_update_keyframe: Callback<(usize, usize, Keyframe)>,
+    pub on_delete_keyframe: Callback<(usize, usize)>,
+    pub on_move_keyframe: Callback<(usize, usize, usize)>,
 }
 
 /// Hook for managing editor state with localStorage persistence.
@@ -246,6 +440,8 @@ pub fn use_editor_state() -> EditorStateHandle {
                         selected_object: None,
                         is_dirty: false,
                         clipboard: None,
+                        selected_sequence: None,
+                        selected_keyframe: None,
                     };
                 }
             }
@@ -348,11 +544,78 @@ pub fn use_editor_state() -> EditorStateHandle {
         })
     };
 
+    // Sequence callbacks
+    let on_select_sequence = {
+        let state = state.clone();
+        Callback::from(move |index: Option<usize>| {
+            state.dispatch(EditorAction::SelectSequence(index));
+        })
+    };
+
+    let on_add_sequence = {
+        let state = state.clone();
+        Callback::from(move |sequence: KeyframeSequence| {
+            state.dispatch(EditorAction::AddSequence(sequence));
+        })
+    };
+
+    let on_update_sequence = {
+        let state = state.clone();
+        Callback::from(move |(index, sequence): (usize, KeyframeSequence)| {
+            state.dispatch(EditorAction::UpdateSequence { index, sequence });
+        })
+    };
+
+    let on_delete_sequence = {
+        let state = state.clone();
+        Callback::from(move |index: usize| {
+            state.dispatch(EditorAction::DeleteSequence(index));
+        })
+    };
+
+    // Keyframe callbacks
+    let on_select_keyframe = {
+        let state = state.clone();
+        Callback::from(move |index: Option<usize>| {
+            state.dispatch(EditorAction::SelectKeyframe(index));
+        })
+    };
+
+    let on_add_keyframe = {
+        let state = state.clone();
+        Callback::from(move |(sequence_index, keyframe): (usize, Keyframe)| {
+            state.dispatch(EditorAction::AddKeyframe { sequence_index, keyframe });
+        })
+    };
+
+    let on_update_keyframe = {
+        let state = state.clone();
+        Callback::from(move |(sequence_index, keyframe_index, keyframe): (usize, usize, Keyframe)| {
+            state.dispatch(EditorAction::UpdateKeyframe { sequence_index, keyframe_index, keyframe });
+        })
+    };
+
+    let on_delete_keyframe = {
+        let state = state.clone();
+        Callback::from(move |(sequence_index, keyframe_index): (usize, usize)| {
+            state.dispatch(EditorAction::DeleteKeyframe { sequence_index, keyframe_index });
+        })
+    };
+
+    let on_move_keyframe = {
+        let state = state.clone();
+        Callback::from(move |(sequence_index, from, to): (usize, usize, usize)| {
+            state.dispatch(EditorAction::MoveKeyframe { sequence_index, from, to });
+        })
+    };
+
     EditorStateHandle {
         config: state.config.clone(),
         selected_object: state.selected_object,
         is_dirty: state.is_dirty,
         clipboard: state.clipboard.clone(),
+        selected_sequence: state.selected_sequence,
+        selected_keyframe: state.selected_keyframe,
         on_new,
         on_load,
         on_save,
@@ -365,6 +628,15 @@ pub fn use_editor_state() -> EditorStateHandle {
         on_paste,
         on_mirror_x,
         on_mirror_y,
+        on_select_sequence,
+        on_add_sequence,
+        on_update_sequence,
+        on_delete_sequence,
+        on_select_keyframe,
+        on_add_keyframe,
+        on_update_keyframe,
+        on_delete_keyframe,
+        on_move_keyframe,
     }
 }
 
