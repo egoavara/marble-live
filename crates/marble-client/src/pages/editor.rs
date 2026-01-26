@@ -29,6 +29,8 @@ pub fn editor_page() -> Html {
     // Keyframe preview state
     let preview_sequence: UseStateHandle<Option<KeyframeSequence>> = use_state(|| None);
     let is_previewing = preview_sequence.is_some();
+    // Current keyframe index being executed during preview
+    let preview_keyframe_index: UseStateHandle<Option<usize>> = use_state(|| None);
 
 
     // Toggle simulation (Play/Pause)
@@ -120,24 +122,28 @@ pub fn editor_page() -> Html {
         })
     };
 
-    // Preview keyframe callback
-    let on_preview_keyframe = {
+    // Preview sequence callback - toggles play/stop
+    let on_preview_sequence = {
         let preview_sequence = preview_sequence.clone();
+        let preview_keyframe_index = preview_keyframe_index.clone();
         let config = editor_state.config.clone();
         let selected_sequence = editor_state.selected_sequence;
-        Callback::from(move |kf_idx: usize| {
-            if let Some(seq_idx) = selected_sequence {
+        let is_previewing = is_previewing;
+        Callback::from(move |_: ()| {
+            if is_previewing {
+                // Stop preview
+                preview_sequence.set(None);
+                preview_keyframe_index.set(None);
+            } else if let Some(seq_idx) = selected_sequence {
                 if let Some(seq) = config.keyframes.get(seq_idx) {
-                    if let Some(keyframe) = seq.keyframes.get(kf_idx) {
-                        // Create a single-keyframe sequence for preview
-                        let preview_seq = KeyframeSequence {
-                            name: "__preview__".to_string(),
-                            target_ids: seq.target_ids.clone(),
-                            keyframes: vec![keyframe.clone()],
-                            autoplay: true,
-                        };
-                        preview_sequence.set(Some(preview_seq));
-                    }
+                    // Use the full sequence for preview
+                    let preview_seq = KeyframeSequence {
+                        name: "__preview__".to_string(),
+                        target_ids: seq.target_ids.clone(),
+                        keyframes: seq.keyframes.clone(),
+                        autoplay: true,
+                    };
+                    preview_sequence.set(Some(preview_seq));
                 }
             }
         })
@@ -146,8 +152,18 @@ pub fn editor_page() -> Html {
     // Preview complete callback
     let on_preview_complete = {
         let preview_sequence = preview_sequence.clone();
+        let preview_keyframe_index = preview_keyframe_index.clone();
         Callback::from(move |_: ()| {
             preview_sequence.set(None);
+            preview_keyframe_index.set(None);
+        })
+    };
+
+    // Preview keyframe index change callback
+    let on_preview_keyframe_change = {
+        let preview_keyframe_index = preview_keyframe_index.clone();
+        Callback::from(move |idx: Option<usize>| {
+            preview_keyframe_index.set(idx);
         })
     };
 
@@ -179,6 +195,7 @@ pub fn editor_page() -> Html {
                     }
                     preview_sequence={(*preview_sequence).clone()}
                     on_preview_complete={on_preview_complete.clone()}
+                    on_preview_keyframe_change={on_preview_keyframe_change.clone()}
                 />
 
                 // Toolbar (top-center)
@@ -277,8 +294,9 @@ pub fn editor_page() -> Html {
                             })
                         }}
                         available_object_ids={editor_state.config.objects.iter().filter_map(|o| o.id.clone()).collect::<Vec<_>>()}
-                        on_preview_keyframe={on_preview_keyframe.clone()}
+                        on_preview_sequence={on_preview_sequence.clone()}
                         is_previewing={is_previewing}
+                        preview_keyframe_index={*preview_keyframe_index}
                     />
                 </div>
             </div>

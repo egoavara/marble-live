@@ -441,6 +441,11 @@ impl GameState {
         &self.game_context
     }
 
+    /// Returns a mutable reference to the game context (for random() support).
+    pub fn game_context_mut(&mut self) -> &mut GameContext {
+        &mut self.game_context
+    }
+
     /// Sets the position and rotation of a kinematic body by object ID.
     /// Used for keyframe animation preview.
     pub fn set_kinematic_position(&mut self, object_id: &str, pos: [f32; 2], rot: f32) {

@@ -3955,6 +3955,22 @@
     background: rgba(102, 126, 234, 0.2);
 }
 
+.timeline-keyframe.playing {
+    border-color: #4caf50;
+    background: rgba(76, 175, 80, 0.3);
+    box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+    animation: pulse-playing 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-playing {
+    from {
+        box-shadow: 0 0 4px rgba(76, 175, 80, 0.4);
+    }
+    to {
+        box-shadow: 0 0 12px rgba(76, 175, 80, 0.8);
+    }
+}
+
 /* Drag and drop styles */
 .timeline-keyframe.dragging {
     opacity: 0.5;
@@ -4225,37 +4241,37 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.timeline-preview-btn {
+.timeline-play-btn {
     margin-left: auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 28px;
+    gap: 0.35rem;
     height: 28px;
-    padding: 4px 8px;
+    padding: 4px 12px;
     background: rgba(76, 175, 80, 0.3);
     border: 1px solid #4caf50;
     border-radius: 4px;
     color: #4caf50;
     cursor: pointer;
     transition: all 0.15s ease;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 600;
 }
 
-.timeline-preview-btn:hover:not(:disabled) {
-    background: rgba(76, 175, 80, 0.3);
-    border-color: #4caf50;
+.timeline-play-btn:hover:not(:disabled) {
+    background: rgba(76, 175, 80, 0.5);
+    border-color: #66bb6a;
 }
 
-.timeline-preview-btn:disabled {
-    opacity: 0.5;
+.timeline-play-btn:disabled {
+    opacity: 0.6;
     cursor: not-allowed;
 }
 
-.timeline-preview-btn.playing {
-    background: rgba(255, 152, 0, 0.2);
-    border-color: rgba(255, 152, 0, 0.5);
+.timeline-play-btn.playing {
+    background: rgba(255, 152, 0, 0.3);
+    border-color: #ff9800;
     color: #ff9800;
     animation: pulse-preview 1s infinite;
 }

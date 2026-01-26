@@ -108,6 +108,11 @@ impl KeyframeExecutor {
         self.finished
     }
 
+    /// Returns the current keyframe index being executed.
+    pub fn current_index(&self) -> usize {
+        self.current_index
+    }
+
     /// Updates the executor by the given delta time.
     /// Returns a list of object updates (id, translation, rotation_radians).
     pub fn update(

@@ -29,6 +29,9 @@ pub struct TimelinePanelProps {
     /// Whether preview is currently playing
     #[prop_or_default]
     pub is_previewing: bool,
+    /// Current keyframe index being executed during preview
+    #[prop_or_default]
+    pub preview_keyframe_index: Option<usize>,
 }
 
 /// Timeline panel component for editing keyframe sequences.
@@ -219,13 +222,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                     on_preview.emit(());
                                 })
                             }}
-                            disabled={props.is_previewing}
-                            title="Play sequence"
+                            title={if props.is_previewing { "Stop preview" } else { "Play sequence" }}
                         >
-                            <Icon data={IconData::LUCIDE_PLAY} width="14px" height="14px" />
                             if props.is_previewing {
-                                {"Playing..."}
+                                <Icon data={IconData::LUCIDE_SQUARE} width="14px" height="14px" />
+                                {"Stop"}
                             } else {
+                                <Icon data={IconData::LUCIDE_PLAY} width="14px" height="14px" />
                                 {"Play"}
                             }
                         </button>
@@ -307,6 +310,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                             let is_selected = props.selected_keyframe == Some(i);
                             let is_dragging = *dragging_index == Some(i);
                             let is_drag_over = *drag_over_index == Some(i) && *dragging_index != Some(i);
+                            // Highlight currently playing keyframe during preview
+                            // current_index points to the next keyframe to process, so current - 1 is being executed
+                            let is_playing = props.preview_keyframe_index.map(|idx| idx > 0 && idx - 1 == i).unwrap_or(false);
                             let (type_class, icon_data, label, is_cel_expr) = keyframe_info(kf);
 
                             let on_click = {
@@ -381,7 +387,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                             type_class,
                                             is_selected.then_some("selected"),
                                             is_dragging.then_some("dragging"),
-                                            is_drag_over.then_some("drag-over")
+                                            is_drag_over.then_some("drag-over"),
+                                            is_playing.then_some("playing")
                                         )}
                                         onclick={on_click}
                                         draggable="true"
@@ -426,8 +433,6 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                 keyframe.clone(),
                                 kf_idx,
                                 &props.on_update_keyframe,
-                                &props.on_preview_keyframe,
-                                props.is_previewing,
                             )}
                         </div>
                     }
@@ -446,8 +451,6 @@ fn render_keyframe_editor(
     keyframe: Keyframe,
     kf_idx: usize,
     on_update: &Callback<(usize, Keyframe)>,
-    on_preview: &Callback<usize>,
-    is_previewing: bool,
 ) -> Html {
     match keyframe {
         Keyframe::LoopStart { count } => {
@@ -457,13 +460,13 @@ fn render_keyframe_editor(
             render_loop_end_editor()
         }
         Keyframe::Delay { duration } => {
-            render_delay_editor(duration, kf_idx, on_update, on_preview, is_previewing)
+            render_delay_editor(duration, kf_idx, on_update)
         }
         Keyframe::Apply { translation, rotation, duration, easing } => {
-            render_apply_editor(translation, rotation, duration, easing, kf_idx, on_update, on_preview, is_previewing)
+            render_apply_editor(translation, rotation, duration, easing, kf_idx, on_update)
         }
         Keyframe::PivotRotate { pivot, angle, duration, easing } => {
-            render_pivot_editor(pivot, angle, duration, easing, kf_idx, on_update, on_preview, is_previewing)
+            render_pivot_editor(pivot, angle, duration, easing, kf_idx, on_update)
         }
     }
 }
@@ -532,8 +535,6 @@ fn render_delay_editor(
     duration: NumberOrExpr,
     kf_idx: usize,
     on_update: &Callback<(usize, Keyframe)>,
-    on_preview: &Callback<usize>,
-    is_previewing: bool,
 ) -> Html {
     let is_expr = matches!(duration, NumberOrExpr::Expr(_));
     let duration_str = match &duration {
@@ -556,27 +557,11 @@ fn render_delay_editor(
         })
     };
 
-    let on_preview_click = {
-        let on_preview = on_preview.clone();
-        Callback::from(move |_: MouseEvent| {
-            on_preview.emit(kf_idx);
-        })
-    };
-
     html! {
         <>
             <div class="timeline-editor-header">
                 <Icon data={IconData::LUCIDE_TIMER} width="14px" height="14px" />
                 <span>{"Delay"}</span>
-                <button
-                    class={classes!("timeline-preview-btn", is_previewing.then_some("playing"))}
-                    onclick={on_preview_click}
-                    disabled={is_previewing}
-                    title="Preview this keyframe"
-                >
-                    <Icon data={IconData::LUCIDE_PLAY} width="12px" height="12px" />
-                    {"Play"}
-                </button>
             </div>
             <div class="timeline-editor-content">
                 <div class="editor-field">
@@ -607,8 +592,6 @@ fn render_apply_editor(
     easing: EasingType,
     kf_idx: usize,
     on_update: &Callback<(usize, Keyframe)>,
-    on_preview: &Callback<usize>,
-    is_previewing: bool,
 ) -> Html {
     let trans_x = translation.map(|t| t[0]).unwrap_or(0.0);
     let trans_y = translation.map(|t| t[1]).unwrap_or(0.0);
@@ -717,27 +700,11 @@ fn render_apply_editor(
         })
     };
 
-    let on_preview_click = {
-        let on_preview = on_preview.clone();
-        Callback::from(move |_: MouseEvent| {
-            on_preview.emit(kf_idx);
-        })
-    };
-
     html! {
         <>
             <div class="timeline-editor-header">
                 <Icon data={IconData::LUCIDE_MOVE} width="14px" height="14px" />
                 <span>{"Apply Transform"}</span>
-                <button
-                    class={classes!("timeline-preview-btn", is_previewing.then_some("playing"))}
-                    onclick={on_preview_click}
-                    disabled={is_previewing}
-                    title="Preview this keyframe"
-                >
-                    <Icon data={IconData::LUCIDE_PLAY} width="12px" height="12px" />
-                    {"Play"}
-                </button>
             </div>
             <div class="timeline-editor-content">
                 <div class="editor-row">
@@ -802,8 +769,6 @@ fn render_pivot_editor(
     easing: EasingType,
     kf_idx: usize,
     on_update: &Callback<(usize, Keyframe)>,
-    on_preview: &Callback<usize>,
-    is_previewing: bool,
 ) -> Html {
     // Pivot X
     let on_pivot_x_change = {
@@ -899,27 +864,11 @@ fn render_pivot_editor(
         })
     };
 
-    let on_preview_click = {
-        let on_preview = on_preview.clone();
-        Callback::from(move |_: MouseEvent| {
-            on_preview.emit(kf_idx);
-        })
-    };
-
     html! {
         <>
             <div class="timeline-editor-header">
                 <Icon data={IconData::LUCIDE_ROTATE_CW} width="14px" height="14px" />
                 <span>{"Pivot Rotate"}</span>
-                <button
-                    class={classes!("timeline-preview-btn", is_previewing.then_some("playing"))}
-                    onclick={on_preview_click}
-                    disabled={is_previewing}
-                    title="Preview this keyframe"
-                >
-                    <Icon data={IconData::LUCIDE_PLAY} width="12px" height="12px" />
-                    {"Play"}
-                </button>
             </div>
             <div class="timeline-editor-content">
                 <div class="editor-row">

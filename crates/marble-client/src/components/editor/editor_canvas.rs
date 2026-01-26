@@ -70,6 +70,9 @@ pub struct EditorCanvasProps {
     /// Callback when preview animation completes.
     #[prop_or_default]
     pub on_preview_complete: Callback<()>,
+    /// Callback when current preview keyframe index changes.
+    #[prop_or_default]
+    pub on_preview_keyframe_change: Callback<Option<usize>>,
 }
 
 impl PartialEq for EditorCanvasProps {
@@ -89,6 +92,7 @@ impl PartialEq for EditorCanvasProps {
             && self.sequence_target_ids == other.sequence_target_ids
             && self.preview_sequence == other.preview_sequence
             && self.on_preview_complete == other.on_preview_complete
+            && self.on_preview_keyframe_change == other.on_preview_keyframe_change
             // Compare game_state_ref by Rc pointer equality
             && match (&self.game_state_ref, &other.game_state_ref) {
                 (Some(a), Some(b)) => Rc::ptr_eq(a, b),
@@ -121,6 +125,9 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
     let preview_game_state: Rc<RefCell<Option<GameState>>> = use_mut_ref(|| None);
     let preview_executor: Rc<RefCell<Option<KeyframeExecutor>>> = use_mut_ref(|| None);
     let preview_initial_transforms: Rc<RefCell<std::collections::HashMap<String, ([f32; 2], f32)>>> =
+        use_mut_ref(std::collections::HashMap::new);
+    // Track current positions during preview (updated by animation)
+    let preview_current_positions: Rc<RefCell<std::collections::HashMap<String, ([f32; 2], f32)>>> =
         use_mut_ref(std::collections::HashMap::new);
     let is_preview_active = use_state(|| false);
 
@@ -177,6 +184,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let preview_game_state = preview_game_state.clone();
         let preview_executor = preview_executor.clone();
         let preview_initial_transforms = preview_initial_transforms.clone();
+        let preview_current_positions = preview_current_positions.clone();
         let is_preview_active = is_preview_active.clone();
 
         use_effect_with(preview_sequence.clone(), move |seq| {
@@ -194,7 +202,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                             let shape = obj.shape.evaluate(&ctx);
                             let (pos, rot) = match shape {
                                 EvaluatedShape::Circle { center, .. } => (center, 0.0),
-                                EvaluatedShape::Rect { center, rotation, .. } => (center, rotation),
+                                EvaluatedShape::Rect { center, rotation, .. } => (center, rotation.to_radians()),
                                 EvaluatedShape::Line { start, end } => {
                                     ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
                                 }
@@ -208,6 +216,8 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                     }
                 }
 
+                // Initialize current positions to initial transforms
+                *preview_current_positions.borrow_mut() = initials.clone();
                 *preview_initial_transforms.borrow_mut() = initials;
                 *preview_game_state.borrow_mut() = Some(gs);
                 *preview_executor.borrow_mut() = Some(KeyframeExecutor::new("__preview__".to_string()));
@@ -217,6 +227,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                 *preview_game_state.borrow_mut() = None;
                 *preview_executor.borrow_mut() = None;
                 preview_initial_transforms.borrow_mut().clear();
+                preview_current_positions.borrow_mut().clear();
                 is_preview_active.set(false);
             }
         });
@@ -474,6 +485,22 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         });
     }
 
+    // Re-render when sequence_target_ids changes (for highlighting target objects)
+    {
+        let do_render = do_render.clone();
+        let renderer = renderer.clone();
+        let is_simulating = props.is_simulating;
+        let sequence_target_ids = props.sequence_target_ids.clone();
+        let has_renderer = renderer.is_some();
+
+        use_effect_with((sequence_target_ids, has_renderer, is_simulating), move |(_, has_renderer, is_sim)| {
+            // Re-render immediately when sequence targets change (not during simulation)
+            if *has_renderer && !*is_sim {
+                do_render();
+            }
+        });
+    }
+
     // Resize handler
     {
         let canvas_ref = canvas_ref.clone();
@@ -518,16 +545,18 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
     {
         let renderer = renderer.clone();
         let camera = camera.clone();
-        let config = props.config.clone();
         let preview_sequence = props.preview_sequence.clone();
         let on_preview_complete = props.on_preview_complete.clone();
+        let on_preview_keyframe_change = props.on_preview_keyframe_change.clone();
         let preview_game_state = preview_game_state.clone();
         let preview_executor = preview_executor.clone();
         let preview_initial_transforms = preview_initial_transforms.clone();
+        let preview_current_positions = preview_current_positions.clone();
         let is_preview_active = is_preview_active.clone();
         let preview_frame_id = use_mut_ref(|| None::<i32>);
         let preview_last_time = use_mut_ref(|| None::<f64>);
         let preview_loop_running = use_mut_ref(|| false);
+        let last_keyframe_index: Rc<RefCell<Option<usize>>> = use_mut_ref(|| None);
 
         use_effect_with((*is_preview_active, preview_sequence.clone()), move |(is_active, seq)| {
             let preview_frame_id_cleanup = preview_frame_id.clone();
@@ -544,15 +573,21 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
 
                 let renderer = renderer.clone();
                 let camera = camera.clone();
-                let config = config.clone();
                 let preview_game_state = preview_game_state.clone();
                 let preview_executor = preview_executor.clone();
                 let preview_initial_transforms = preview_initial_transforms.clone();
+                let preview_current_positions = preview_current_positions.clone();
                 let preview_frame_id = preview_frame_id.clone();
                 let preview_last_time = preview_last_time.clone();
                 let preview_loop_running = preview_loop_running.clone();
                 let is_preview_active = is_preview_active.clone();
                 let on_preview_complete = on_preview_complete.clone();
+                let on_preview_keyframe_change = on_preview_keyframe_change.clone();
+                let last_keyframe_index = last_keyframe_index.clone();
+
+                // Reset last keyframe index and notify start
+                *last_keyframe_index.borrow_mut() = None;
+                on_preview_keyframe_change.emit(Some(0));
 
                 let closure: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
                 let closure_clone = closure.clone();
@@ -574,61 +609,43 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                     let mut finished = false;
                     {
                         let mut executor_opt = preview_executor.borrow_mut();
-                        let gs_opt = preview_game_state.borrow();
                         let initials = preview_initial_transforms.borrow();
+                        let current_positions = preview_current_positions.borrow().clone();
 
-                        if let (Some(executor), Some(gs)) = (executor_opt.as_mut(), gs_opt.as_ref()) {
-                            // Get current positions from game state
-                            let mut current_positions = std::collections::HashMap::new();
-                            let ctx = GameContext::new(0.0, 0);
-                            for target_id in &seq.target_ids {
-                                for obj in &config.objects {
-                                    if obj.id.as_ref() == Some(target_id) {
-                                        let shape = obj.shape.evaluate(&ctx);
-                                        let (pos, rot) = match shape {
-                                            EvaluatedShape::Circle { center, .. } => (center, 0.0),
-                                            EvaluatedShape::Rect { center, rotation, .. } => (center, rotation),
-                                            EvaluatedShape::Line { start, end } => {
-                                                ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
-                                            }
-                                            EvaluatedShape::Bezier { start, end, .. } => {
-                                                ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
-                                            }
-                                        };
-                                        current_positions.insert(target_id.clone(), (pos, rot));
-                                        break;
-                                    }
-                                }
-                            }
-
-                            // If we have previous positions, use them
-                            for (id, (pos, rot)) in &*initials {
-                                if !current_positions.contains_key(id) {
-                                    current_positions.insert(id.clone(), (*pos, *rot));
-                                }
-                            }
-
+                        if let Some(executor) = executor_opt.as_mut() {
                             // Create temporary sequence for preview
                             let preview_sequences = vec![seq.clone()];
-                            let mut game_ctx = GameContext::new(0.0, 0);
 
-                            let updates = executor.update(
-                                dt,
-                                &preview_sequences,
-                                &current_positions,
-                                &initials,
-                                &mut game_ctx,
-                            );
-
-                            // Apply updates to game state objects
-                            drop(gs_opt);
+                            // Get game context from preview game state for random() support
+                            let mut curr_pos = preview_current_positions.borrow_mut();
                             if let Some(gs) = &mut *preview_game_state.borrow_mut() {
+                                let updates = executor.update(
+                                    dt,
+                                    &preview_sequences,
+                                    &current_positions,
+                                    &initials,
+                                    gs.game_context_mut(),
+                                );
+
+                                // Apply updates to game state and track current positions
                                 for (id, pos, rot) in &updates {
                                     gs.set_kinematic_position(id, *pos, *rot);
+                                    // Update tracked positions for next frame
+                                    curr_pos.insert(id.clone(), (*pos, *rot));
+                                }
+                                // Step physics to apply kinematic targets to actual positions
+                                gs.physics_world.step();
+
+                                finished = executor.is_finished();
+
+                                // Notify keyframe index change
+                                let current_idx = executor.current_index();
+                                let last_idx = *last_keyframe_index.borrow();
+                                if last_idx != Some(current_idx) {
+                                    *last_keyframe_index.borrow_mut() = Some(current_idx);
+                                    on_preview_keyframe_change.emit(Some(current_idx));
                                 }
                             }
-
-                            finished = executor.is_finished();
                         }
                     }
 
@@ -644,6 +661,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                     if finished {
                         *preview_loop_running.borrow_mut() = false;
                         is_preview_active.set(false);
+                        on_preview_keyframe_change.emit(None);
                         on_preview_complete.emit(());
                         return;
                     }
