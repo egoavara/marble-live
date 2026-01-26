@@ -2,11 +2,12 @@
 
 use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
 use marble_core::map::{
-    BumperProperties, MapMeta, MapObject, ObjectProperties, ObjectRole, RouletteConfig, Shape,
-    SpawnProperties, TriggerProperties,
+    BumperProperties, EasingType, Keyframe, KeyframeSequence, MapMeta, MapObject, ObjectProperties,
+    ObjectRole, RouletteConfig, Shape, SpawnProperties, TriggerProperties,
 };
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
+use yew_icons::{Icon, IconData};
 
 /// Helper to extract static value from NumberOrExpr
 fn get_number_static(n: &NumberOrExpr) -> Option<f32> {
@@ -31,12 +32,43 @@ pub struct PropertyPanelProps {
     pub selected_index: Option<usize>,
     pub on_update_meta: Callback<MapMeta>,
     pub on_update_object: Callback<(usize, MapObject)>,
+    /// Currently selected keyframe sequence
+    #[prop_or_default]
+    pub sequence: Option<KeyframeSequence>,
+    /// Currently selected keyframe index
+    #[prop_or_default]
+    pub selected_keyframe: Option<usize>,
+    /// Callback when a keyframe is updated
+    #[prop_or_default]
+    pub on_update_keyframe: Callback<(usize, Keyframe)>,
 }
 
 /// Property panel component.
 #[function_component(PropertyPanel)]
 pub fn property_panel(props: &PropertyPanelProps) -> Html {
     let active_tab = use_state(|| "object".to_string());
+
+    // Auto-switch to object tab when an object is selected
+    {
+        let active_tab = active_tab.clone();
+        let selected_index = props.selected_index;
+        use_effect_with(selected_index, move |idx| {
+            if idx.is_some() {
+                active_tab.set("object".to_string());
+            }
+        });
+    }
+
+    // Auto-switch to keyframe tab when a keyframe is selected
+    {
+        let active_tab = active_tab.clone();
+        let selected_keyframe = props.selected_keyframe;
+        use_effect_with(selected_keyframe, move |kf| {
+            if kf.is_some() {
+                active_tab.set("keyframe".to_string());
+            }
+        });
+    }
 
     let on_tab_click = {
         let active_tab = active_tab.clone();
@@ -64,7 +96,16 @@ pub fn property_panel(props: &PropertyPanelProps) -> Html {
                         Callback::from(move |_: MouseEvent| on_tab_click.emit("meta".to_string()))
                     }}
                 >
-                    {"Map Meta"}
+                    {"Meta"}
+                </button>
+                <button
+                    class={classes!("property-tab", (*active_tab == "keyframe").then_some("active"))}
+                    onclick={{
+                        let on_tab_click = on_tab_click.clone();
+                        Callback::from(move |_: MouseEvent| on_tab_click.emit("keyframe".to_string()))
+                    }}
+                >
+                    {"KF"}
                 </button>
             </div>
             <div class="property-content">
@@ -74,10 +115,16 @@ pub fn property_panel(props: &PropertyPanelProps) -> Html {
                         selected_index={props.selected_index}
                         on_update={props.on_update_object.clone()}
                     />
-                } else {
+                } else if *active_tab == "meta" {
                     <MetaPropertiesPanel
                         meta={props.config.meta.clone()}
                         on_update={props.on_update_meta.clone()}
+                    />
+                } else {
+                    <KeyframePropertiesPanel
+                        sequence={props.sequence.clone()}
+                        selected_keyframe={props.selected_keyframe}
+                        on_update_keyframe={props.on_update_keyframe.clone()}
                     />
                 }
             </div>
@@ -808,5 +855,551 @@ fn number_field(props: &NumberFieldProps) -> Html {
                 step="any"
             />
         </div>
+    }
+}
+
+// ============================================================================
+// Keyframe Properties Panel
+// ============================================================================
+
+/// Props for KeyframePropertiesPanel.
+#[derive(Properties, PartialEq)]
+struct KeyframePropertiesPanelProps {
+    sequence: Option<KeyframeSequence>,
+    selected_keyframe: Option<usize>,
+    on_update_keyframe: Callback<(usize, Keyframe)>,
+}
+
+/// Panel for editing selected keyframe properties.
+#[function_component(KeyframePropertiesPanel)]
+fn keyframe_properties_panel(props: &KeyframePropertiesPanelProps) -> Html {
+    let Some(seq) = &props.sequence else {
+        return html! {
+            <div class="property-empty">
+                {"Select a sequence from the Keyframes tab"}
+            </div>
+        };
+    };
+
+    let Some(kf_idx) = props.selected_keyframe else {
+        return html! {
+            <div class="property-empty">
+                {"Select a keyframe from the timeline"}
+            </div>
+        };
+    };
+
+    let Some(keyframe) = seq.keyframes.get(kf_idx) else {
+        return html! {
+            <div class="property-empty">
+                {"Keyframe not found"}
+            </div>
+        };
+    };
+
+    html! {
+        <div class="keyframe-editor">
+            {render_keyframe_editor(
+                keyframe.clone(),
+                kf_idx,
+                &props.on_update_keyframe,
+            )}
+        </div>
+    }
+}
+
+/// Renders the keyframe editor based on keyframe type.
+fn render_keyframe_editor(
+    keyframe: Keyframe,
+    kf_idx: usize,
+    on_update: &Callback<(usize, Keyframe)>,
+) -> Html {
+    match keyframe {
+        Keyframe::LoopStart { count } => render_loop_start_editor(count, kf_idx, on_update),
+        Keyframe::LoopEnd => render_loop_end_editor(),
+        Keyframe::Delay { duration } => render_delay_editor(duration, kf_idx, on_update),
+        Keyframe::Apply {
+            translation,
+            rotation,
+            duration,
+            easing,
+        } => render_apply_editor(translation, rotation, duration, easing, kf_idx, on_update),
+        Keyframe::PivotRotate {
+            pivot,
+            angle,
+            duration,
+            easing,
+        } => render_pivot_editor(pivot, angle, duration, easing, kf_idx, on_update),
+    }
+}
+
+/// LoopStart editor: count input (number or infinite)
+fn render_loop_start_editor(
+    count: Option<u32>,
+    kf_idx: usize,
+    on_update: &Callback<(usize, Keyframe)>,
+) -> Html {
+    let on_count_change = {
+        let on_update = on_update.clone();
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let value = input.value();
+                let new_count = if value.is_empty() {
+                    None // infinite
+                } else {
+                    value.parse::<u32>().ok()
+                };
+                on_update.emit((kf_idx, Keyframe::LoopStart { count: new_count }));
+            }
+        })
+    };
+
+    let count_str = count.map(|n| n.to_string()).unwrap_or_default();
+
+    html! {
+        <div class="property-fields">
+            <div class="property-section">
+                <div class="property-section-title">
+                    <Icon data={IconData::LUCIDE_REPEAT} width="14px" height="14px" />
+                    <span style="margin-left: 6px;">{"Loop Start"}</span>
+                </div>
+                <div class="property-field">
+                    <label>{"Count"}</label>
+                    <input
+                        type="text"
+                        placeholder="∞ (infinite)"
+                        value={count_str}
+                        oninput={on_count_change}
+                    />
+                    <span class="property-note">{"Leave empty for infinite loop"}</span>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+/// LoopEnd editor: no editable fields
+fn render_loop_end_editor() -> Html {
+    html! {
+        <div class="property-fields">
+            <div class="property-section">
+                <div class="property-section-title">
+                    <Icon data={IconData::LUCIDE_CORNER_DOWN_LEFT} width="14px" height="14px" />
+                    <span style="margin-left: 6px;">{"Loop End"}</span>
+                </div>
+                <div class="property-note">
+                    {"Marks the end of a loop block. No editable properties."}
+                </div>
+            </div>
+        </div>
+    }
+}
+
+/// Delay editor: duration (number or CEL expression)
+fn render_delay_editor(
+    duration: NumberOrExpr,
+    kf_idx: usize,
+    on_update: &Callback<(usize, Keyframe)>,
+) -> Html {
+    let is_expr = matches!(duration, NumberOrExpr::Expr(_));
+    let duration_str = match &duration {
+        NumberOrExpr::Number(n) => n.to_string(),
+        NumberOrExpr::Expr(e) => e.clone(),
+    };
+
+    let on_duration_change = {
+        let on_update = on_update.clone();
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let value = input.value();
+                let new_duration = if let Ok(n) = value.parse::<f32>() {
+                    NumberOrExpr::Number(n)
+                } else {
+                    NumberOrExpr::Expr(value)
+                };
+                on_update.emit((kf_idx, Keyframe::Delay { duration: new_duration }));
+            }
+        })
+    };
+
+    html! {
+        <div class="property-fields">
+            <div class="property-section">
+                <div class="property-section-title">
+                    <Icon data={IconData::LUCIDE_TIMER} width="14px" height="14px" />
+                    <span style="margin-left: 6px;">{"Delay"}</span>
+                </div>
+                <div class="property-field">
+                    <label>{"Duration (seconds)"}</label>
+                    <input
+                        type="text"
+                        class={is_expr.then_some("cel-expr")}
+                        placeholder="e.g. 1.5 or random(1, 3)"
+                        value={duration_str}
+                        oninput={on_duration_change}
+                    />
+                    if is_expr {
+                        <span class="property-note" style="color: #ff9800;">{"CEL expression - duration varies at runtime"}</span>
+                    } else {
+                        <span class="property-note">{"Enter a number or CEL expression like random(1, 3)"}</span>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+/// Apply editor: translation, rotation, duration, easing
+fn render_apply_editor(
+    translation: Option<[f32; 2]>,
+    rotation: Option<f32>,
+    duration: f32,
+    easing: EasingType,
+    kf_idx: usize,
+    on_update: &Callback<(usize, Keyframe)>,
+) -> Html {
+    let trans_x = translation.map(|t| t[0]).unwrap_or(0.0);
+    let trans_y = translation.map(|t| t[1]).unwrap_or(0.0);
+    let rot_deg = rotation.unwrap_or(0.0);
+
+    // Translation X
+    let on_trans_x_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let x = input.value().parse::<f32>().unwrap_or(0.0);
+                let y = translation.map(|t| t[1]).unwrap_or(0.0);
+                let new_translation = if x == 0.0 && y == 0.0 { None } else { Some([x, y]) };
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::Apply {
+                        translation: new_translation,
+                        rotation,
+                        duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    // Translation Y
+    let on_trans_y_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let x = translation.map(|t| t[0]).unwrap_or(0.0);
+                let y = input.value().parse::<f32>().unwrap_or(0.0);
+                let new_translation = if x == 0.0 && y == 0.0 { None } else { Some([x, y]) };
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::Apply {
+                        translation: new_translation,
+                        rotation,
+                        duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    // Rotation
+    let on_rotation_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let deg = input.value().parse::<f32>().unwrap_or(0.0);
+                let new_rotation = if deg == 0.0 { None } else { Some(deg) };
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::Apply {
+                        translation,
+                        rotation: new_rotation,
+                        duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    // Duration
+    let on_duration_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let new_duration = input.value().parse::<f32>().unwrap_or(0.5).max(0.01);
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::Apply {
+                        translation,
+                        rotation,
+                        duration: new_duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    // Easing
+    let on_easing_change = {
+        let on_update = on_update.clone();
+        Callback::from(move |e: Event| {
+            if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
+                let new_easing = match select.value().as_str() {
+                    "ease_in" => EasingType::EaseIn,
+                    "ease_out" => EasingType::EaseOut,
+                    "ease_in_out" => EasingType::EaseInOut,
+                    _ => EasingType::Linear,
+                };
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::Apply {
+                        translation,
+                        rotation,
+                        duration,
+                        easing: new_easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    html! {
+        <div class="property-fields">
+            <div class="property-section">
+                <div class="property-section-title">
+                    <Icon data={IconData::LUCIDE_MOVE} width="14px" height="14px" />
+                    <span style="margin-left: 6px;">{"Apply Transform"}</span>
+                </div>
+                <div class="property-field property-field-vec2">
+                    <label>{"Translation"}</label>
+                    <div class="vec2-inputs">
+                        <input
+                            type="number"
+                            step="1"
+                            placeholder="X"
+                            value={trans_x.to_string()}
+                            oninput={on_trans_x_change}
+                        />
+                        <input
+                            type="number"
+                            step="1"
+                            placeholder="Y"
+                            value={trans_y.to_string()}
+                            oninput={on_trans_y_change}
+                        />
+                    </div>
+                </div>
+                <div class="property-field">
+                    <label>{"Rotation (°)"}</label>
+                    <input
+                        type="number"
+                        step="1"
+                        value={rot_deg.to_string()}
+                        oninput={on_rotation_change}
+                    />
+                </div>
+                <div class="property-field">
+                    <label>{"Duration (s)"}</label>
+                    <input
+                        type="number"
+                        step="0.1"
+                        min="0.01"
+                        value={duration.to_string()}
+                        oninput={on_duration_change}
+                    />
+                </div>
+                <div class="property-field">
+                    <label>{"Easing"}</label>
+                    {render_easing_select(easing, on_easing_change)}
+                </div>
+            </div>
+        </div>
+    }
+}
+
+/// PivotRotate editor: pivot, angle, duration, easing
+fn render_pivot_editor(
+    pivot: [f32; 2],
+    angle: f32,
+    duration: f32,
+    easing: EasingType,
+    kf_idx: usize,
+    on_update: &Callback<(usize, Keyframe)>,
+) -> Html {
+    // Pivot X
+    let on_pivot_x_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let x = input.value().parse::<f32>().unwrap_or(0.0);
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::PivotRotate {
+                        pivot: [x, pivot[1]],
+                        angle,
+                        duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    // Pivot Y
+    let on_pivot_y_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let y = input.value().parse::<f32>().unwrap_or(0.0);
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::PivotRotate {
+                        pivot: [pivot[0], y],
+                        angle,
+                        duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    // Angle
+    let on_angle_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let new_angle = input.value().parse::<f32>().unwrap_or(0.0);
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::PivotRotate {
+                        pivot,
+                        angle: new_angle,
+                        duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    // Duration
+    let on_duration_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let new_duration = input.value().parse::<f32>().unwrap_or(0.5).max(0.01);
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::PivotRotate {
+                        pivot,
+                        angle,
+                        duration: new_duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    // Easing
+    let on_easing_change = {
+        let on_update = on_update.clone();
+        Callback::from(move |e: Event| {
+            if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
+                let new_easing = match select.value().as_str() {
+                    "ease_in" => EasingType::EaseIn,
+                    "ease_out" => EasingType::EaseOut,
+                    "ease_in_out" => EasingType::EaseInOut,
+                    _ => EasingType::Linear,
+                };
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::PivotRotate {
+                        pivot,
+                        angle,
+                        duration,
+                        easing: new_easing,
+                    },
+                ));
+            }
+        })
+    };
+
+    html! {
+        <div class="property-fields">
+            <div class="property-section">
+                <div class="property-section-title">
+                    <Icon data={IconData::LUCIDE_ROTATE_CW} width="14px" height="14px" />
+                    <span style="margin-left: 6px;">{"Pivot Rotate"}</span>
+                </div>
+                <div class="property-field property-field-vec2">
+                    <label>{"Pivot Point"}</label>
+                    <div class="vec2-inputs">
+                        <input
+                            type="number"
+                            step="1"
+                            placeholder="X"
+                            value={pivot[0].to_string()}
+                            oninput={on_pivot_x_change}
+                        />
+                        <input
+                            type="number"
+                            step="1"
+                            placeholder="Y"
+                            value={pivot[1].to_string()}
+                            oninput={on_pivot_y_change}
+                        />
+                    </div>
+                </div>
+                <div class="property-field">
+                    <label>{"Angle (°)"}</label>
+                    <input
+                        type="number"
+                        step="1"
+                        value={angle.to_string()}
+                        oninput={on_angle_change}
+                    />
+                </div>
+                <div class="property-field">
+                    <label>{"Duration (s)"}</label>
+                    <input
+                        type="number"
+                        step="0.1"
+                        min="0.01"
+                        value={duration.to_string()}
+                        oninput={on_duration_change}
+                    />
+                </div>
+                <div class="property-field">
+                    <label>{"Easing"}</label>
+                    {render_easing_select(easing, on_easing_change)}
+                </div>
+            </div>
+        </div>
+    }
+}
+
+/// Renders an easing type selector
+fn render_easing_select(current: EasingType, on_change: Callback<Event>) -> Html {
+    html! {
+        <select onchange={on_change}>
+            <option value="linear" selected={current == EasingType::Linear}>{"Linear"}</option>
+            <option value="ease_in" selected={current == EasingType::EaseIn}>{"Ease In"}</option>
+            <option value="ease_out" selected={current == EasingType::EaseOut}>{"Ease Out"}</option>
+            <option value="ease_in_out" selected={current == EasingType::EaseInOut}>{"Ease In Out"}</option>
+        </select>
     }
 }

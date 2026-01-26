@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use marble_core::map::{Keyframe, KeyframeSequence};
+use marble_core::map::KeyframeSequence;
 use marble_core::marble::Color;
 use marble_core::GameState;
 use yew::prelude::*;
@@ -238,6 +238,17 @@ pub fn editor_page() -> Html {
                         selected_index={editor_state.selected_object}
                         on_update_meta={editor_state.on_update_meta.clone()}
                         on_update_object={editor_state.on_update_object.clone()}
+                        sequence={editor_state.selected_sequence.and_then(|idx| editor_state.config.keyframes.get(idx).cloned())}
+                        selected_keyframe={editor_state.selected_keyframe}
+                        on_update_keyframe={{
+                            let cb = editor_state.on_update_keyframe.clone();
+                            let seq_idx = editor_state.selected_sequence;
+                            Callback::from(move |(kf_idx, kf)| {
+                                if let Some(idx) = seq_idx {
+                                    cb.emit((idx, kf_idx, kf));
+                                }
+                            })
+                        }}
                     />
                 </div>
 
