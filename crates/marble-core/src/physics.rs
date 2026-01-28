@@ -9,9 +9,9 @@ use std::hash::{Hash, Hasher};
 /// Fixed timestep for physics simulation (60Hz).
 pub const PHYSICS_DT: f32 = 1.0 / 60.0;
 
-/// Default gravity vector (downward, in pixels/s²).
+/// Default gravity vector (downward, in m/s²).
 pub fn default_gravity() -> Vector {
-    Vector::new(0.0, 981.0)
+    Vector::new(0.0, 9.81)
 }
 
 /// Physics world containing all `Rapier2D` components for deterministic simulation.
@@ -384,12 +384,12 @@ mod tests {
 
         // Add some bodies
         let body = RigidBodyBuilder::dynamic()
-            .translation(Vector::new(100.0, 200.0))
-            .linvel(Vector::new(10.0, -5.0))
+            .translation(Vector::new(1.0, 2.0))
+            .linvel(Vector::new(0.1, -0.05))
             .build();
         let handle = world.add_rigid_body(body);
 
-        let collider = ColliderBuilder::ball(15.0).build();
+        let collider = ColliderBuilder::ball(0.15).build();
         world.add_collider(collider, handle);
 
         // Run a few steps

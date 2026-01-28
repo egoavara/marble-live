@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
 use marble_core::keyframe::KeyframeExecutor;
-use marble_core::map::{EvaluatedShape, KeyframeSequence, MapObject, RouletteConfig, Shape};
+use marble_core::map::{EvaluatedShape, Keyframe, KeyframeSequence, MapObject, RouletteConfig, Shape};
 use marble_core::{GameContext, GameState};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -13,17 +13,21 @@ use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 use super::context_menu::{ContextMenu, ContextMenuState};
-use super::gizmo::{self, generate_bezier_gizmo, generate_gizmo, generate_line_gizmo, hit_test_bezier_gizmo, hit_test_gizmo, hit_test_line_gizmo};
-use super::interaction::{BezierTransform, EditorInteractionState, GizmoHandle, LineTransform, ObjectTransform};
+use super::gizmo::{self, generate_bezier_gizmo, generate_gizmo, generate_line_gizmo, generate_pivot_gizmo, hit_test_bezier_gizmo, hit_test_ghost, hit_test_gizmo, hit_test_line_gizmo, hit_test_pivot_gizmo};
+use super::interaction::{BezierTransform, EditorInteractionState, GhostTransform, GizmoHandle, LineTransform, ObjectTransform, PivotTransform};
 use crate::camera::{CameraMode, CameraState};
 use crate::renderer::{CircleInstance, LineInstance, RectInstance, WgpuRenderer};
 
-/// Preview transform during drag (standard, bezier, or line).
+/// Preview transform during drag (standard, bezier, line, or pivot).
 #[derive(Debug, Clone, Copy)]
 pub enum PreviewTransform {
     Standard(usize, ObjectTransform),
     Bezier(usize, BezierTransform),
     Line(usize, LineTransform),
+    /// Pivot preview: (sequence_index, keyframe_index, pivot_transform)
+    Pivot(usize, usize, PivotTransform),
+    /// Ghost preview drag: (sequence_index, keyframe_index, ghost_transform)
+    Ghost(usize, usize, GhostTransform),
 }
 
 #[derive(Properties)]
@@ -73,6 +77,18 @@ pub struct EditorCanvasProps {
     /// Callback when current preview keyframe index changes.
     #[prop_or_default]
     pub on_preview_keyframe_change: Callback<Option<usize>>,
+    /// Currently selected keyframe sequence (for pivot gizmo).
+    #[prop_or_default]
+    pub selected_sequence: Option<KeyframeSequence>,
+    /// Currently selected sequence index (for pivot gizmo updates).
+    #[prop_or_default]
+    pub selected_sequence_index: Option<usize>,
+    /// Currently selected keyframe index within the sequence (for pivot gizmo).
+    #[prop_or_default]
+    pub selected_keyframe: Option<usize>,
+    /// Callback when a keyframe is updated via gizmo drag.
+    #[prop_or_default]
+    pub on_update_keyframe: Callback<(usize, Keyframe)>,
 }
 
 impl PartialEq for EditorCanvasProps {
@@ -93,6 +109,10 @@ impl PartialEq for EditorCanvasProps {
             && self.preview_sequence == other.preview_sequence
             && self.on_preview_complete == other.on_preview_complete
             && self.on_preview_keyframe_change == other.on_preview_keyframe_change
+            && self.selected_sequence == other.selected_sequence
+            && self.selected_sequence_index == other.selected_sequence_index
+            && self.selected_keyframe == other.selected_keyframe
+            && self.on_update_keyframe == other.on_update_keyframe
             // Compare game_state_ref by Rc pointer equality
             && match (&self.game_state_ref, &other.game_state_ref) {
                 (Some(a), Some(b)) => Rc::ptr_eq(a, b),
@@ -107,7 +127,7 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
     let canvas_ref = use_node_ref();
     let renderer: UseStateHandle<Option<Rc<RefCell<WgpuRenderer>>>> = use_state(|| None);
     let camera = use_mut_ref(|| {
-        let mut cam = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
+        let mut cam = CameraState::new((800.0, 600.0), ((0.0, 0.0), (6.0, 10.0)));
         cam.set_mode(CameraMode::Overview);
         cam
     });
@@ -116,6 +136,9 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
     // Local preview transform during drag (doesn't trigger parent re-render)
     let preview_transform = use_mut_ref(|| None::<PreviewTransform>);
     let render_trigger = use_force_update();
+    // Cached keyframe selection (RefCell for dynamic access in render closure)
+    let cached_selected_sequence: Rc<RefCell<Option<KeyframeSequence>>> = use_mut_ref(|| None);
+    let cached_selected_keyframe: Rc<RefCell<Option<usize>>> = use_mut_ref(|| None);
     // Context menu state
     let context_menu_state = use_state(ContextMenuState::new);
     // Track if dragging is active (for document-level event listeners)
@@ -246,6 +269,8 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let sequence_target_ids = props.sequence_target_ids.clone();
         let preview_game_state_render = preview_game_state.clone();
         let is_preview_active_render = *is_preview_active;
+        let cached_selected_sequence = cached_selected_sequence.clone();
+        let cached_selected_keyframe = cached_selected_keyframe.clone();
 
         Rc::new(move || {
             if let Some(renderer) = &*renderer {
@@ -291,6 +316,12 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                         if idx < render_config.objects.len() {
                             apply_line_transform_to_object(&mut render_config.objects[idx], &transform);
                         }
+                    }
+                    Some(PreviewTransform::Pivot(_, _, _)) => {
+                        // Pivot preview doesn't modify render_config, just shows gizmo
+                    }
+                    Some(PreviewTransform::Ghost(_, _, _)) => {
+                        // Ghost preview doesn't modify render_config, just shows gizmo
                     }
                     None => {}
                 }
@@ -345,6 +376,99 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                 } else {
                     (vec![], vec![], vec![])
                 };
+
+                // Generate pivot gizmo for selected PivotRotate keyframe
+                let selected_keyframe = *cached_selected_keyframe.borrow();
+                let selected_sequence = cached_selected_sequence.borrow();
+                if let Some(kf_idx) = selected_keyframe {
+                    if let Some(seq) = &*selected_sequence {
+                        if let Some(kf) = seq.keyframes.get(kf_idx) {
+                            if let Keyframe::PivotRotate { pivot, .. } = kf {
+                                // Use preview pivot transform if dragging, otherwise use keyframe's pivot
+                                let pivot_t = match *preview {
+                                    Some(PreviewTransform::Pivot(_, preview_kf_idx, t)) if preview_kf_idx == kf_idx => t,
+                                    _ => PivotTransform { point: (pivot[0], pivot[1]) },
+                                };
+                                let pivot_gizmo = generate_pivot_gizmo(&pivot_t, cam.zoom, hovered);
+                                oc.extend(pivot_gizmo.circles);
+                                ol.extend(pivot_gizmo.lines);
+                                or.extend(pivot_gizmo.rects);
+                            }
+                        }
+                    }
+                }
+
+                // Generate ghost preview for Apply/PivotRotate keyframe
+                if let Some(kf_idx) = selected_keyframe {
+                    if let Some(seq) = &*selected_sequence {
+                        if let Some(kf) = seq.keyframes.get(kf_idx) {
+                            if matches!(kf, Keyframe::Apply { .. } | Keyframe::PivotRotate { .. }) {
+                                // During ghost drag, create a virtual keyframe from the dragged position
+                                let effective_kf = match *preview {
+                                    Some(PreviewTransform::Ghost(_, preview_kf_idx, ghost_t)) if preview_kf_idx == kf_idx => {
+                                        match kf {
+                                            Keyframe::Apply { rotation, duration, easing, .. } => {
+                                                Some(Keyframe::Apply {
+                                                    translation: Some([
+                                                        ghost_t.center.0 - ghost_t.init_pos[0],
+                                                        ghost_t.center.1 - ghost_t.init_pos[1],
+                                                    ]),
+                                                    rotation: *rotation,
+                                                    duration: *duration,
+                                                    easing: easing.clone(),
+                                                })
+                                            }
+                                            Keyframe::PivotRotate { pivot, duration, easing, .. } => {
+                                                let from_angle = (ghost_t.init_pos[1] - pivot[1])
+                                                    .atan2(ghost_t.init_pos[0] - pivot[0]);
+                                                let to_angle = (ghost_t.center.1 - pivot[1])
+                                                    .atan2(ghost_t.center.0 - pivot[0]);
+                                                Some(Keyframe::PivotRotate {
+                                                    pivot: *pivot,
+                                                    angle: (to_angle - from_angle).to_degrees(),
+                                                    duration: *duration,
+                                                    easing: easing.clone(),
+                                                })
+                                            }
+                                            _ => None,
+                                        }
+                                    }
+                                    _ => None,
+                                };
+                                let render_kf = effective_kf.as_ref().unwrap_or(kf);
+
+                                let ctx = GameContext::new(0.0, 0);
+                                let mut target_shapes = Vec::new();
+                                for target_id in &seq.target_ids {
+                                    for obj in &config.objects {
+                                        if obj.id.as_ref() == Some(target_id) {
+                                            let shape = obj.shape.evaluate(&ctx);
+                                            let (pos, rot) = match &shape {
+                                                EvaluatedShape::Circle { center, .. } => (*center, 0.0),
+                                                EvaluatedShape::Rect { center, rotation, .. } => (*center, rotation.to_radians()),
+                                                EvaluatedShape::Line { start, end } => {
+                                                    ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
+                                                }
+                                                EvaluatedShape::Bezier { start, end, .. } => {
+                                                    ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
+                                                }
+                                            };
+                                            target_shapes.push((shape, pos, rot));
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !target_shapes.is_empty() {
+                                    let ghost = gizmo::generate_ghost_preview(render_kf, &target_shapes, cam.zoom, hovered);
+                                    oc.extend(ghost.circles);
+                                    ol.extend(ghost.lines);
+                                    or.extend(ghost.rects);
+                                }
+                            }
+                        }
+                    }
+                }
+                drop(selected_sequence);
 
                 // Generate highlight overlays for sequence target objects
                 if !sequence_target_ids.is_empty() {
@@ -495,6 +619,28 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
 
         use_effect_with((sequence_target_ids, has_renderer, is_simulating), move |(_, has_renderer, is_sim)| {
             // Re-render immediately when sequence targets change (not during simulation)
+            if *has_renderer && !*is_sim {
+                do_render();
+            }
+        });
+    }
+
+    // Update cached keyframe selection and re-render when it changes
+    {
+        let do_render = do_render.clone();
+        let renderer = renderer.clone();
+        let is_simulating = props.is_simulating;
+        let selected_sequence = props.selected_sequence.clone();
+        let selected_keyframe = props.selected_keyframe;
+        let cached_selected_sequence = cached_selected_sequence.clone();
+        let cached_selected_keyframe = cached_selected_keyframe.clone();
+        let has_renderer = renderer.is_some();
+
+        use_effect_with((selected_sequence.clone(), selected_keyframe, has_renderer, is_simulating), move |(seq, kf, has_renderer, is_sim)| {
+            // Update cached values
+            *cached_selected_sequence.borrow_mut() = seq.clone();
+            *cached_selected_keyframe.borrow_mut() = *kf;
+            // Re-render immediately when keyframe selection changes (not during simulation)
             if *has_renderer && !*is_sim {
                 do_render();
             }
@@ -836,6 +982,10 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let is_dragging = *is_dragging_state;
         let is_dragging_state = is_dragging_state.clone();
         let canvas_ref = canvas_ref.clone();
+        let selected_sequence = props.selected_sequence.clone();
+        let selected_sequence_index = props.selected_sequence_index;
+        let selected_keyframe = props.selected_keyframe;
+        let on_update_keyframe = props.on_update_keyframe.clone();
 
         use_effect_with(is_dragging, move |is_dragging| {
             // 클린업에 필요한 데이터를 Option으로 감싸서 동일한 클로저 타입 반환
@@ -859,6 +1009,8 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                     let preview_transform = preview_transform.clone();
                     let do_render = do_render.clone();
                     let canvas_ref = canvas_ref.clone();
+                    let selected_sequence_index = selected_sequence_index;
+                    let selected_keyframe = selected_keyframe;
 
                     Closure::wrap(Box::new(move |e: web_sys::MouseEvent| {
                         let mut inter = interaction.borrow_mut();
@@ -910,7 +1062,17 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                         }
 
                         if let Some(handle) = inter.active_handle {
-                            if let Some(idx) = selected_index {
+                            // Pivot handle drag (for PivotRotate keyframe)
+                            if handle.is_pivot() {
+                                if let Some(orig) = inter.original_pivot_transform {
+                                    if let Some(d) = inter.drag_delta() {
+                                        if let (Some(seq_idx), Some(kf_idx)) = (selected_sequence_index, selected_keyframe) {
+                                            let new_t = gizmo::apply_pivot_transform(&orig, d, inter.shift_held);
+                                            *preview_transform.borrow_mut() = Some(PreviewTransform::Pivot(seq_idx, kf_idx, new_t));
+                                        }
+                                    }
+                                }
+                            } else if let Some(idx) = selected_index {
                                 if idx < config.objects.len() {
                                     if handle.is_bezier() {
                                         if let Some(orig) = inter.original_bezier_transform {
@@ -957,6 +1119,8 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                     let config = config.clone();
                     let on_object_update = on_object_update.clone();
                     let is_dragging_state = is_dragging_state.clone();
+                    let selected_sequence = selected_sequence.clone();
+                    let on_update_keyframe = on_update_keyframe.clone();
 
                     Closure::wrap(Box::new(move |_: web_sys::MouseEvent| {
                         let mut inter = interaction.borrow_mut();
@@ -985,6 +1149,56 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                     let mut obj = config.objects[idx].clone();
                                     apply_line_transform_to_object(&mut obj, &transform);
                                     on_object_update.emit((idx, obj));
+                                }
+                            }
+                            Some(PreviewTransform::Pivot(_seq_idx, kf_idx, pivot_t)) => {
+                                // Update keyframe with new pivot position
+                                if let Some(seq) = &selected_sequence {
+                                    if let Some(kf) = seq.keyframes.get(kf_idx) {
+                                        if let Keyframe::PivotRotate { angle, duration, easing, .. } = kf {
+                                            let updated_kf = Keyframe::PivotRotate {
+                                                pivot: [pivot_t.point.0, pivot_t.point.1],
+                                                angle: *angle,
+                                                duration: *duration,
+                                                easing: easing.clone(),
+                                            };
+                                            on_update_keyframe.emit((kf_idx, updated_kf));
+                                        }
+                                    }
+                                }
+                            }
+                            Some(PreviewTransform::Ghost(_seq_idx, kf_idx, ghost_t)) => {
+                                // Update keyframe with new translation or angle from ghost position
+                                if let Some(seq) = &selected_sequence {
+                                    if let Some(kf) = seq.keyframes.get(kf_idx) {
+                                        let updated_kf = match kf {
+                                            Keyframe::Apply { rotation, duration, easing, .. } => {
+                                                Keyframe::Apply {
+                                                    translation: Some([
+                                                        ghost_t.center.0 - ghost_t.init_pos[0],
+                                                        ghost_t.center.1 - ghost_t.init_pos[1],
+                                                    ]),
+                                                    rotation: *rotation,
+                                                    duration: *duration,
+                                                    easing: easing.clone(),
+                                                }
+                                            }
+                                            Keyframe::PivotRotate { pivot, duration, easing, .. } => {
+                                                let from_angle = (ghost_t.init_pos[1] - pivot[1])
+                                                    .atan2(ghost_t.init_pos[0] - pivot[0]);
+                                                let to_angle = (ghost_t.center.1 - pivot[1])
+                                                    .atan2(ghost_t.center.0 - pivot[0]);
+                                                Keyframe::PivotRotate {
+                                                    pivot: *pivot,
+                                                    angle: (to_angle - from_angle).to_degrees(),
+                                                    duration: *duration,
+                                                    easing: easing.clone(),
+                                                }
+                                            }
+                                            _ => { return; }
+                                        };
+                                        on_update_keyframe.emit((kf_idx, updated_kf));
+                                    }
                                 }
                             }
                             None => {}
@@ -1054,6 +1268,9 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let context_menu_state = context_menu_state.clone();
         let is_dragging_state = is_dragging_state.clone();
         let canvas_ref = canvas_ref.clone();
+        let selected_sequence = props.selected_sequence.clone();
+        let selected_sequence_index = props.selected_sequence_index;
+        let selected_keyframe = props.selected_keyframe;
 
         Callback::from(move |e: MouseEvent| {
             // 캔버스에 포커스를 주어 키보드 이벤트 수신
@@ -1098,7 +1315,45 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
 
             match e.button() {
                 0 => {
-                    // Check gizmo hit first
+                    // Check pivot gizmo first (for PivotRotate keyframe editing)
+                    if let Some(kf_idx) = selected_keyframe {
+                        if let Some(seq_idx) = selected_sequence_index {
+                            if let Some(seq) = &selected_sequence {
+                                if let Some(kf) = seq.keyframes.get(kf_idx) {
+                                    if let Keyframe::PivotRotate { pivot, .. } = kf {
+                                        let pivot_t = PivotTransform { point: (pivot[0], pivot[1]) };
+                                        if let Some(handle) = hit_test_pivot_gizmo(&pivot_t, world, cam.zoom) {
+                                            tracing::info!("pivot gizmo hit: {:?}", handle);
+                                            inter.start_pivot_drag(handle, world, pivot_t);
+                                            is_dragging_state.set(true);
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Check ghost preview hit (for Apply/PivotRotate keyframe dragging)
+                    if let Some(kf_idx) = selected_keyframe {
+                        if let Some(seq_idx) = selected_sequence_index {
+                            if let Some(seq) = &selected_sequence {
+                                if let Some(kf) = seq.keyframes.get(kf_idx) {
+                                    if matches!(kf, Keyframe::Apply { .. } | Keyframe::PivotRotate { .. }) {
+                                        let targets = compute_ghost_targets(kf, seq, &config);
+                                        if let Some(ghost_t) = hit_test_ghost(&targets, world, cam.zoom) {
+                                            tracing::info!("ghost hit: center=({:.1},{:.1})", ghost_t.center.0, ghost_t.center.1);
+                                            inter.start_ghost_drag(GizmoHandle::GhostMove, world, ghost_t);
+                                            is_dragging_state.set(true);
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Check object gizmo hit
                     if let Some(idx) = selected_index {
                         if idx < config.objects.len() {
                             // Check bezier gizmo first
@@ -1160,6 +1415,9 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let hovered_handle = hovered_handle.clone();
         let preview_transform = preview_transform.clone();
         let do_render = do_render.clone();
+        let selected_sequence = props.selected_sequence.clone();
+        let selected_sequence_index = props.selected_sequence_index;
+        let selected_keyframe = props.selected_keyframe;
 
         Callback::from(move |e: MouseEvent| {
             let (sx, sy) = get_mouse_pos(&e);
@@ -1214,7 +1472,31 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                 }
 
                 if let Some(handle) = inter.active_handle {
-                    if let Some(idx) = selected_index {
+                    // Pivot handle drag (for PivotRotate keyframe)
+                    if handle.is_pivot() {
+                        if let Some(orig) = inter.original_pivot_transform {
+                            if let Some(d) = inter.drag_delta() {
+                                if let Some(seq_idx) = selected_sequence_index {
+                                    if let Some(kf_idx) = selected_keyframe {
+                                        let new_t = gizmo::apply_pivot_transform(&orig, d, inter.shift_held);
+                                        *preview_transform.borrow_mut() = Some(PreviewTransform::Pivot(seq_idx, kf_idx, new_t));
+                                    }
+                                }
+                            }
+                        }
+                    } else if handle.is_ghost() {
+                        // Ghost handle drag (for Apply/PivotRotate destination)
+                        if let Some(orig) = inter.original_ghost_transform {
+                            if let Some(d) = inter.drag_delta() {
+                                if let Some(seq_idx) = selected_sequence_index {
+                                    if let Some(kf_idx) = selected_keyframe {
+                                        let new_t = gizmo::apply_ghost_transform(&orig, d, inter.shift_held);
+                                        *preview_transform.borrow_mut() = Some(PreviewTransform::Ghost(seq_idx, kf_idx, new_t));
+                                    }
+                                }
+                            }
+                        }
+                    } else if let Some(idx) = selected_index {
                         if idx < config.objects.len() {
                             // Bezier handle drag
                             if handle.is_bezier() {
@@ -1258,6 +1540,47 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
             }
 
             // Hover detection (no state trigger, just RefCell update)
+            // Check pivot gizmo hover first
+            if let Some(kf_idx) = selected_keyframe {
+                if let Some(seq) = &selected_sequence {
+                    if let Some(kf) = seq.keyframes.get(kf_idx) {
+                        if let Keyframe::PivotRotate { pivot, .. } = kf {
+                            let pivot_t = PivotTransform { point: (pivot[0], pivot[1]) };
+                            if let Some(handle) = hit_test_pivot_gizmo(&pivot_t, world, zoom) {
+                                let current = *hovered_handle.borrow();
+                                if Some(handle) != current {
+                                    *hovered_handle.borrow_mut() = Some(handle);
+                                    drop(inter);
+                                    do_render();
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check ghost preview hover
+            if let Some(kf_idx) = selected_keyframe {
+                if let Some(seq) = &selected_sequence {
+                    if let Some(kf) = seq.keyframes.get(kf_idx) {
+                        if matches!(kf, Keyframe::Apply { .. } | Keyframe::PivotRotate { .. }) {
+                            let targets = compute_ghost_targets(kf, seq, &config);
+                            if hit_test_ghost(&targets, world, zoom).is_some() {
+                                let current = *hovered_handle.borrow();
+                                if Some(GizmoHandle::GhostMove) != current {
+                                    *hovered_handle.borrow_mut() = Some(GizmoHandle::GhostMove);
+                                    drop(inter);
+                                    do_render();
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check object gizmo hover
             if let Some(idx) = selected_index {
                 if idx < config.objects.len() {
                     let new_h = if is_bezier_object(&config.objects[idx]) {
@@ -1298,6 +1621,8 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
         let config = props.config.clone();
         let on_object_update = props.on_object_update.clone();
         let is_dragging_state = is_dragging_state.clone();
+        let selected_sequence = props.selected_sequence.clone();
+        let on_update_keyframe = props.on_update_keyframe.clone();
 
         Callback::from(move |_: MouseEvent| {
             let mut inter = interaction.borrow_mut();
@@ -1328,6 +1653,56 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                         let mut obj = config.objects[idx].clone();
                         apply_line_transform_to_object(&mut obj, &transform);
                         on_object_update.emit((idx, obj));
+                    }
+                }
+                Some(PreviewTransform::Pivot(_seq_idx, kf_idx, pivot_t)) => {
+                    // Update keyframe with new pivot position
+                    if let Some(seq) = &selected_sequence {
+                        if let Some(kf) = seq.keyframes.get(kf_idx) {
+                            if let Keyframe::PivotRotate { angle, duration, easing, .. } = kf {
+                                let updated_kf = Keyframe::PivotRotate {
+                                    pivot: [pivot_t.point.0, pivot_t.point.1],
+                                    angle: *angle,
+                                    duration: *duration,
+                                    easing: easing.clone(),
+                                };
+                                on_update_keyframe.emit((kf_idx, updated_kf));
+                            }
+                        }
+                    }
+                }
+                Some(PreviewTransform::Ghost(_seq_idx, kf_idx, ghost_t)) => {
+                    // Update keyframe with new translation or angle from ghost position
+                    if let Some(seq) = &selected_sequence {
+                        if let Some(kf) = seq.keyframes.get(kf_idx) {
+                            let updated_kf = match kf {
+                                Keyframe::Apply { rotation, duration, easing, .. } => {
+                                    Keyframe::Apply {
+                                        translation: Some([
+                                            ghost_t.center.0 - ghost_t.init_pos[0],
+                                            ghost_t.center.1 - ghost_t.init_pos[1],
+                                        ]),
+                                        rotation: *rotation,
+                                        duration: *duration,
+                                        easing: easing.clone(),
+                                    }
+                                }
+                                Keyframe::PivotRotate { pivot, duration, easing, .. } => {
+                                    let from_angle = (ghost_t.init_pos[1] - pivot[1])
+                                        .atan2(ghost_t.init_pos[0] - pivot[0]);
+                                    let to_angle = (ghost_t.center.1 - pivot[1])
+                                        .atan2(ghost_t.center.0 - pivot[0]);
+                                    Keyframe::PivotRotate {
+                                        pivot: *pivot,
+                                        angle: (to_angle - from_angle).to_degrees(),
+                                        duration: *duration,
+                                        easing: easing.clone(),
+                                    }
+                                }
+                                _ => { return; }
+                            };
+                            on_update_keyframe.emit((kf_idx, updated_kf));
+                        }
                     }
                 }
                 None => {}
@@ -1671,6 +2046,57 @@ fn hit_test_bezier_curve(
         }
     }
     false
+}
+
+/// Compute ghost target centers for hit testing and rendering.
+/// Returns: Vec<(dest_center, init_pos, init_rot)>
+fn compute_ghost_targets(
+    keyframe: &Keyframe,
+    seq: &KeyframeSequence,
+    config: &RouletteConfig,
+) -> Vec<((f32, f32), [f32; 2], f32)> {
+    let ctx = GameContext::new(0.0, 0);
+    let mut targets = Vec::new();
+
+    for target_id in &seq.target_ids {
+        for obj in &config.objects {
+            if obj.id.as_ref() == Some(target_id) {
+                let shape = obj.shape.evaluate(&ctx);
+                let (init_pos, init_rot) = match &shape {
+                    EvaluatedShape::Circle { center, .. } => (*center, 0.0),
+                    EvaluatedShape::Rect { center, rotation, .. } => (*center, rotation.to_radians()),
+                    EvaluatedShape::Line { start, end } => {
+                        ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
+                    }
+                    EvaluatedShape::Bezier { start, end, .. } => {
+                        ([(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0], 0.0)
+                    }
+                };
+
+                let dest_pos = match keyframe {
+                    Keyframe::Apply { translation, .. } => {
+                        let t = translation.unwrap_or([0.0, 0.0]);
+                        (init_pos[0] + t[0], init_pos[1] + t[1])
+                    }
+                    Keyframe::PivotRotate { pivot, angle, .. } => {
+                        let offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                        let angle_rad = angle.to_radians();
+                        let cos = angle_rad.cos();
+                        let sin = angle_rad.sin();
+                        (
+                            pivot[0] + offset[0] * cos - offset[1] * sin,
+                            pivot[1] + offset[0] * sin + offset[1] * cos,
+                        )
+                    }
+                    _ => continue,
+                };
+
+                targets.push((dest_pos, init_pos, init_rot));
+                break;
+            }
+        }
+    }
+    targets
 }
 
 /// Evaluate cubic bezier curve at parameter t.

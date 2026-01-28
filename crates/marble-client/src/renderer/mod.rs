@@ -931,7 +931,7 @@ impl WgpuRenderer {
                                     radius,
                                     Color::new(13, 13, 26, 255),
                                     Color::new(255, 68, 68, 255),
-                                    3.0,
+                                    0.03,
                                 ));
                             }
                             EvaluatedShape::Rect { center, size, rotation } => {
@@ -941,7 +941,7 @@ impl WgpuRenderer {
                                     rotation,
                                     Color::new(13, 13, 26, 255),
                                     Color::new(255, 68, 68, 255),
-                                    3.0,
+                                    0.03,
                                 ));
                             }
                             EvaluatedShape::Line { .. } => {}
@@ -955,7 +955,7 @@ impl WgpuRenderer {
                                 lines.push(LineInstance::new(
                                     (start[0], start[1]),
                                     (end[0], end[1]),
-                                    4.0,
+                                    0.04,
                                     Color::new(74, 74, 106, 255),
                                 ));
                             }
@@ -965,7 +965,7 @@ impl WgpuRenderer {
                                     radius,
                                     Color::new(58, 58, 90, 255),
                                     Color::new(90, 90, 138, 255),
-                                    2.0,
+                                    0.02,
                                 ));
                             }
                             EvaluatedShape::Rect { center, size, rotation } => {
@@ -975,7 +975,7 @@ impl WgpuRenderer {
                                     rotation,
                                     Color::new(58, 58, 90, 255),
                                     Color::new(90, 90, 138, 255),
-                                    2.0,
+                                    0.02,
                                 ));
                             }
                             EvaluatedShape::Bezier { .. } => {
@@ -985,7 +985,7 @@ impl WgpuRenderer {
                                         lines.push(LineInstance::new(
                                             (points[i][0], points[i][1]),
                                             (points[i + 1][0], points[i + 1][1]),
-                                            4.0,
+                                            0.04,
                                             Color::new(74, 74, 106, 255),
                                         ));
                                     }
@@ -1003,7 +1003,7 @@ impl WgpuRenderer {
                                     rotation,
                                     Color::new(50, 100, 50, 40),
                                     Color::new(100, 200, 100, 80),
-                                    1.0,
+                                    0.01,
                                 ));
                             }
                             EvaluatedShape::Circle { center, radius } => {
@@ -1012,7 +1012,7 @@ impl WgpuRenderer {
                                     radius,
                                     Color::new(50, 100, 50, 40),
                                     Color::new(100, 200, 100, 80),
-                                    1.0,
+                                    0.01,
                                 ));
                             }
                             EvaluatedShape::Line { .. } => {}
@@ -1035,7 +1035,7 @@ impl WgpuRenderer {
             {
                 // Marble shadow
                 circles.push(CircleInstance::new(
-                    (x + 2.0, y + 2.0),
+                    (x + 0.02, y + 0.02),
                     marble.radius,
                     Color::new(0, 0, 0, 76),
                     Color::new(0, 0, 0, 0),
@@ -1053,7 +1053,7 @@ impl WgpuRenderer {
                     marble.radius,
                     marble.color,
                     border_color,
-                    2.0,
+                    0.02,
                 ));
 
                 // Marble highlight

@@ -2,8 +2,10 @@
 
 use std::rc::Rc;
 
-use marble_core::map::{Keyframe, KeyframeSequence, MapMeta, MapObject, ObjectRole, RouletteConfig, Shape};
 use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
+use marble_core::map::{
+    Keyframe, KeyframeSequence, MapMeta, MapObject, ObjectRole, RouletteConfig, Shape,
+};
 use yew::prelude::*;
 
 const STORAGE_KEY: &str = "marble-live-editor-state";
@@ -71,7 +73,10 @@ pub enum EditorAction {
     /// Add a new keyframe sequence.
     AddSequence(KeyframeSequence),
     /// Update a keyframe sequence at the given index.
-    UpdateSequence { index: usize, sequence: KeyframeSequence },
+    UpdateSequence {
+        index: usize,
+        sequence: KeyframeSequence,
+    },
     /// Delete a keyframe sequence by index.
     DeleteSequence(usize),
 
@@ -79,13 +84,27 @@ pub enum EditorAction {
     /// Select a keyframe within the selected sequence.
     SelectKeyframe(Option<usize>),
     /// Add a keyframe to a sequence.
-    AddKeyframe { sequence_index: usize, keyframe: Keyframe },
+    AddKeyframe {
+        sequence_index: usize,
+        keyframe: Keyframe,
+    },
     /// Update a keyframe within a sequence.
-    UpdateKeyframe { sequence_index: usize, keyframe_index: usize, keyframe: Keyframe },
+    UpdateKeyframe {
+        sequence_index: usize,
+        keyframe_index: usize,
+        keyframe: Keyframe,
+    },
     /// Delete a keyframe from a sequence.
-    DeleteKeyframe { sequence_index: usize, keyframe_index: usize },
+    DeleteKeyframe {
+        sequence_index: usize,
+        keyframe_index: usize,
+    },
     /// Move a keyframe within a sequence.
-    MoveKeyframe { sequence_index: usize, from: usize, to: usize },
+    MoveKeyframe {
+        sequence_index: usize,
+        from: usize,
+        to: usize,
+    },
 }
 
 impl Reducible for EditorState {
@@ -142,7 +161,13 @@ impl Reducible for EditorState {
                     } else if sel > index {
                         Some(sel - 1)
                     } else if sel == index {
-                        if sel > 0 { Some(sel - 1) } else if config.objects.is_empty() { None } else { Some(0) }
+                        if sel > 0 {
+                            Some(sel - 1)
+                        } else if config.objects.is_empty() {
+                            None
+                        } else {
+                            Some(0)
+                        }
                     } else {
                         Some(sel)
                     }
@@ -287,7 +312,13 @@ impl Reducible for EditorState {
                     } else if sel > index {
                         Some(sel - 1)
                     } else if sel == index {
-                        if sel > 0 { Some(sel - 1) } else if config.keyframes.is_empty() { None } else { Some(0) }
+                        if sel > 0 {
+                            Some(sel - 1)
+                        } else if config.keyframes.is_empty() {
+                            None
+                        } else {
+                            Some(0)
+                        }
                     } else {
                         Some(sel)
                     }
@@ -308,7 +339,10 @@ impl Reducible for EditorState {
                 selected_keyframe: index,
                 ..(*self).clone()
             }),
-            EditorAction::AddKeyframe { sequence_index, keyframe } => {
+            EditorAction::AddKeyframe {
+                sequence_index,
+                keyframe,
+            } => {
                 let mut config = self.config.clone();
                 if sequence_index < config.keyframes.len() {
                     config.keyframes[sequence_index].keyframes.push(keyframe);
@@ -323,7 +357,11 @@ impl Reducible for EditorState {
                     Rc::new((*self).clone())
                 }
             }
-            EditorAction::UpdateKeyframe { sequence_index, keyframe_index, keyframe } => {
+            EditorAction::UpdateKeyframe {
+                sequence_index,
+                keyframe_index,
+                keyframe,
+            } => {
                 let mut config = self.config.clone();
                 if sequence_index < config.keyframes.len() {
                     let seq = &mut config.keyframes[sequence_index];
@@ -337,7 +375,10 @@ impl Reducible for EditorState {
                     ..(*self).clone()
                 })
             }
-            EditorAction::DeleteKeyframe { sequence_index, keyframe_index } => {
+            EditorAction::DeleteKeyframe {
+                sequence_index,
+                keyframe_index,
+            } => {
                 let mut config = self.config.clone();
                 if sequence_index < config.keyframes.len() {
                     let seq = &mut config.keyframes[sequence_index];
@@ -352,7 +393,13 @@ impl Reducible for EditorState {
                         } else if sel > keyframe_index {
                             Some(sel - 1)
                         } else if sel == keyframe_index {
-                            if sel > 0 { Some(sel - 1) } else if seq.keyframes.is_empty() { None } else { Some(0) }
+                            if sel > 0 {
+                                Some(sel - 1)
+                            } else if seq.keyframes.is_empty() {
+                                None
+                            } else {
+                                Some(0)
+                            }
                         } else {
                             Some(sel)
                         }
@@ -369,7 +416,11 @@ impl Reducible for EditorState {
                     Rc::new((*self).clone())
                 }
             }
-            EditorAction::MoveKeyframe { sequence_index, from, to } => {
+            EditorAction::MoveKeyframe {
+                sequence_index,
+                from,
+                to,
+            } => {
                 let mut config = self.config.clone();
                 if sequence_index < config.keyframes.len() {
                     let seq = &mut config.keyframes[sequence_index];
@@ -454,7 +505,8 @@ pub fn use_editor_state() -> EditorStateHandle {
         let config = state.config.clone();
         let config_json = serde_json::to_string(&config).unwrap_or_default();
         use_effect_with(config_json.clone(), move |json| {
-            if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+            if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten())
+            {
                 let _ = storage.set_item(STORAGE_KEY, json);
             }
         });
@@ -584,28 +636,44 @@ pub fn use_editor_state() -> EditorStateHandle {
     let on_add_keyframe = {
         let state = state.clone();
         Callback::from(move |(sequence_index, keyframe): (usize, Keyframe)| {
-            state.dispatch(EditorAction::AddKeyframe { sequence_index, keyframe });
+            state.dispatch(EditorAction::AddKeyframe {
+                sequence_index,
+                keyframe,
+            });
         })
     };
 
     let on_update_keyframe = {
         let state = state.clone();
-        Callback::from(move |(sequence_index, keyframe_index, keyframe): (usize, usize, Keyframe)| {
-            state.dispatch(EditorAction::UpdateKeyframe { sequence_index, keyframe_index, keyframe });
-        })
+        Callback::from(
+            move |(sequence_index, keyframe_index, keyframe): (usize, usize, Keyframe)| {
+                state.dispatch(EditorAction::UpdateKeyframe {
+                    sequence_index,
+                    keyframe_index,
+                    keyframe,
+                });
+            },
+        )
     };
 
     let on_delete_keyframe = {
         let state = state.clone();
         Callback::from(move |(sequence_index, keyframe_index): (usize, usize)| {
-            state.dispatch(EditorAction::DeleteKeyframe { sequence_index, keyframe_index });
+            state.dispatch(EditorAction::DeleteKeyframe {
+                sequence_index,
+                keyframe_index,
+            });
         })
     };
 
     let on_move_keyframe = {
         let state = state.clone();
         Callback::from(move |(sequence_index, from, to): (usize, usize, usize)| {
-            state.dispatch(EditorAction::MoveKeyframe { sequence_index, from, to });
+            state.dispatch(EditorAction::MoveKeyframe {
+                sequence_index,
+                from,
+                to,
+            });
         })
     };
 
@@ -646,8 +714,8 @@ pub fn create_default_obstacle() -> MapObject {
         id: None,
         role: ObjectRole::Obstacle,
         shape: Shape::Circle {
-            center: Vec2OrExpr::Static([400.0, 300.0]),
-            radius: NumberOrExpr::Number(30.0),
+            center: Vec2OrExpr::Static([3.0, 5.0]),
+            radius: NumberOrExpr::Number(0.3),
         },
         properties: Default::default(),
     }
@@ -659,8 +727,8 @@ pub fn create_default_spawner() -> MapObject {
         id: None,
         role: ObjectRole::Spawner,
         shape: Shape::Rect {
-            center: Vec2OrExpr::Static([400.0, 100.0]),
-            size: Vec2OrExpr::Static([200.0, 50.0]),
+            center: Vec2OrExpr::Static([3.0, 1.0]),
+            size: Vec2OrExpr::Static([2.0, 0.5]),
             rotation: Default::default(),
         },
         properties: Default::default(),
@@ -673,16 +741,16 @@ pub fn create_default_trigger() -> MapObject {
         id: None,
         role: ObjectRole::Trigger,
         shape: Shape::Circle {
-            center: Vec2OrExpr::Static([400.0, 500.0]),
-            radius: NumberOrExpr::Number(40.0),
+            center: Vec2OrExpr::Static([3.0, 9.5]),
+            radius: NumberOrExpr::Number(0.4),
         },
         properties: Default::default(),
     }
 }
 
-/// Round to integer.
+/// Round to 0.01m (1 pixel) grid.
 fn snap(v: f32) -> f32 {
-    v.round()
+    (v / 0.01).round() * 0.01
 }
 
 /// Move an object's center to a new position (snapped to integer).
@@ -713,12 +781,30 @@ fn move_object_center(obj: &mut MapObject, x: f32, y: f32) {
             *start = Vec2OrExpr::Static([snap(sx + dx), snap(sy + dy)]);
             *end = Vec2OrExpr::Static([snap(ex + dx), snap(ey + dy)]);
         }
-        Shape::Bezier { start, control1, control2, end, .. } => {
+        Shape::Bezier {
+            start,
+            control1,
+            control2,
+            end,
+            ..
+        } => {
             // Get current points
-            let sv = match &*start { Vec2OrExpr::Static(v) => *v, _ => return };
-            let c1v = match &*control1 { Vec2OrExpr::Static(v) => *v, _ => return };
-            let c2v = match &*control2 { Vec2OrExpr::Static(v) => *v, _ => return };
-            let ev = match &*end { Vec2OrExpr::Static(v) => *v, _ => return };
+            let sv = match &*start {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let c1v = match &*control1 {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let c2v = match &*control2 {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let ev = match &*end {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
 
             // Calculate center
             let cx = (sv[0] + c1v[0] + c2v[0] + ev[0]) / 4.0;
@@ -762,12 +848,30 @@ fn mirror_object_x(obj: &mut MapObject) {
             *start = Vec2OrExpr::Static([snap(2.0 * cx - sx), snap(sy)]);
             *end = Vec2OrExpr::Static([snap(2.0 * cx - ex), snap(ey)]);
         }
-        Shape::Bezier { start, control1, control2, end, .. } => {
+        Shape::Bezier {
+            start,
+            control1,
+            control2,
+            end,
+            ..
+        } => {
             // Get current points
-            let sv = match &*start { Vec2OrExpr::Static(v) => *v, _ => return };
-            let c1v = match &*control1 { Vec2OrExpr::Static(v) => *v, _ => return };
-            let c2v = match &*control2 { Vec2OrExpr::Static(v) => *v, _ => return };
-            let ev = match &*end { Vec2OrExpr::Static(v) => *v, _ => return };
+            let sv = match &*start {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let c1v = match &*control1 {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let c2v = match &*control2 {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let ev = match &*end {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
 
             // Calculate center x
             let cx = (sv[0] + c1v[0] + c2v[0] + ev[0]) / 4.0;
@@ -808,12 +912,30 @@ fn mirror_object_y(obj: &mut MapObject) {
             *start = Vec2OrExpr::Static([snap(sx), snap(2.0 * cy - sy)]);
             *end = Vec2OrExpr::Static([snap(ex), snap(2.0 * cy - ey)]);
         }
-        Shape::Bezier { start, control1, control2, end, .. } => {
+        Shape::Bezier {
+            start,
+            control1,
+            control2,
+            end,
+            ..
+        } => {
             // Get current points
-            let sv = match &*start { Vec2OrExpr::Static(v) => *v, _ => return };
-            let c1v = match &*control1 { Vec2OrExpr::Static(v) => *v, _ => return };
-            let c2v = match &*control2 { Vec2OrExpr::Static(v) => *v, _ => return };
-            let ev = match &*end { Vec2OrExpr::Static(v) => *v, _ => return };
+            let sv = match &*start {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let c1v = match &*control1 {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let c2v = match &*control2 {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
+            let ev = match &*end {
+                Vec2OrExpr::Static(v) => *v,
+                _ => return,
+            };
 
             // Calculate center y
             let cy = (sv[1] + c1v[1] + c2v[1] + ev[1]) / 4.0;

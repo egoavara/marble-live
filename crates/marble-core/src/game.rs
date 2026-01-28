@@ -339,10 +339,10 @@ impl GameState {
                     let dx = center[0] - pos.x;
                     let dy = center[1] - pos.y;
                     let dist_sq = dx * dx + dy * dy;
-                    let dist = dist_sq.sqrt().max(1.0); // Prevent division by zero
+                    let dist = dist_sq.sqrt().max(0.01); // Prevent division by zero
 
                     // Force magnitude inversely proportional to distance
-                    let force_magnitude = force * 1000.0 / dist;
+                    let force_magnitude = force * 10.0 / dist;
                     let force_vec = Vector::new(dx / dist * force_magnitude, dy / dist * force_magnitude);
 
                     body.add_force(force_vec, true);

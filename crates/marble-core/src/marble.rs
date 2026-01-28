@@ -58,8 +58,8 @@ impl Color {
     }
 }
 
-/// Default marble radius in pixels.
-pub const DEFAULT_MARBLE_RADIUS: f32 = 25.0;
+/// Default marble radius in meters (100px = 1m).
+pub const DEFAULT_MARBLE_RADIUS: f32 = 0.25;
 
 /// Marble entity representing a player's marble in the game.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -402,8 +402,8 @@ mod tests {
     fn create_test_spawner() -> SpawnerData {
         SpawnerData {
             shape: Shape::Rect {
-                center: Vec2OrExpr::Static([400.0, 100.0]),
-                size: Vec2OrExpr::Static([600.0, 100.0]),
+                center: Vec2OrExpr::Static([3.0, 1.0]),
+                size: Vec2OrExpr::Static([4.0, 0.8]),
                 rotation: NumberOrExpr::Number(0.0),
             },
             properties: None,

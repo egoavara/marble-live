@@ -196,6 +196,19 @@ pub fn editor_page() -> Html {
                     preview_sequence={(*preview_sequence).clone()}
                     on_preview_complete={on_preview_complete.clone()}
                     on_preview_keyframe_change={on_preview_keyframe_change.clone()}
+                    selected_sequence={editor_state.selected_sequence.and_then(|idx|
+                        editor_state.config.keyframes.get(idx).cloned())}
+                    selected_sequence_index={editor_state.selected_sequence}
+                    selected_keyframe={editor_state.selected_keyframe}
+                    on_update_keyframe={{
+                        let cb = editor_state.on_update_keyframe.clone();
+                        let seq_idx = editor_state.selected_sequence;
+                        Callback::from(move |(kf_idx, kf)| {
+                            if let Some(idx) = seq_idx {
+                                cb.emit((idx, kf_idx, kf));
+                            }
+                        })
+                    }}
                 />
 
                 // Toolbar (top-center)

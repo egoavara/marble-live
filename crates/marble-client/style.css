@@ -4120,6 +4120,19 @@
     z-index: 100;
 }
 
+.timeline-insert-menu-fixed {
+    position: fixed;
+    transform: translate(-50%, -100%);
+    margin: 0;
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    background: #2a2a2a;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+}
+
 .timeline-insert-menu-item {
     width: 24px;
     height: 24px;

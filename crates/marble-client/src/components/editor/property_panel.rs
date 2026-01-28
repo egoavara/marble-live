@@ -257,22 +257,22 @@ fn shape_editor(props: &ShapeEditorProps) -> Html {
             let new_shape = match input.value().as_str() {
                 "line" => Shape::Line {
                     start: Vec2OrExpr::Static([0.0, 0.0]),
-                    end: Vec2OrExpr::Static([100.0, 0.0]),
+                    end: Vec2OrExpr::Static([1.0, 0.0]),
                 },
                 "circle" => Shape::Circle {
-                    center: Vec2OrExpr::Static([400.0, 300.0]),
-                    radius: NumberOrExpr::Number(30.0),
+                    center: Vec2OrExpr::Static([3.0, 5.0]),
+                    radius: NumberOrExpr::Number(0.3),
                 },
                 "rect" => Shape::Rect {
-                    center: Vec2OrExpr::Static([400.0, 300.0]),
-                    size: Vec2OrExpr::Static([100.0, 50.0]),
+                    center: Vec2OrExpr::Static([3.0, 5.0]),
+                    size: Vec2OrExpr::Static([1.0, 0.5]),
                     rotation: NumberOrExpr::Number(0.0),
                 },
                 "bezier" => Shape::Bezier {
-                    start: Vec2OrExpr::Static([350.0, 300.0]),
-                    control1: Vec2OrExpr::Static([375.0, 250.0]),
-                    control2: Vec2OrExpr::Static([425.0, 350.0]),
-                    end: Vec2OrExpr::Static([450.0, 300.0]),
+                    start: Vec2OrExpr::Static([2.5, 5.0]),
+                    control1: Vec2OrExpr::Static([2.75, 4.5]),
+                    control2: Vec2OrExpr::Static([3.25, 5.5]),
+                    end: Vec2OrExpr::Static([3.5, 5.0]),
                     segments: 16,
                 },
                 _ => return,
@@ -347,7 +347,7 @@ fn shape_editor(props: &ShapeEditorProps) -> Html {
                 }
                 Shape::Rect { center, size, rotation } => {
                     let center_val = get_vec2_static(center).unwrap_or([0.0, 0.0]);
-                    let size_val = get_vec2_static(size).unwrap_or([100.0, 50.0]);
+                    let size_val = get_vec2_static(size).unwrap_or([1.0, 0.5]);
                     let rotation_val = get_number_static(rotation).unwrap_or(0.0);
                     html! {
                         <>
@@ -413,7 +413,7 @@ fn shape_editor(props: &ShapeEditorProps) -> Html {
                 }
                 Shape::Line { start, end } => {
                     let start_val = get_vec2_static(start).unwrap_or([0.0, 0.0]);
-                    let end_val = get_vec2_static(end).unwrap_or([100.0, 0.0]);
+                    let end_val = get_vec2_static(end).unwrap_or([1.0, 0.0]);
                     html! {
                         <>
                             <Vec2Field

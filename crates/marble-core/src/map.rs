@@ -531,9 +531,9 @@ impl RouletteConfig {
             }
         }
 
-        // Default to (0,0) - (800, 600) if no objects
+        // Default to (0,0) - (8.0, 6.0) if no objects (meters)
         if min_x == f32::MAX {
-            ((0.0, 0.0), (800.0, 600.0))
+            ((0.0, 0.0), (8.0, 6.0))
         } else {
             ((min_x, min_y), (max_x, max_y))
         }
@@ -673,7 +673,7 @@ impl RouletteConfig {
                 let length = (dx * dx + dy * dy).sqrt();
                 let angle = dy.atan2(dx);
 
-                ColliderBuilder::cuboid(length / 2.0, 2.0)
+                ColliderBuilder::cuboid(length / 2.0, 0.02)
                     .translation(Vector::new(mid[0], mid[1]))
                     .rotation(angle)
                     .friction(0.3)
@@ -754,7 +754,7 @@ impl RouletteConfig {
                 let length = (dx * dx + dy * dy).sqrt();
                 let angle = dy.atan2(dx);
 
-                let collider = ColliderBuilder::cuboid(length / 2.0, 2.0)
+                let collider = ColliderBuilder::cuboid(length / 2.0, 0.02)
                     .friction(0.3)
                     .restitution(0.5)
                     .build();
@@ -1025,22 +1025,22 @@ mod tests {
             "objects": [
                 {
                     "role": "spawner",
-                    "shape": { "type": "rect", "center": [400, 100], "size": [600, 100], "rotation": 0 },
+                    "shape": { "type": "rect", "center": [3.0, 1.0], "size": [4.0, 0.8], "rotation": 0 },
                     "properties": { "spawn": { "mode": "random", "initial_force": "random" } }
                 },
                 {
                     "role": "obstacle",
-                    "shape": { "type": "line", "start": [0, 0], "end": [800, 0] }
+                    "shape": { "type": "line", "start": [0, 0], "end": [6.0, 0] }
                 },
                 {
                     "role": "obstacle",
-                    "shape": { "type": "circle", "center": [400, 300], "radius": 30 },
+                    "shape": { "type": "circle", "center": [3.0, 5.0], "radius": 0.3 },
                     "properties": { "bumper": { "force": 1.0 } }
                 },
                 {
                     "id": "goal",
                     "role": "trigger",
-                    "shape": { "type": "circle", "center": [400, 550], "radius": 40 },
+                    "shape": { "type": "circle", "center": [3.0, 9.5], "radius": 0.45 },
                     "properties": {
                         "blackhole": { "force": 0.2 },
                         "trigger": { "action": "gamerule" }
@@ -1065,7 +1065,7 @@ mod tests {
                 {
                     "id": "goal",
                     "role": "trigger",
-                    "shape": { "type": "circle", "center": [400, 550], "radius": 40 },
+                    "shape": { "type": "circle", "center": [3.0, 9.5], "radius": 0.45 },
                     "properties": {
                         "blackhole": { "force": "0.2 + 0.1 * game.time" },
                         "trigger": { "action": "gamerule" }

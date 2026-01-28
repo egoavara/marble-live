@@ -323,7 +323,7 @@ mod tests {
             target_ids: vec!["obj1".to_string()],
             keyframes: vec![
                 Keyframe::Apply {
-                    translation: Some([100.0, 0.0]),
+                    translation: Some([1.0, 0.0]),
                     rotation: None,
                     duration: 1.0,
                     easing: EasingType::Linear,
@@ -347,7 +347,7 @@ mod tests {
             keyframes: vec![
                 Keyframe::LoopStart { count: Some(2) },
                 Keyframe::Apply {
-                    translation: Some([50.0, 0.0]),
+                    translation: Some([0.5, 0.0]),
                     rotation: None,
                     duration: 0.5,
                     easing: EasingType::Linear,
@@ -386,9 +386,9 @@ mod tests {
             }
         }
 
-        // After 1 second, should be at [100, 0]
+        // After 1 second, should be at [1.0, 0]
         let pos = positions.get("obj1").unwrap().0;
-        assert!((pos[0] - 100.0).abs() < 1.0);
+        assert!((pos[0] - 1.0).abs() < 0.01);
     }
 
     #[test]
@@ -483,9 +483,9 @@ mod tests {
         let mut executor = KeyframeExecutor::new("pivot_test".to_string());
         let sequences = vec![sequence];
 
-        // Object starts at (100, 0) with 0 rotation
-        let mut positions = HashMap::from([("flipper".to_string(), ([100.0, 0.0], 0.0))]);
-        let initials = HashMap::from([("flipper".to_string(), ([100.0, 0.0], 0.0))]);
+        // Object starts at (1.0, 0) with 0 rotation
+        let mut positions = HashMap::from([("flipper".to_string(), ([1.0, 0.0], 0.0))]);
+        let initials = HashMap::from([("flipper".to_string(), ([1.0, 0.0], 0.0))]);
         let mut game_context = GameContext::with_cache_and_seed(12345);
 
         // First update starts the animation
@@ -499,10 +499,10 @@ mod tests {
             }
         }
 
-        // After 90 degree rotation around origin, (100, 0) should be at approximately (0, 100)
+        // After 90 degree rotation around origin, (1.0, 0) should be at approximately (0, 1.0)
         let (pos, rot) = positions.get("flipper").unwrap();
-        assert!(pos[0].abs() < 1.0, "X should be near 0, got {}", pos[0]);
-        assert!((pos[1] - 100.0).abs() < 1.0, "Y should be near 100, got {}", pos[1]);
+        assert!(pos[0].abs() < 0.01, "X should be near 0, got {}", pos[0]);
+        assert!((pos[1] - 1.0).abs() < 0.01, "Y should be near 1.0, got {}", pos[1]);
         assert!((*rot - std::f32::consts::FRAC_PI_2).abs() < 0.01, "Rotation should be 90 degrees");
     }
 

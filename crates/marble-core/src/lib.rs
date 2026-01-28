@@ -7,13 +7,19 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod context_game;
+pub mod context_keyframe;
 pub mod dsl;
+pub mod engine;
+pub mod executor_cache;
+pub mod expr;
 pub mod game;
 pub mod keyframe;
 pub mod map;
 pub mod marble;
 pub mod physics;
 pub mod sync;
+pub mod util;
 
 pub use dsl::{DslError, GameContext, NumberOrExpr, Vec2OrExpr};
 pub use game::{GameState, Player};
@@ -23,6 +29,6 @@ pub use map::{
     MapWorldData, ObjectProperties, ObjectRole, RollDirection, RollProperties, RouletteConfig,
     Shape, SpawnerData,
 };
-pub use marble::{Color, Marble, MarbleId, MarbleManager, PlayerId, DEFAULT_MARBLE_RADIUS};
-pub use physics::{default_gravity, PhysicsWorld, PHYSICS_DT};
+pub use marble::{Color, DEFAULT_MARBLE_RADIUS, Marble, MarbleId, MarbleManager, PlayerId};
+pub use physics::{PHYSICS_DT, PhysicsWorld, default_gravity};
 pub use sync::SyncSnapshot;

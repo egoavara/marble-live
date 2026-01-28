@@ -3,8 +3,9 @@
 //! Shows all handles (move, scale, rotate) simultaneously.
 
 use marble_core::Color;
+use marble_core::map::{EvaluatedShape, Keyframe};
 
-use super::interaction::{BezierTransform, GizmoHandle, LineTransform, ObjectTransform};
+use super::interaction::{BezierTransform, GhostTransform, GizmoHandle, LineTransform, ObjectTransform, PivotTransform};
 use crate::renderer::{CircleInstance, LineInstance, RectInstance};
 
 /// Gizmo visual constants.
@@ -36,6 +37,21 @@ pub mod constants {
     pub const COLOR_BEZIER_CONTROL: Color = Color { r: 100, g: 180, b: 255, a: 255 };
     pub const COLOR_BEZIER_CENTER: Color = Color { r: 255, g: 255, b: 255, a: 255 };
     pub const COLOR_BEZIER_TANGENT: Color = Color { r: 150, g: 150, b: 150, a: 180 };
+
+    // Pivot gizmo constants
+    pub const PIVOT_POINT_SIZE: f32 = 10.0;
+    pub const PIVOT_CROSSHAIR_LENGTH: f32 = 20.0;
+    pub const PIVOT_CROSSHAIR_WIDTH: f32 = 2.0;
+    pub const COLOR_PIVOT: Color = Color { r: 255, g: 152, b: 0, a: 255 }; // Orange #ff9800
+
+    // Ghost preview constants
+    pub const GHOST_DASH_LENGTH: f32 = 8.0;
+    pub const GHOST_GAP_LENGTH: f32 = 6.0;
+    pub const GHOST_LINE_WIDTH: f32 = 2.0;
+    pub const GHOST_ARROW_WIDTH: f32 = 2.5;
+    pub const GHOST_ARROWHEAD_SIZE: f32 = 8.0;
+    pub const COLOR_GHOST: Color = Color { r: 100, g: 200, b: 255, a: 140 };
+    pub const COLOR_GHOST_ARROW: Color = Color { r: 100, g: 200, b: 255, a: 200 };
 }
 
 #[derive(Debug, Clone, Default)]
@@ -232,12 +248,12 @@ fn point_near_line(start: (f32, f32), end: (f32, f32), p: (f32, f32), tol: f32) 
 pub fn apply_move_transform(handle: GizmoHandle, orig: &ObjectTransform, delta: (f32, f32), snap: bool) -> ObjectTransform {
     let mut r = *orig;
     match handle {
-        GizmoHandle::MoveX => { r.center.0 = orig.center.0 + delta.0; if snap { r.center.0 = (r.center.0 / 10.0).round() * 10.0; } }
-        GizmoHandle::MoveY => { r.center.1 = orig.center.1 + delta.1; if snap { r.center.1 = (r.center.1 / 10.0).round() * 10.0; } }
+        GizmoHandle::MoveX => { r.center.0 = orig.center.0 + delta.0; if snap { r.center.0 = (r.center.0 / 0.1).round() * 0.1; } }
+        GizmoHandle::MoveY => { r.center.1 = orig.center.1 + delta.1; if snap { r.center.1 = (r.center.1 / 0.1).round() * 0.1; } }
         GizmoHandle::MoveFree => {
             r.center.0 = orig.center.0 + delta.0;
             r.center.1 = orig.center.1 + delta.1;
-            if snap { r.center.0 = (r.center.0 / 10.0).round() * 10.0; r.center.1 = (r.center.1 / 10.0).round() * 10.0; }
+            if snap { r.center.0 = (r.center.0 / 0.1).round() * 0.1; r.center.1 = (r.center.1 / 0.1).round() * 0.1; }
         }
         _ => {}
     }
@@ -246,7 +262,7 @@ pub fn apply_move_transform(handle: GizmoHandle, orig: &ObjectTransform, delta: 
 
 pub fn apply_scale_transform(handle: GizmoHandle, orig: &ObjectTransform, delta: (f32, f32), snap: bool) -> ObjectTransform {
     let mut r = *orig;
-    let min = 10.0;
+    let min = 0.1;
 
     // Transform delta to object's local coordinate system
     let rad = -orig.rotation.to_radians();
@@ -288,8 +304,8 @@ pub fn apply_scale_transform(handle: GizmoHandle, orig: &ObjectTransform, delta:
     }
 
     if snap {
-        r.size.0 = (r.size.0 / 10.0).round() * 10.0;
-        r.size.1 = (r.size.1 / 10.0).round() * 10.0;
+        r.size.0 = (r.size.0 / 0.1).round() * 0.1;
+        r.size.1 = (r.size.1 / 0.1).round() * 0.1;
     }
     r
 }
@@ -400,11 +416,11 @@ pub fn hit_test_bezier_gizmo(transform: &BezierTransform, mouse: (f32, f32), zoo
     None
 }
 
-/// Snap threshold for bezier points to snap to each other (in world units).
-const BEZIER_POINT_SNAP_THRESHOLD: f32 = 15.0;
+/// Snap threshold for bezier points to snap to each other (in meters).
+const BEZIER_POINT_SNAP_THRESHOLD: f32 = 0.15;
 
-/// Threshold for considering two points as "merged" (same position).
-const BEZIER_MERGED_THRESHOLD: f32 = 0.5;
+/// Threshold for considering two points as "merged" (same position, in meters).
+const BEZIER_MERGED_THRESHOLD: f32 = 0.005;
 
 /// Apply transform to bezier based on handle and drag delta.
 /// When `alt_held` is true, points that are merged (same position) move together.
@@ -419,7 +435,7 @@ pub fn apply_bezier_transform(
 
     let snap_to_grid = |p: (f32, f32)| -> (f32, f32) {
         if snap {
-            ((p.0 / 10.0).round() * 10.0, (p.1 / 10.0).round() * 10.0)
+            ((p.0 / 0.1).round() * 0.1, (p.1 / 0.1).round() * 0.1)
         } else {
             p
         }
@@ -621,7 +637,7 @@ pub fn apply_line_transform(
 
     let snap_to_grid = |p: (f32, f32)| -> (f32, f32) {
         if snap {
-            ((p.0 / 10.0).round() * 10.0, (p.1 / 10.0).round() * 10.0)
+            ((p.0 / 0.1).round() * 0.1, (p.1 / 0.1).round() * 0.1)
         } else {
             p
         }
@@ -657,4 +673,477 @@ pub fn apply_line_transform(
     }
 
     result
+}
+
+// ============================================================================
+// Pivot Gizmo Functions (for PivotRotate keyframe)
+// ============================================================================
+
+/// Generate pivot point gizmo with crosshair and center handle.
+pub fn generate_pivot_gizmo(
+    transform: &PivotTransform,
+    zoom: f32,
+    hovered_handle: Option<GizmoHandle>,
+) -> GizmoRenderData {
+    use constants::*;
+    let mut data = GizmoRenderData::default();
+    let scale = 1.0 / zoom;
+
+    let point = transform.point;
+    let color = if hovered_handle == Some(GizmoHandle::PivotPoint) { COLOR_HOVER } else { COLOR_PIVOT };
+
+    // Crosshair lines
+    let half_len = PIVOT_CROSSHAIR_LENGTH * scale / 2.0;
+    let line_width = PIVOT_CROSSHAIR_WIDTH * scale;
+
+    // Horizontal line
+    data.lines.push(LineInstance::new(
+        (point.0 - half_len, point.1),
+        (point.0 + half_len, point.1),
+        line_width,
+        color,
+    ));
+
+    // Vertical line
+    data.lines.push(LineInstance::new(
+        (point.0, point.1 - half_len),
+        (point.0, point.1 + half_len),
+        line_width,
+        color,
+    ));
+
+    // Center circle
+    let radius = PIVOT_POINT_SIZE * scale / 2.0;
+    data.circles.push(CircleInstance::new(
+        point,
+        radius,
+        color,
+        Color::new(50, 50, 50, 255),
+        scale,
+    ));
+
+    data
+}
+
+/// Hit test pivot gizmo handle.
+pub fn hit_test_pivot_gizmo(
+    transform: &PivotTransform,
+    mouse: (f32, f32),
+    zoom: f32,
+) -> Option<GizmoHandle> {
+    use constants::*;
+    let scale = 1.0 / zoom;
+    let tol = HIT_TOLERANCE * scale;
+
+    let point = transform.point;
+
+    // Check if mouse is near pivot point
+    let point_size = PIVOT_POINT_SIZE * scale;
+    if dist(mouse, point) <= point_size / 2.0 + tol {
+        return Some(GizmoHandle::PivotPoint);
+    }
+
+    None
+}
+
+/// Apply transform to pivot point based on drag delta.
+pub fn apply_pivot_transform(
+    orig: &PivotTransform,
+    delta: (f32, f32),
+    snap: bool,
+) -> PivotTransform {
+    let new_point = (orig.point.0 + delta.0, orig.point.1 + delta.1);
+
+    let result_point = if snap {
+        ((new_point.0 / 0.1).round() * 0.1, (new_point.1 / 0.1).round() * 0.1)
+    } else {
+        new_point
+    };
+
+    PivotTransform { point: result_point }
+}
+
+// ============================================================================
+// Ghost Preview Functions (Transform Preview)
+// ============================================================================
+
+/// Generate ghost preview for Apply/PivotRotate keyframe.
+/// Shows destination outline, direction arrow, and rotation arc.
+///
+/// `target_shapes` is a list of (EvaluatedShape, init_pos, init_rot_radians) for each target object.
+pub fn generate_ghost_preview(
+    keyframe: &Keyframe,
+    target_shapes: &[(EvaluatedShape, [f32; 2], f32)],
+    zoom: f32,
+    hovered_handle: Option<GizmoHandle>,
+) -> GizmoRenderData {
+    let mut data = GizmoRenderData::default();
+    let scale = 1.0 / zoom;
+
+    for (shape, init_pos, init_rot) in target_shapes {
+        let (dest_pos, dest_rot) = match keyframe {
+            Keyframe::Apply { translation, rotation, .. } => {
+                let dp = [
+                    init_pos[0] + translation.map(|t| t[0]).unwrap_or(0.0),
+                    init_pos[1] + translation.map(|t| t[1]).unwrap_or(0.0),
+                ];
+                let dr = init_rot + rotation.map(|r| r.to_radians()).unwrap_or(0.0);
+                (dp, dr)
+            }
+            Keyframe::PivotRotate { pivot, angle, .. } => {
+                let offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                let angle_rad = angle.to_radians();
+                let cos = angle_rad.cos();
+                let sin = angle_rad.sin();
+                let dp = [
+                    pivot[0] + offset[0] * cos - offset[1] * sin,
+                    pivot[1] + offset[0] * sin + offset[1] * cos,
+                ];
+                let dr = init_rot + angle_rad;
+                (dp, dr)
+            }
+            _ => continue,
+        };
+
+        // Ghost outline at destination
+        match shape {
+            EvaluatedShape::Circle { radius, .. } => {
+                generate_dashed_circle(&mut data, (dest_pos[0], dest_pos[1]), *radius, scale);
+            }
+            EvaluatedShape::Rect { size, .. } => {
+                generate_dashed_rect(
+                    &mut data,
+                    (dest_pos[0], dest_pos[1]),
+                    (size[0] / 2.0, size[1] / 2.0),
+                    dest_rot,
+                    scale,
+                );
+            }
+            EvaluatedShape::Line { start, end } => {
+                // Transform line endpoints to destination
+                let mid = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0];
+                let rot_delta = dest_rot - init_rot;
+                let cos_d = rot_delta.cos();
+                let sin_d = rot_delta.sin();
+
+                let transform_point = |p: &[f32; 2]| -> (f32, f32) {
+                    let off = [p[0] - mid[0], p[1] - mid[1]];
+                    let rotated = [off[0] * cos_d - off[1] * sin_d, off[0] * sin_d + off[1] * cos_d];
+                    (dest_pos[0] + rotated[0], dest_pos[1] + rotated[1])
+                };
+
+                let line_start = transform_point(start);
+                let line_end = transform_point(end);
+                generate_dashed_line_segment(&mut data, line_start, line_end, scale);
+            }
+            _ => {}
+        }
+
+        // Center handle for dragging (diamond shape)
+        let handle_size = constants::CENTER_HANDLE_SIZE * scale * 0.8;
+        let handle_color = if hovered_handle == Some(GizmoHandle::GhostMove) {
+            constants::COLOR_HOVER
+        } else {
+            constants::COLOR_GHOST_ARROW
+        };
+        data.rects.push(RectInstance::new(
+            (dest_pos[0], dest_pos[1]),
+            (handle_size / 2.0, handle_size / 2.0),
+            45.0,
+            handle_color,
+            Color::new(50, 50, 50, 200),
+            1.5 * scale,
+        ));
+
+        // Direction arrow from current to destination
+        let from = (init_pos[0], init_pos[1]);
+        let to = (dest_pos[0], dest_pos[1]);
+        let d = ((to.0 - from.0).powi(2) + (to.1 - from.1).powi(2)).sqrt();
+        if d > 0.01 {
+            generate_direction_arrow(&mut data, from, to, scale);
+        }
+
+        // Rotation arc
+        let rot_delta = dest_rot - init_rot;
+        if rot_delta.abs() > 0.01 {
+            match keyframe {
+                Keyframe::PivotRotate { pivot, .. } => {
+                    let arc_center = (pivot[0], pivot[1]);
+                    let arc_radius = ((init_pos[0] - pivot[0]).powi(2) + (init_pos[1] - pivot[1]).powi(2)).sqrt();
+                    let from_angle = (init_pos[1] - pivot[1]).atan2(init_pos[0] - pivot[0]);
+                    generate_rotation_arc(&mut data, arc_center, from_angle, from_angle + rot_delta, arc_radius, scale);
+                }
+                _ => {
+                    let arc_center = (init_pos[0], init_pos[1]);
+                    let arc_radius = 30.0 * scale;
+                    generate_rotation_arc(&mut data, arc_center, *init_rot, dest_rot, arc_radius, scale);
+                }
+            }
+        }
+    }
+
+    data
+}
+
+fn generate_dashed_circle(data: &mut GizmoRenderData, center: (f32, f32), radius: f32, scale: f32) {
+    use constants::*;
+    let circumference = 2.0 * std::f32::consts::PI * radius;
+    let dash = GHOST_DASH_LENGTH * scale;
+    let gap = GHOST_GAP_LENGTH * scale;
+    let segment_len = dash + gap;
+    let w = GHOST_LINE_WIDTH * scale;
+
+    if circumference < 0.01 || segment_len < 0.001 {
+        return;
+    }
+
+    let mut dist_traveled = 0.0;
+    while dist_traveled < circumference {
+        let end_dist = (dist_traveled + dash).min(circumference);
+
+        // Convert distances to angles
+        let a1 = dist_traveled / radius;
+        let a2 = end_dist / radius;
+
+        // Break this dash into small arc segments for smoothness
+        let arc_len = a2 - a1;
+        let sub_segments = ((arc_len * radius / (5.0 * scale)).ceil() as usize).max(1);
+
+        for i in 0..sub_segments {
+            let t0 = a1 + arc_len * (i as f32 / sub_segments as f32);
+            let t1 = a1 + arc_len * ((i + 1) as f32 / sub_segments as f32);
+            data.lines.push(LineInstance::new(
+                (center.0 + radius * t0.cos(), center.1 + radius * t0.sin()),
+                (center.0 + radius * t1.cos(), center.1 + radius * t1.sin()),
+                w,
+                COLOR_GHOST,
+            ));
+        }
+
+        dist_traveled = end_dist + gap;
+    }
+}
+
+fn generate_dashed_rect(
+    data: &mut GizmoRenderData,
+    center: (f32, f32),
+    half_size: (f32, f32),
+    rotation_rad: f32,
+    scale: f32,
+) {
+    let cos = rotation_rad.cos();
+    let sin = rotation_rad.sin();
+
+    let rotate = |local: (f32, f32)| -> (f32, f32) {
+        (
+            center.0 + local.0 * cos - local.1 * sin,
+            center.1 + local.0 * sin + local.1 * cos,
+        )
+    };
+
+    let corners = [
+        rotate((-half_size.0, -half_size.1)),
+        rotate((half_size.0, -half_size.1)),
+        rotate((half_size.0, half_size.1)),
+        rotate((-half_size.0, half_size.1)),
+    ];
+
+    for i in 0..4 {
+        generate_dashed_line_segment(data, corners[i], corners[(i + 1) % 4], scale);
+    }
+}
+
+fn generate_dashed_line_segment(
+    data: &mut GizmoRenderData,
+    start: (f32, f32),
+    end: (f32, f32),
+    scale: f32,
+) {
+    use constants::*;
+    let dx = end.0 - start.0;
+    let dy = end.1 - start.1;
+    let total_len = (dx * dx + dy * dy).sqrt();
+    let dash = GHOST_DASH_LENGTH * scale;
+    let gap = GHOST_GAP_LENGTH * scale;
+    let w = GHOST_LINE_WIDTH * scale;
+
+    if total_len < 0.001 {
+        return;
+    }
+
+    let dir = (dx / total_len, dy / total_len);
+    let mut d = 0.0;
+
+    while d < total_len {
+        let end_d = (d + dash).min(total_len);
+        let p0 = (start.0 + dir.0 * d, start.1 + dir.1 * d);
+        let p1 = (start.0 + dir.0 * end_d, start.1 + dir.1 * end_d);
+        data.lines.push(LineInstance::new(p0, p1, w, COLOR_GHOST));
+        d = end_d + gap;
+    }
+}
+
+fn generate_direction_arrow(
+    data: &mut GizmoRenderData,
+    from: (f32, f32),
+    to: (f32, f32),
+    scale: f32,
+) {
+    use constants::*;
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    let total_len = (dx * dx + dy * dy).sqrt();
+    let w = GHOST_ARROW_WIDTH * scale;
+    let head_size = GHOST_ARROWHEAD_SIZE * scale;
+
+    if total_len < head_size * 2.0 {
+        // Too short for arrowhead, just draw a single line
+        data.lines.push(LineInstance::new(from, to, w, COLOR_GHOST_ARROW));
+        return;
+    }
+
+    // Dashed shaft (stop before arrowhead)
+    let shaft_end_d = total_len - head_size;
+    let dir = (dx / total_len, dy / total_len);
+    let dash = GHOST_DASH_LENGTH * scale;
+    let gap = GHOST_GAP_LENGTH * scale;
+
+    let mut d = 0.0;
+    while d < shaft_end_d {
+        let end_d = (d + dash).min(shaft_end_d);
+        let p0 = (from.0 + dir.0 * d, from.1 + dir.1 * d);
+        let p1 = (from.0 + dir.0 * end_d, from.1 + dir.1 * end_d);
+        data.lines.push(LineInstance::new(p0, p1, w, COLOR_GHOST_ARROW));
+        d = end_d + gap;
+    }
+
+    // Arrowhead
+    let perp = (-dir.1, dir.0);
+    let tip = to;
+    let left = (
+        tip.0 - dir.0 * head_size + perp.0 * head_size * 0.5,
+        tip.1 - dir.1 * head_size + perp.1 * head_size * 0.5,
+    );
+    let right = (
+        tip.0 - dir.0 * head_size - perp.0 * head_size * 0.5,
+        tip.1 - dir.1 * head_size - perp.1 * head_size * 0.5,
+    );
+    data.lines.push(LineInstance::new(left, tip, w, COLOR_GHOST_ARROW));
+    data.lines.push(LineInstance::new(right, tip, w, COLOR_GHOST_ARROW));
+}
+
+fn generate_rotation_arc(
+    data: &mut GizmoRenderData,
+    center: (f32, f32),
+    from_angle: f32,
+    to_angle: f32,
+    arc_radius: f32,
+    scale: f32,
+) {
+    use constants::*;
+    let w = GHOST_LINE_WIDTH * scale;
+    let total_angle = to_angle - from_angle;
+    let abs_angle = total_angle.abs();
+    let arc_len = abs_angle * arc_radius;
+
+    if abs_angle < 0.01 || arc_radius < 0.01 {
+        return;
+    }
+
+    // Walk along the arc in dash/gap pattern
+    let dash = GHOST_DASH_LENGTH * scale;
+    let gap = GHOST_GAP_LENGTH * scale;
+
+    let mut dist = 0.0;
+    while dist < arc_len {
+        let end_dist = (dist + dash).min(arc_len);
+
+        let a1 = from_angle + total_angle * (dist / arc_len);
+        let a2 = from_angle + total_angle * (end_dist / arc_len);
+
+        // Sub-segments for smoothness
+        let arc_piece = (a2 - a1).abs();
+        let subs = ((arc_piece * arc_radius / (5.0 * scale)).ceil() as usize).max(1);
+
+        for i in 0..subs {
+            let t0 = a1 + (a2 - a1) * (i as f32 / subs as f32);
+            let t1 = a1 + (a2 - a1) * ((i + 1) as f32 / subs as f32);
+            data.lines.push(LineInstance::new(
+                (center.0 + arc_radius * t0.cos(), center.1 + arc_radius * t0.sin()),
+                (center.0 + arc_radius * t1.cos(), center.1 + arc_radius * t1.sin()),
+                w,
+                COLOR_GHOST,
+            ));
+        }
+
+        dist = end_dist + gap;
+    }
+
+    // Arrowhead at the end of the arc
+    let head_size = GHOST_ARROWHEAD_SIZE * scale;
+    let end_angle = to_angle;
+    let tip = (center.0 + arc_radius * end_angle.cos(), center.1 + arc_radius * end_angle.sin());
+
+    // Tangent direction at the arc end
+    let tangent_dir = if total_angle > 0.0 {
+        (-end_angle.sin(), end_angle.cos())
+    } else {
+        (end_angle.sin(), -end_angle.cos())
+    };
+
+    let perp = (-tangent_dir.1, tangent_dir.0);
+    let left = (
+        tip.0 - tangent_dir.0 * head_size + perp.0 * head_size * 0.5,
+        tip.1 - tangent_dir.1 * head_size + perp.1 * head_size * 0.5,
+    );
+    let right = (
+        tip.0 - tangent_dir.0 * head_size - perp.0 * head_size * 0.5,
+        tip.1 - tangent_dir.1 * head_size - perp.1 * head_size * 0.5,
+    );
+    let w_arrow = GHOST_ARROW_WIDTH * scale;
+    data.lines.push(LineInstance::new(left, tip, w_arrow, COLOR_GHOST_ARROW));
+    data.lines.push(LineInstance::new(right, tip, w_arrow, COLOR_GHOST_ARROW));
+}
+
+/// Hit test ghost preview center handles.
+/// `ghost_targets` is a list of (dest_center, init_pos, init_rot) for each target.
+/// Returns GhostTransform for the hit target, or None.
+pub fn hit_test_ghost(
+    ghost_targets: &[((f32, f32), [f32; 2], f32)],
+    mouse: (f32, f32),
+    zoom: f32,
+) -> Option<GhostTransform> {
+    let scale = 1.0 / zoom;
+    let tol = constants::HIT_TOLERANCE * scale;
+    let handle_size = constants::CENTER_HANDLE_SIZE * scale * 0.8;
+
+    for &(center, init_pos, init_rot) in ghost_targets {
+        if dist(mouse, center) <= handle_size / 2.0 + tol {
+            return Some(GhostTransform {
+                center,
+                init_pos,
+                init_rot,
+            });
+        }
+    }
+    None
+}
+
+/// Apply drag delta to ghost transform.
+pub fn apply_ghost_transform(
+    orig: &GhostTransform,
+    delta: (f32, f32),
+    snap: bool,
+) -> GhostTransform {
+    let new_center = (orig.center.0 + delta.0, orig.center.1 + delta.1);
+    let result_center = if snap {
+        ((new_center.0 / 0.1).round() * 0.1, (new_center.1 / 0.1).round() * 0.1)
+    } else {
+        new_center
+    };
+    GhostTransform {
+        center: result_center,
+        init_pos: orig.init_pos,
+        init_rot: orig.init_rot,
+    }
 }

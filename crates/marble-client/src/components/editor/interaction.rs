@@ -29,6 +29,10 @@ pub enum GizmoHandle {
     LineStart,
     LineEnd,
     LineMoveFree,
+    // Pivot handle (for PivotRotate keyframe)
+    PivotPoint,
+    // Ghost handle (for ghost preview dragging)
+    GhostMove,
 }
 
 impl GizmoHandle {
@@ -61,6 +65,14 @@ impl GizmoHandle {
         matches!(self,
             GizmoHandle::LineStart | GizmoHandle::LineEnd | GizmoHandle::LineMoveFree
         )
+    }
+
+    pub fn is_pivot(&self) -> bool {
+        matches!(self, GizmoHandle::PivotPoint)
+    }
+
+    pub fn is_ghost(&self) -> bool {
+        matches!(self, GizmoHandle::GhostMove)
     }
 }
 
@@ -108,6 +120,20 @@ impl LineTransform {
     }
 }
 
+/// Pivot point transform data (single point for PivotRotate keyframe).
+#[derive(Debug, Clone, Copy)]
+pub struct PivotTransform {
+    pub point: (f32, f32),
+}
+
+/// Ghost preview transform data (for dragging ghost destination).
+#[derive(Debug, Clone, Copy)]
+pub struct GhostTransform {
+    pub center: (f32, f32),
+    pub init_pos: [f32; 2],
+    pub init_rot: f32,
+}
+
 /// Editor interaction state.
 #[derive(Debug, Clone)]
 pub struct EditorInteractionState {
@@ -123,6 +149,8 @@ pub struct EditorInteractionState {
     pub original_transform: Option<ObjectTransform>,
     pub original_bezier_transform: Option<BezierTransform>,
     pub original_line_transform: Option<LineTransform>,
+    pub original_pivot_transform: Option<PivotTransform>,
+    pub original_ghost_transform: Option<GhostTransform>,
 
     pub shift_held: bool,
     pub ctrl_held: bool,
@@ -148,6 +176,8 @@ impl EditorInteractionState {
             original_transform: None,
             original_bezier_transform: None,
             original_line_transform: None,
+            original_pivot_transform: None,
+            original_ghost_transform: None,
             shift_held: false,
             ctrl_held: false,
             alt_held: false,
@@ -172,6 +202,8 @@ impl EditorInteractionState {
         self.original_transform = Some(transform);
         self.original_bezier_transform = None;
         self.original_line_transform = None;
+        self.original_pivot_transform = None;
+        self.original_ghost_transform = None;
     }
 
     pub fn start_bezier_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: BezierTransform) {
@@ -180,6 +212,8 @@ impl EditorInteractionState {
         self.original_transform = None;
         self.original_bezier_transform = Some(transform);
         self.original_line_transform = None;
+        self.original_pivot_transform = None;
+        self.original_ghost_transform = None;
     }
 
     pub fn start_line_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: LineTransform) {
@@ -188,6 +222,28 @@ impl EditorInteractionState {
         self.original_transform = None;
         self.original_bezier_transform = None;
         self.original_line_transform = Some(transform);
+        self.original_pivot_transform = None;
+        self.original_ghost_transform = None;
+    }
+
+    pub fn start_pivot_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: PivotTransform) {
+        self.active_handle = Some(handle);
+        self.drag_start_world = Some(world_pos);
+        self.original_transform = None;
+        self.original_bezier_transform = None;
+        self.original_line_transform = None;
+        self.original_pivot_transform = Some(transform);
+        self.original_ghost_transform = None;
+    }
+
+    pub fn start_ghost_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: GhostTransform) {
+        self.active_handle = Some(handle);
+        self.drag_start_world = Some(world_pos);
+        self.original_transform = None;
+        self.original_bezier_transform = None;
+        self.original_line_transform = None;
+        self.original_pivot_transform = None;
+        self.original_ghost_transform = Some(transform);
     }
 
     pub fn end_drag(&mut self) {
@@ -196,6 +252,8 @@ impl EditorInteractionState {
         self.original_transform = None;
         self.original_bezier_transform = None;
         self.original_line_transform = None;
+        self.original_pivot_transform = None;
+        self.original_ghost_transform = None;
     }
 
     pub fn cancel_drag(&mut self) {

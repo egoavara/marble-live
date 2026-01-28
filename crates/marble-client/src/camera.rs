@@ -20,8 +20,8 @@ pub enum CameraMode {
     Overview,
 }
 
-/// Minimum y-distance margin to switch leader (prevents flickering)
-const LEADER_SWITCH_MARGIN: f32 = 30.0;
+/// Minimum y-distance margin to switch leader (prevents flickering, in meters)
+const LEADER_SWITCH_MARGIN: f32 = 0.3;
 
 /// Cooldown frames after leader switch (60 frames = 1 second at 60fps)
 const LEADER_SWITCH_COOLDOWN: u32 = 60;
@@ -53,7 +53,7 @@ pub struct CameraState {
 
 impl Default for CameraState {
     fn default() -> Self {
-        Self::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)))
+        Self::new((800.0, 600.0), ((0.0, 0.0), (8.0, 6.0)))
     }
 }
 
@@ -162,8 +162,8 @@ impl CameraState {
                 zoom_x.min(zoom_y)
             }
             CameraMode::FollowMe | CameraMode::FollowLeader => {
-                // Closer zoom when following
-                1.5
+                // Closer zoom when following (meters → pixels)
+                150.0
             }
         };
 
@@ -227,7 +227,7 @@ impl CameraState {
                 // If we have a current leader, find the marble closest to it
                 if let Some(current) = self.current_leader_pos {
                     let dist_sq = (pos.0 - current.0).powi(2) + (pos.1 - current.1).powi(2);
-                    if dist_sq < 2500.0 {
+                    if dist_sq < 0.25 {
                         // Within 50 units
                         if pos.1 > current_tracked_y {
                             current_tracked_y = pos.1;

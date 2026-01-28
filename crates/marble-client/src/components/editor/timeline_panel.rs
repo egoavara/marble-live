@@ -2,7 +2,9 @@
 
 use marble_core::dsl::NumberOrExpr;
 use marble_core::map::{Keyframe, KeyframeSequence};
+use wasm_bindgen::JsCast;
 use yew::prelude::*;
+use yew::{create_portal, Html};
 use yew_icons::{Icon, IconData};
 
 /// Props for the TimelinePanel component.
@@ -39,11 +41,28 @@ pub struct TimelinePanelProps {
 pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let editing_targets = use_state(|| false);
     let new_target_input = use_state(|| String::new());
-    // Index where to insert new keyframe (None = no menu shown)
-    let insert_at: UseStateHandle<Option<usize>> = use_state(|| None);
+    // (index, x, y) where to insert new keyframe and show menu (None = no menu shown)
+    let insert_menu: UseStateHandle<Option<(usize, f64, f64)>> = use_state(|| None);
     // Drag state for reordering keyframes
     let dragging_index: UseStateHandle<Option<usize>> = use_state(|| None);
     let drag_over_index: UseStateHandle<Option<usize>> = use_state(|| None);
+
+    // Portal host element in document.body for the insert menu
+    // (bypasses all ancestor overflow/transform clipping)
+    let portal_host: UseStateHandle<Option<web_sys::Element>> = use_state(|| None);
+    {
+        let portal_host = portal_host.clone();
+        use_effect_with((), move |_| {
+            let doc = web_sys::window().unwrap().document().unwrap();
+            let el = doc.create_element("div").unwrap();
+            el.set_attribute("class", "timeline-insert-menu-portal").ok();
+            doc.body().unwrap().append_child(&el).ok();
+            portal_host.set(Some(el.clone()));
+            move || {
+                el.remove();
+            }
+        });
+    }
 
     let toggle_editing_targets = {
         let editing_targets = editing_targets.clone();
@@ -123,38 +142,49 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
 
     // Close insert menu when clicking outside
     let close_insert_menu = {
-        let insert_at = insert_at.clone();
+        let insert_menu = insert_menu.clone();
         Callback::from(move |_: MouseEvent| {
-            insert_at.set(None);
+            web_sys::console::log_1(&format!("[insert-menu] close_insert_menu fired, current state: {:?}", *insert_menu).into());
+            insert_menu.set(None);
         })
     };
 
-    // Helper to render insert button
-    let render_insert_btn = |idx: usize| {
-        let is_menu_open = **&insert_at == Some(idx);
-        let insert_at_clone = insert_at.clone();
+    // Helper to create insert callback for fixed menu
+    let make_insert_at_menu = |kf: Keyframe| {
         let on_update_sequence = props.on_update_sequence.clone();
         let sequence = props.sequence.clone();
-
-        let on_plus_click = {
-            let insert_at = insert_at_clone.clone();
-            Callback::from(move |e: MouseEvent| {
-                e.stop_propagation();
-                insert_at.set(Some(idx));
-            })
-        };
-
-        let make_insert = |kf: Keyframe| {
-            let on_update_sequence = on_update_sequence.clone();
-            let sequence = sequence.clone();
-            let insert_at = insert_at_clone.clone();
-            Callback::from(move |e: MouseEvent| {
-                e.stop_propagation();
+        let insert_menu = insert_menu.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.stop_propagation();
+            if let Some((idx, _, _)) = *insert_menu {
                 if let Some(mut seq) = sequence.clone() {
                     seq.keyframes.insert(idx, kf.clone());
                     on_update_sequence.emit(seq);
                 }
-                insert_at.set(None);
+            }
+            insert_menu.set(None);
+        })
+    };
+
+    // Helper to render insert button (menu is rendered separately at panel level)
+    let render_insert_btn = |idx: usize| {
+        let is_menu_open = (*insert_menu).map(|(i, _, _)| i) == Some(idx);
+        let insert_menu = insert_menu.clone();
+
+        let on_plus_click = {
+            let insert_menu = insert_menu.clone();
+            Callback::from(move |e: MouseEvent| {
+                e.stop_propagation();
+                if let Some(target) = e.target() {
+                    if let Some(el) = target.dyn_ref::<web_sys::Element>() {
+                        let btn = el.closest(".timeline-insert-btn").ok().flatten().unwrap_or_else(|| el.clone());
+                        let rect = btn.get_bounding_client_rect();
+                        // Viewport-relative coordinates (portal renders in document.body)
+                        let x = rect.left() + rect.width() / 2.0;
+                        let y = rect.top() - 4.0;
+                        insert_menu.set(Some((idx, x, y)));
+                    }
+                }
             })
         };
 
@@ -167,40 +197,54 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 >
                     <Icon data={IconData::LUCIDE_PLUS} width="12px" height="12px" />
                 </button>
-                if is_menu_open {
-                    <div class="timeline-insert-menu">
-                        <button class="timeline-insert-menu-item loop-start" onclick={make_insert(Keyframe::LoopStart { count: None })} title="Loop Start">
-                            <Icon data={IconData::LUCIDE_REPEAT} width="12px" height="12px" />
-                        </button>
-                        <button class="timeline-insert-menu-item loop-end" onclick={make_insert(Keyframe::LoopEnd)} title="Loop End">
-                            <Icon data={IconData::LUCIDE_CORNER_DOWN_LEFT} width="12px" height="12px" />
-                        </button>
-                        <button class="timeline-insert-menu-item delay" onclick={make_insert(Keyframe::Delay { duration: NumberOrExpr::Number(1.0) })} title="Delay">
-                            <Icon data={IconData::LUCIDE_TIMER} width="12px" height="12px" />
-                        </button>
-                        <button class="timeline-insert-menu-item apply" onclick={make_insert(Keyframe::Apply {
-                            translation: None,
-                            rotation: None,
-                            duration: 0.5,
-                            easing: Default::default(),
-                        })} title="Apply Transform">
-                            <Icon data={IconData::LUCIDE_MOVE} width="12px" height="12px" />
-                        </button>
-                        <button class="timeline-insert-menu-item pivot" onclick={make_insert(Keyframe::PivotRotate {
-                            pivot: [0.0, 0.0],
-                            angle: 30.0,
-                            duration: 0.5,
-                            easing: Default::default(),
-                        })} title="Pivot Rotate">
-                            <Icon data={IconData::LUCIDE_ROTATE_CW} width="12px" height="12px" />
-                        </button>
-                    </div>
-                }
             </div>
         }
     };
 
+    // Render the insert menu via portal into document.body
+    let portal_menu = if let (Some(host), Some((_, menu_x, menu_y))) = ((*portal_host).clone(), *insert_menu) {
+        create_portal(
+            html! {
+                <div
+                    class="timeline-insert-menu-fixed"
+                    style={format!("left: {}px; top: {}px;", menu_x, menu_y)}
+                    onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}
+                >
+                    <button class="timeline-insert-menu-item loop-start" onclick={make_insert_at_menu(Keyframe::LoopStart { count: None })} title="Loop Start">
+                        <Icon data={IconData::LUCIDE_REPEAT} width="12px" height="12px" />
+                    </button>
+                    <button class="timeline-insert-menu-item loop-end" onclick={make_insert_at_menu(Keyframe::LoopEnd)} title="Loop End">
+                        <Icon data={IconData::LUCIDE_CORNER_DOWN_LEFT} width="12px" height="12px" />
+                    </button>
+                    <button class="timeline-insert-menu-item delay" onclick={make_insert_at_menu(Keyframe::Delay { duration: NumberOrExpr::Number(1.0) })} title="Delay">
+                        <Icon data={IconData::LUCIDE_TIMER} width="12px" height="12px" />
+                    </button>
+                    <button class="timeline-insert-menu-item apply" onclick={make_insert_at_menu(Keyframe::Apply {
+                        translation: None,
+                        rotation: None,
+                        duration: 0.5,
+                        easing: Default::default(),
+                    })} title="Apply Transform">
+                        <Icon data={IconData::LUCIDE_MOVE} width="12px" height="12px" />
+                    </button>
+                    <button class="timeline-insert-menu-item pivot" onclick={make_insert_at_menu(Keyframe::PivotRotate {
+                        pivot: [0.0, 0.0],
+                        angle: 30.0,
+                        duration: 0.5,
+                        easing: Default::default(),
+                    })} title="Pivot Rotate">
+                        <Icon data={IconData::LUCIDE_ROTATE_CW} width="12px" height="12px" />
+                    </button>
+                </div>
+            },
+            host.into(),
+        )
+    } else {
+        Html::default()
+    };
+
     html! {
+        <>
         <div class="timeline-panel" onclick={close_insert_menu}>
             if let Some(seq) = &props.sequence {
                 // Sequence header
@@ -431,5 +475,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 </div>
             }
         </div>
+        {portal_menu}
+        </>
     }
 }
