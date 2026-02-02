@@ -10,8 +10,9 @@ use std::hash::{Hash, Hasher};
 pub const PHYSICS_DT: f32 = 1.0 / 60.0;
 
 /// Default gravity vector (downward, in m/s²).
+/// Uses standard math coordinate system: Y+ is up, so gravity is negative.
 pub fn default_gravity() -> Vector {
-    Vector::new(0.0, 9.81)
+    Vector::new(0.0, -9.81)
 }
 
 /// Physics world containing all `Rapier2D` components for deterministic simulation.

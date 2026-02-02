@@ -1,0 +1,107 @@
+@use 'variables' as *;
+@use 'mixins' as *;
+@use 'animations' as *;
+
+// ===== 모달 오버레이 =====
+
+.modal-overlay {
+    @include fixed-fill;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: $z-modal;
+}
+
+// ===== 기본 모달 =====
+
+.modal {
+    background: $color-bg-primary;
+    border-radius: $radius-xl;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: $shadow-lg;
+    overflow: hidden;
+}
+
+.modal-content {
+    padding: $spacing-xl;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: $spacing-lg $spacing-xl;
+    background: $color-bg-secondary;
+    border-bottom: 1px solid $color-border-primary;
+
+    h2 {
+        margin: 0;
+        font-size: $font-size-lg;
+        color: $color-text-primary;
+    }
+}
+
+.modal-header-no-close {
+    justify-content: center;
+}
+
+.modal-header-close-only {
+    justify-content: flex-end;
+}
+
+.modal-close-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: $color-text-muted;
+    font-size: $font-size-xl;
+    cursor: pointer;
+    border-radius: $radius-sm;
+    transition: all $transition-normal;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: $color-text-primary;
+    }
+}
+
+// ===== 설정 모달 =====
+
+.settings-modal {
+    padding: 0;
+
+    .settings-form {
+        // modal-content에서 패딩 제공
+    }
+}
+
+// ===== 환영 모달 =====
+
+.welcome-modal {
+    padding: 0;
+
+    .modal-header {
+        background: transparent;
+        border-bottom: none;
+        padding-bottom: 0;
+
+        h2 {
+            margin: 0;
+            font-size: 1.75rem;
+            @include gradient-text;
+        }
+    }
+
+    .modal-content {
+        padding-top: $spacing-sm;
+    }
+}
+
+.welcome-subtitle {
+    color: $color-text-muted;
+    text-align: center;
+    margin-bottom: $spacing-xl;
+}

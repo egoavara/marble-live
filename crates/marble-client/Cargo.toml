@@ -55,5 +55,5 @@ rand.workspace = true
 getrandom.workspace = true
 console_error_panic_hook.workspace = true
 
-wgpu.workspace = true
-bytemuck.workspace = true
+# wgpu and bytemuck removed - Bevy handles rendering now
+serde-wasm-bindgen.workspace = true

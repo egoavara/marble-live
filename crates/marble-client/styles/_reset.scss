@@ -1,0 +1,183 @@
+@use 'variables' as *;
+
+// ===== 기본 리셋 및 레이아웃 =====
+
+// 페이지 기본 스타일
+.page {
+    min-height: 100vh;
+    padding: $spacing-2xl;
+}
+
+.page-header {
+    text-align: center;
+    margin-bottom: $spacing-xl;
+
+    h1 {
+        font-size: $font-size-xl;
+        color: $color-text-muted;
+    }
+}
+
+// ===== 앱 레이아웃 =====
+
+.app-layout {
+    position: relative;
+    min-height: 100vh;
+    width: 100%;
+}
+
+.app-main {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding: $spacing-lg;
+}
+
+.app-header {
+    text-align: center;
+    margin-bottom: $spacing-xl;
+
+    h1 {
+        font-size: 2.5rem;
+        margin-bottom: $spacing-sm;
+        background: $gradient-accent;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .subtitle {
+        color: $color-text-muted;
+        font-size: $font-size-md;
+    }
+}
+
+// ===== 게임 영역 =====
+
+.game-area {
+    display: flex;
+    justify-content: center;
+    gap: $spacing-xl;
+    flex-wrap: wrap;
+}
+
+.canvas-container {
+    border: 2px solid $color-border-primary;
+    border-radius: $radius-lg;
+    overflow: hidden;
+    box-shadow: $shadow-md;
+}
+
+#game-canvas {
+    display: block;
+    background: $color-bg-primary;
+}
+
+// ===== 사이드바 =====
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-lg;
+    min-width: 200px;
+}
+
+// ===== 컨트롤 =====
+
+.controls {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+}
+
+// ===== 상단 고정 요소 =====
+
+.top-left-logo {
+    position: fixed;
+    top: $spacing-lg;
+    left: $spacing-lg;
+    z-index: $z-header;
+}
+
+.top-right-menu {
+    position: fixed;
+    top: $spacing-lg;
+    right: $spacing-lg;
+    z-index: $z-header;
+}
+
+// ===== 레거시 헤더 (디버그 페이지용) =====
+
+.app-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: $spacing-md $spacing-xl;
+    background: $color-bg-primary;
+    border-bottom: 1px solid $color-border-primary;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: $spacing-lg;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+}
+
+.header-logo {
+    font-size: $font-size-lg;
+    font-weight: $font-weight-bold;
+    color: $color-text-primary;
+    text-decoration: none;
+    background: $gradient-accent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.header-btn {
+    padding: $spacing-sm $spacing-lg;
+    font-size: $font-size-base;
+    font-weight: $font-weight-normal;
+    color: $color-text-primary;
+    background: transparent;
+    border: 1px solid $color-border-secondary;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover {
+        background: $color-border-primary;
+        border-color: $color-text-dim;
+    }
+}
+
+// ===== 반응형 =====
+
+@media (max-width: $breakpoint-lg) {
+    .game-area {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .sidebar {
+        width: 100%;
+        max-width: 400px;
+    }
+
+    .controls {
+        flex-direction: row;
+        justify-content: center;
+    }
+}

@@ -52,6 +52,7 @@ pub fn sequence_list(props: &SequenceListProps) -> Html {
                     target_ids: vec![],
                     keyframes: vec![],
                     autoplay: true,
+                    property_managed: false,
                 });
                 new_sequence_name.set(String::new());
                 show_add_modal.set(false);
@@ -59,15 +60,24 @@ pub fn sequence_list(props: &SequenceListProps) -> Html {
         })
     };
 
+    // Filter out property_managed sequences (auto-generated from roll properties)
+    let visible_sequences: Vec<_> = props
+        .sequences
+        .iter()
+        .enumerate()
+        .filter(|(_, seq)| !seq.property_managed)
+        .collect();
+
     html! {
         <div class="sequence-list">
             <div class="sequence-list-items">
-                {for props.sequences.iter().enumerate().map(|(i, seq)| {
+                {for visible_sequences.iter().map(|(i, seq)| {
+                    let i = *i;
                     let on_select = props.on_select.clone();
                     let on_delete = props.on_delete.clone();
                     let on_update = props.on_update.clone();
                     let is_selected = props.selected_index == Some(i);
-                    let sequence = seq.clone();
+                    let sequence = (*seq).clone();
 
                     let on_item_click = {
                         let on_select = on_select.clone();
@@ -136,7 +146,7 @@ pub fn sequence_list(props: &SequenceListProps) -> Html {
                         </div>
                     }
                 })}
-                if props.sequences.is_empty() {
+                if visible_sequences.is_empty() {
                     <div class="sequence-list-empty">
                         {"No sequences. Click + to add."}
                     </div>

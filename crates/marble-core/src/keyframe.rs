@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::dsl::GameContext;
-use crate::map::{EasingType, Keyframe, KeyframeSequence};
+use crate::map::{EasingType, Keyframe, KeyframeSequence, PivotMode, RollDirection};
 
 use serde::{Deserialize, Serialize};
 
@@ -241,6 +241,7 @@ impl KeyframeExecutor {
                 }
                 Keyframe::PivotRotate {
                     pivot,
+                    pivot_mode,
                     angle,
                     duration,
                     easing,
@@ -251,11 +252,24 @@ impl KeyframeExecutor {
                         let initial = initial_transforms.get(target_id);
 
                         if let (Some(&(cur_pos, cur_rot)), Some(&(init_pos, init_rot))) = (current, initial) {
-                            // Calculate the initial offset from pivot (using initial position)
-                            let offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
-
-                            // Target angle is initial rotation + angle offset
-                            let end_rotation = init_rot + angle.to_radians();
+                            // Calculate world pivot and offset based on pivot mode
+                            let (world_pivot, offset, end_rotation) = match pivot_mode {
+                                PivotMode::Absolute => {
+                                    // Absolute mode: pivot is in world coordinates
+                                    // angle is relative to initial rotation (existing behavior)
+                                    let offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                                    let end_rot = init_rot + angle.to_radians();
+                                    (*pivot, offset, end_rot)
+                                }
+                                PivotMode::Relative => {
+                                    // Relative mode: pivot is offset from current position
+                                    // angle is relative to current rotation
+                                    let world_pivot = [cur_pos[0] + pivot[0], cur_pos[1] + pivot[1]];
+                                    let offset = [-pivot[0], -pivot[1]];
+                                    let end_rot = cur_rot + angle.to_radians();
+                                    (world_pivot, offset, end_rot)
+                                }
+                            };
 
                             self.active_animations.push(ActiveAnimation {
                                 target_id: target_id.clone(),
@@ -266,13 +280,31 @@ impl KeyframeExecutor {
                                 duration: *duration,
                                 elapsed: 0.0,
                                 easing: *easing,
-                                pivot: Some(*pivot),
+                                pivot: Some(world_pivot),
                                 initial_pivot_offset: Some(offset),
                             });
                         }
                     }
                     self.current_index += 1;
                     break;
+                }
+                Keyframe::ContinuousRotate { speed, direction } => {
+                    // Continuous rotation - apply rotation delta each frame.
+                    // Must break after applying to prevent infinite loop within a single frame.
+                    let direction_mult = match direction {
+                        RollDirection::Clockwise => 1.0,
+                        RollDirection::Counterclockwise => -1.0,
+                    };
+
+                    for target_id in &sequence.target_ids {
+                        if let Some(&(cur_pos, cur_rot)) = current_positions.get(target_id) {
+                            let delta_rot = speed.to_radians() * dt * direction_mult;
+                            updates.push((target_id.clone(), cur_pos, cur_rot + delta_rot));
+                        }
+                    }
+
+                    self.current_index += 1;
+                    break; // Process LoopEnd on next frame to avoid infinite loop
                 }
             }
         }
@@ -309,6 +341,125 @@ impl KeyframeExecutor {
         self.delay_remaining = 0.0;
         self.active_animations.clear();
         self.finished = false;
+    }
+
+    /// Fast-forwards the executor to a specific keyframe index.
+    ///
+    /// This method calculates the cumulative transform state at the given keyframe index
+    /// without animating through all intermediate states. It processes keyframes 0 through
+    /// `target_index` instantly, computing the final position/rotation for each target.
+    ///
+    /// After calling this method, the executor is positioned at `target_index` and ready
+    /// to begin smooth animation of that keyframe.
+    ///
+    /// Returns the calculated transforms at that state: (object_id -> (position, rotation)).
+    pub fn fast_forward_to(
+        &mut self,
+        target_index: usize,
+        sequences: &[KeyframeSequence],
+        initial_transforms: &HashMap<String, ([f32; 2], f32)>,
+    ) -> HashMap<String, ([f32; 2], f32)> {
+        // Reset executor state
+        self.reset();
+
+        // Find the sequence
+        let Some(sequence) = sequences.iter().find(|s| s.name == self.sequence_name) else {
+            return initial_transforms.clone();
+        };
+
+        // Initialize state with initial transforms for all targets
+        let mut state: HashMap<String, ([f32; 2], f32)> = HashMap::new();
+        for target_id in &sequence.target_ids {
+            if let Some(&(pos, rot)) = initial_transforms.get(target_id) {
+                state.insert(target_id.clone(), (pos, rot));
+            }
+        }
+
+        // Process keyframes 0..target_index to calculate cumulative state
+        // (without animation - instant application)
+        for (idx, keyframe) in sequence.keyframes.iter().enumerate() {
+            if idx > target_index {
+                break;
+            }
+
+            match keyframe {
+                Keyframe::Apply {
+                    translation,
+                    rotation,
+                    ..
+                } => {
+                    // Apply translation and rotation to all targets
+                    for target_id in &sequence.target_ids {
+                        if let Some(&(init_pos, init_rot)) = initial_transforms.get(target_id) {
+                            if let Some((pos, rot)) = state.get_mut(target_id) {
+                                if let Some(t) = translation {
+                                    // Translation is relative to initial position
+                                    pos[0] = init_pos[0] + t[0];
+                                    pos[1] = init_pos[1] + t[1];
+                                }
+                                if let Some(r) = rotation {
+                                    // Rotation is relative to initial rotation
+                                    *rot = init_rot + r.to_radians();
+                                }
+                            }
+                        }
+                    }
+                }
+                Keyframe::PivotRotate { pivot, pivot_mode, angle, .. } => {
+                    // Apply pivot rotation to all targets
+                    for target_id in &sequence.target_ids {
+                        if let Some(&(init_pos, init_rot)) = initial_transforms.get(target_id) {
+                            // Get current state (result of previous keyframes) or use initial
+                            let (cur_pos, _cur_rot) = state.get(target_id)
+                                .copied()
+                                .unwrap_or((init_pos, init_rot));
+
+                            // Calculate based on pivot mode
+                            let (world_pivot, offset, final_rot) = match pivot_mode {
+                                PivotMode::Absolute => {
+                                    // Absolute mode: use initial position for offset calculation
+                                    let offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                                    let final_rot = init_rot + angle.to_radians();
+                                    (*pivot, offset, final_rot)
+                                }
+                                PivotMode::Relative => {
+                                    // Relative mode: use current position
+                                    let world_pivot = [cur_pos[0] + pivot[0], cur_pos[1] + pivot[1]];
+                                    let offset = [-pivot[0], -pivot[1]];
+                                    // For relative mode, get current rotation from state
+                                    let cur_rot = state.get(target_id)
+                                        .map(|(_, r)| *r)
+                                        .unwrap_or(init_rot);
+                                    let final_rot = cur_rot + angle.to_radians();
+                                    (world_pivot, offset, final_rot)
+                                }
+                            };
+
+                            // Apply rotation to offset
+                            let (sin, cos) = final_rot.sin_cos();
+                            let rotated_x = offset[0] * cos - offset[1] * sin;
+                            let rotated_y = offset[0] * sin + offset[1] * cos;
+
+                            if let Some((pos, rot)) = state.get_mut(target_id) {
+                                pos[0] = world_pivot[0] + rotated_x;
+                                pos[1] = world_pivot[1] + rotated_y;
+                                *rot = final_rot;
+                            }
+                        }
+                    }
+                }
+                // ContinuousRotate, LoopStart, LoopEnd, Delay don't affect static preview state
+                Keyframe::ContinuousRotate { .. }
+                | Keyframe::LoopStart { .. }
+                | Keyframe::LoopEnd
+                | Keyframe::Delay { .. } => {}
+            }
+        }
+
+        // Set current_index to target_index so executor starts animation from there
+        self.current_index = target_index;
+
+        state
     }
 }
 

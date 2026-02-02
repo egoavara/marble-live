@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use cel_interpreter::{Context, Value};
 
@@ -24,5 +24,5 @@ impl ContextKeyframe {
         );
     }
 
-    pub fn setup_function<'b>(&self, ctx: &'b mut Context<'b>) {}
+    pub fn setup_function<'b>(&self, _ctx: &'b mut Context<'b>) {}
 }

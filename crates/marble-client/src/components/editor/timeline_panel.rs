@@ -34,6 +34,9 @@ pub struct TimelinePanelProps {
     /// Current keyframe index being executed during preview
     #[prop_or_default]
     pub preview_keyframe_index: Option<usize>,
+    /// Deselect the entire keyframe sequence (exit keyframe edit mode)
+    #[prop_or_default]
+    pub on_deselect_sequence: Callback<()>,
 }
 
 /// Timeline panel component for editing keyframe sequences.
@@ -93,6 +96,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
             }
             Keyframe::PivotRotate { duration, .. } => {
                 ("pivot", IconData::LUCIDE_ROTATE_CW, format!("{:.1}s", duration), false)
+            }
+            Keyframe::ContinuousRotate { speed, .. } => {
+                ("continuous", IconData::LUCIDE_REFRESH_CW, format!("{:.0}°/s", speed), false)
             }
         }
     }
@@ -229,6 +235,7 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                     </button>
                     <button class="timeline-insert-menu-item pivot" onclick={make_insert_at_menu(Keyframe::PivotRotate {
                         pivot: [0.0, 0.0],
+                        pivot_mode: Default::default(),
                         angle: 30.0,
                         duration: 0.5,
                         easing: Default::default(),
@@ -275,6 +282,19 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                                 <Icon data={IconData::LUCIDE_PLAY} width="14px" height="14px" />
                                 {"Play"}
                             }
+                        </button>
+                        // Close button to exit keyframe edit mode (deselect sequence)
+                        <button
+                            class="timeline-deselect-btn"
+                            onclick={{
+                                let on_deselect = props.on_deselect_sequence.clone();
+                                Callback::from(move |_: MouseEvent| {
+                                    on_deselect.emit(());
+                                })
+                            }}
+                            title="Close keyframe editor"
+                        >
+                            <Icon data={IconData::LUCIDE_X} width="14px" height="14px" />
                         </button>
                     </div>
                     // Targets display/edit

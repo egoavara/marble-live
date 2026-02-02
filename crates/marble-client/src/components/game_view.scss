@@ -1,0 +1,236 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+@use '../../styles/animations' as *;
+
+// ===== GameView =====
+
+.game-view {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+
+    &.fullscreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background: $color-bg-tertiary;
+
+        .game-canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            background: $color-bg-primary;
+            border-radius: $radius-lg;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+    }
+}
+
+// ===== Game overlays =====
+
+.game-overlay {
+    @include absolute-fill;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: $z-overlay;
+    pointer-events: none;
+
+    > * {
+        pointer-events: auto;
+    }
+}
+
+// ===== Start overlay =====
+
+.start-overlay {
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.start-game-btn {
+    padding: 1.25rem 3rem;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-bold;
+    color: $color-text-primary;
+    background: $gradient-success;
+    border: none;
+    border-radius: $radius-xl;
+    cursor: pointer;
+    transition: all $transition-slow;
+    box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
+
+    &:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 30px rgba(76, 175, 80, 0.5);
+    }
+}
+
+.start-hint {
+    margin-top: $spacing-lg;
+    font-size: $font-size-md;
+    color: $color-text-muted;
+}
+
+// ===== Spawn controls =====
+
+.spawn-controls {
+    position: absolute;
+    bottom: $spacing-2xl;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: $z-header;
+}
+
+.spawn-btn {
+    padding: $spacing-md $spacing-2xl;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-bold;
+    color: $color-text-primary;
+    background: linear-gradient(135deg, $color-info 0%, #1976D2 100%);
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all $transition-slow;
+    box-shadow: 0 4px 20px rgba(33, 150, 243, 0.4);
+
+    &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(33, 150, 243, 0.5);
+    }
+
+    &:active {
+        transform: translateY(0);
+    }
+}
+
+// ===== Waiting overlay =====
+
+.waiting-overlay {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.waiting-text {
+    font-size: $font-size-lg;
+    color: $color-text-muted;
+    animation: pulse 2s infinite;
+}
+
+// ===== Countdown overlay =====
+
+.countdown-overlay {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.countdown-number {
+    font-size: 8rem;
+    font-weight: $font-weight-black;
+    color: $color-text-primary;
+    text-shadow:
+        0 0 20px rgba(255, 255, 255, 0.5),
+        0 0 40px rgba(102, 126, 234, 0.5);
+    animation: countdownPulse 1s ease-in-out infinite;
+}
+
+// ===== Finished overlay =====
+
+.finished-overlay {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+.finished-title {
+    font-size: $font-size-3xl;
+    font-weight: $font-weight-bold;
+    color: $color-gold;
+    margin-bottom: $spacing-2xl;
+    text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+}
+
+.restart-btn {
+    padding: $spacing-lg 2.5rem;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+    background: $gradient-accent;
+    border: none;
+    border-radius: $radius-lg;
+    cursor: pointer;
+    transition: all $transition-slow;
+
+    &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.5);
+    }
+}
+
+// ===== Debug info =====
+
+.game-debug-info {
+    position: absolute;
+    top: $spacing-lg;
+    right: $spacing-lg;
+    padding: $spacing-sm $spacing-md;
+    font-size: $font-size-sm;
+    font-family: $font-family-mono;
+    color: $color-text-disabled;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: $radius-sm;
+    z-index: 30;
+}
+
+.game-canvas-placeholder {
+    @include absolute-fill;
+    @include flex-center;
+    background: linear-gradient(135deg, $color-bg-tertiary 0%, $color-bg-primary 100%);
+}
+
+.placeholder-text {
+    font-size: $font-size-2xl;
+    color: $color-border-primary;
+    font-weight: $font-weight-semibold;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+// ===== Camera Controls =====
+
+.camera-controls {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 4px;
+    background: $color-bg-panel;
+    padding: 4px;
+    border-radius: $radius-pill;
+    border: 1px solid $color-border-subtle;
+    backdrop-filter: blur(12px);
+    z-index: $z-floating-panel;
+    box-shadow: $shadow-lg;
+}
+
+.camera-btn {
+    @include icon-btn(36px);
+    border-radius: 50%;
+
+    &.active {
+        background: $gradient-accent;
+        color: $color-text-primary;
+        box-shadow: $shadow-sm;
+    }
+}
+
+.camera-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}

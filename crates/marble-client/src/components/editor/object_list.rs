@@ -4,7 +4,7 @@ use marble_core::map::{KeyframeSequence, MapObject, ObjectRole, Shape};
 use yew::prelude::*;
 
 use super::sequence_list::SequenceList;
-use crate::hooks::{create_default_obstacle, create_default_spawner, create_default_trigger};
+use crate::hooks::{create_default_guideline, create_default_obstacle, create_default_spawner, create_default_trigger};
 
 /// Tab selection for the object list panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -90,6 +90,15 @@ pub fn object_list(props: &ObjectListProps) -> Html {
         })
     };
 
+    let add_guideline = {
+        let on_add = props.on_add.clone();
+        let show_add_menu = show_add_menu.clone();
+        Callback::from(move |_: MouseEvent| {
+            on_add.emit(create_default_guideline());
+            show_add_menu.set(false);
+        })
+    };
+
     html! {
         <div class="object-list">
             // Tab header
@@ -140,12 +149,14 @@ pub fn object_list(props: &ObjectListProps) -> Html {
                         ObjectRole::Spawner => "role-spawner",
                         ObjectRole::Obstacle => "role-obstacle",
                         ObjectRole::Trigger => "role-trigger",
+                        ObjectRole::Guideline => "role-guideline",
                     };
 
                     let role_label = match obj.role {
                         ObjectRole::Spawner => "S",
                         ObjectRole::Obstacle => "O",
                         ObjectRole::Trigger => "T",
+                        ObjectRole::Guideline => "G",
                     };
 
                     let shape_label = match &obj.shape {
@@ -198,6 +209,10 @@ pub fn object_list(props: &ObjectListProps) -> Html {
                             <button class="add-menu-item" onclick={add_trigger}>
                                 <span class="object-role-badge role-trigger">{"T"}</span>
                                 {"Trigger"}
+                            </button>
+                            <button class="add-menu-item" onclick={add_guideline}>
+                                <span class="object-role-badge role-guideline">{"G"}</span>
+                                {"Guideline"}
                             </button>
                         </div>
                     }

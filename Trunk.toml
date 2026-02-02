@@ -1,9 +1,11 @@
 [build]
 target = "crates/marble-client/index.html"
 dist = "dist"
+minify = "on_release"
 
 [watch]
-ignore = ["target", "dist", "crates/marble-server", "crates/marble-proto", "crates/marble-core"]
+watch = ["crates/marble-client", "crates/marble-core"]
+ignore = ["target", "crates/marble-server"]
 
 [serve]
 address = "127.0.0.1"

@@ -1,13 +1,18 @@
 //! Property panel component for editing object and meta properties.
 
+use std::collections::HashMap;
+
 use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
 use marble_core::map::{
-    BumperProperties, EasingType, Keyframe, KeyframeSequence, MapMeta, MapObject, ObjectProperties,
-    ObjectRole, RouletteConfig, Shape, SpawnProperties, TriggerProperties,
+    BumperProperties, EasingType, GuidelineProperties, Keyframe, KeyframeSequence, MapMeta,
+    MapObject, ObjectProperties, ObjectRole, PivotMode, RollDirection, RouletteConfig, Shape, SpawnProperties,
+    TriggerProperties,
 };
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_icons::{Icon, IconData};
+
+use crate::hooks::{create_shape_from_cache, get_shape_center, ShapeCache};
 
 /// Helper to extract static value from NumberOrExpr
 fn get_number_static(n: &NumberOrExpr) -> Option<f32> {
@@ -41,92 +46,84 @@ pub struct PropertyPanelProps {
     /// Callback when a keyframe is updated
     #[prop_or_default]
     pub on_update_keyframe: Callback<(usize, Keyframe)>,
+    /// 오브젝트별 shape 캐시
+    #[prop_or_default]
+    pub shape_cache: HashMap<usize, ShapeCache>,
+    /// Shape 변경 전 현재 속성 캐시 콜백
+    #[prop_or_default]
+    pub on_cache_shape: Callback<(usize, Shape)>,
 }
 
-/// Property panel component.
+/// Determines the current editing context based on selection state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PropertyContext {
+    /// Keyframe is selected (highest priority)
+    Keyframe,
+    /// Object is selected
+    Object,
+    /// Nothing selected - show map metadata
+    Map,
+}
+
+impl PropertyContext {
+    /// Get the context indicator icon and label.
+    fn indicator(&self) -> (&'static str, &'static str) {
+        match self {
+            PropertyContext::Keyframe => ("\u{1F511}", "Keyframe"), // 🔑
+            PropertyContext::Object => ("\u{1F4E6}", "Object"),     // 📦
+            PropertyContext::Map => ("\u{1F5FA}", "Map"),           // 🗺️
+        }
+    }
+}
+
+/// Property panel component with context-based automatic switching.
 #[function_component(PropertyPanel)]
 pub fn property_panel(props: &PropertyPanelProps) -> Html {
-    let active_tab = use_state(|| "object".to_string());
-
-    // Auto-switch to object tab when an object is selected
-    {
-        let active_tab = active_tab.clone();
-        let selected_index = props.selected_index;
-        use_effect_with(selected_index, move |idx| {
-            if idx.is_some() {
-                active_tab.set("object".to_string());
-            }
-        });
-    }
-
-    // Auto-switch to keyframe tab when a keyframe is selected
-    {
-        let active_tab = active_tab.clone();
-        let selected_keyframe = props.selected_keyframe;
-        use_effect_with(selected_keyframe, move |kf| {
-            if kf.is_some() {
-                active_tab.set("keyframe".to_string());
-            }
-        });
-    }
-
-    let on_tab_click = {
-        let active_tab = active_tab.clone();
-        Callback::from(move |tab: String| {
-            active_tab.set(tab);
-        })
+    // Determine context based on selection state
+    // Priority: Keyframe > Object > Map
+    let context = if props.selected_keyframe.is_some() && props.sequence.is_some() {
+        PropertyContext::Keyframe
+    } else if props.selected_index.is_some() {
+        PropertyContext::Object
+    } else {
+        PropertyContext::Map
     };
 
+    let (icon, label) = context.indicator();
+
     html! {
-        <div class="property-panel">
-            <div class="property-tabs">
-                <button
-                    class={classes!("property-tab", (*active_tab == "object").then_some("active"))}
-                    onclick={{
-                        let on_tab_click = on_tab_click.clone();
-                        Callback::from(move |_: MouseEvent| on_tab_click.emit("object".to_string()))
-                    }}
-                >
-                    {"Object"}
-                </button>
-                <button
-                    class={classes!("property-tab", (*active_tab == "meta").then_some("active"))}
-                    onclick={{
-                        let on_tab_click = on_tab_click.clone();
-                        Callback::from(move |_: MouseEvent| on_tab_click.emit("meta".to_string()))
-                    }}
-                >
-                    {"Meta"}
-                </button>
-                <button
-                    class={classes!("property-tab", (*active_tab == "keyframe").then_some("active"))}
-                    onclick={{
-                        let on_tab_click = on_tab_click.clone();
-                        Callback::from(move |_: MouseEvent| on_tab_click.emit("keyframe".to_string()))
-                    }}
-                >
-                    {"KF"}
-                </button>
+        <div class="property-panel property-panel-contextual">
+            <div class="property-panel-header">
+                <div class="context-indicator">
+                    <span class="context-icon">{icon}</span>
+                    <span class="context-label">{label}</span>
+                </div>
             </div>
             <div class="property-content">
-                if *active_tab == "object" {
-                    <ObjectPropertiesPanel
-                        config={props.config.clone()}
-                        selected_index={props.selected_index}
-                        on_update={props.on_update_object.clone()}
-                    />
-                } else if *active_tab == "meta" {
-                    <MetaPropertiesPanel
-                        meta={props.config.meta.clone()}
-                        on_update={props.on_update_meta.clone()}
-                    />
-                } else {
-                    <KeyframePropertiesPanel
-                        sequence={props.sequence.clone()}
-                        selected_keyframe={props.selected_keyframe}
-                        on_update_keyframe={props.on_update_keyframe.clone()}
-                    />
-                }
+                {match context {
+                    PropertyContext::Keyframe => html! {
+                        <KeyframePropertiesPanel
+                            sequence={props.sequence.clone()}
+                            selected_keyframe={props.selected_keyframe}
+                            on_update_keyframe={props.on_update_keyframe.clone()}
+                        />
+                    },
+                    PropertyContext::Object => html! {
+                        <ObjectPropertiesPanel
+                            config={props.config.clone()}
+                            selected_index={props.selected_index}
+                            on_update={props.on_update_object.clone()}
+                            shape_cache={props.shape_cache.clone()}
+                            on_cache_shape={props.on_cache_shape.clone()}
+                        />
+                    },
+                    PropertyContext::Map => html! {
+                        <MetaPropertiesPanel
+                            meta={props.config.meta.clone()}
+                            on_update={props.on_update_meta.clone()}
+                        />
+                    },
+                }}
             </div>
         </div>
     }
@@ -138,6 +135,12 @@ struct ObjectPropertiesPanelProps {
     config: RouletteConfig,
     selected_index: Option<usize>,
     on_update: Callback<(usize, MapObject)>,
+    /// 오브젝트별 shape 캐시
+    #[prop_or_default]
+    shape_cache: HashMap<usize, ShapeCache>,
+    /// Shape 변경 전 현재 속성 캐시 콜백
+    #[prop_or_default]
+    on_cache_shape: Callback<(usize, Shape)>,
 }
 
 /// Panel for editing selected object properties.
@@ -163,10 +166,10 @@ fn object_properties_panel(props: &ObjectPropertiesPanelProps) -> Html {
     let on_update = props.on_update.clone();
 
     // ID input
-    let on_id_change = {
+    let on_id_input = {
         let object = object.clone();
         let on_update = on_update.clone();
-        Callback::from(move |e: Event| {
+        Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             let value = input.value();
             let mut new_obj = object.clone();
@@ -201,7 +204,7 @@ fn object_properties_panel(props: &ObjectPropertiesPanelProps) -> Html {
                     <input
                         type="text"
                         value={object.id.clone().unwrap_or_default()}
-                        onchange={on_id_change}
+                        oninput={on_id_input}
                         placeholder="(optional)"
                     />
                 </div>
@@ -220,6 +223,8 @@ fn object_properties_panel(props: &ObjectPropertiesPanelProps) -> Html {
                 index={index}
                 on_update={on_update.clone()}
                 object={object.clone()}
+                shape_cache={props.shape_cache.get(&index).cloned()}
+                on_cache_shape={props.on_cache_shape.clone()}
             />
 
             <PropertiesEditor
@@ -240,6 +245,12 @@ struct ShapeEditorProps {
     index: usize,
     on_update: Callback<(usize, MapObject)>,
     object: MapObject,
+    /// 이 오브젝트의 shape 캐시
+    #[prop_or_default]
+    shape_cache: Option<ShapeCache>,
+    /// Shape 변경 전 현재 속성 캐시 콜백
+    #[prop_or_default]
+    on_cache_shape: Callback<(usize, Shape)>,
 }
 
 /// Shape editor component.
@@ -248,35 +259,31 @@ fn shape_editor(props: &ShapeEditorProps) -> Html {
     let index = props.index;
     let on_update = props.on_update.clone();
     let object = props.object.clone();
+    let shape_cache = props.shape_cache.clone();
+    let on_cache_shape = props.on_cache_shape.clone();
 
     let on_shape_type_change = {
         let on_update = on_update.clone();
         let object = object.clone();
+        let shape_cache = shape_cache.clone();
+        let on_cache_shape = on_cache_shape.clone();
         Callback::from(move |e: Event| {
             let input: HtmlInputElement = e.target_unchecked_into();
-            let new_shape = match input.value().as_str() {
-                "line" => Shape::Line {
-                    start: Vec2OrExpr::Static([0.0, 0.0]),
-                    end: Vec2OrExpr::Static([1.0, 0.0]),
-                },
-                "circle" => Shape::Circle {
-                    center: Vec2OrExpr::Static([3.0, 5.0]),
-                    radius: NumberOrExpr::Number(0.3),
-                },
-                "rect" => Shape::Rect {
-                    center: Vec2OrExpr::Static([3.0, 5.0]),
-                    size: Vec2OrExpr::Static([1.0, 0.5]),
-                    rotation: NumberOrExpr::Number(0.0),
-                },
-                "bezier" => Shape::Bezier {
-                    start: Vec2OrExpr::Static([2.5, 5.0]),
-                    control1: Vec2OrExpr::Static([2.75, 4.5]),
-                    control2: Vec2OrExpr::Static([3.25, 5.5]),
-                    end: Vec2OrExpr::Static([3.5, 5.0]),
-                    segments: 16,
-                },
-                _ => return,
+            let target_type = input.value();
+
+            // 1. 현재 shape 캐시
+            on_cache_shape.emit((index, object.shape.clone()));
+
+            // 2. 현재 shape에서 중심 추출
+            let center = get_shape_center(&object.shape);
+
+            // 3. 새 shape 생성 (캐시된 속성 사용 또는 기본값)
+            let cache = shape_cache.clone().unwrap_or_default();
+            let new_shape = match create_shape_from_cache(&target_type, center, &cache) {
+                Some(shape) => shape,
+                None => return,
             };
+
             let mut new_obj = object.clone();
             new_obj.shape = new_shape;
             on_update.emit((index, new_obj));
@@ -704,6 +711,121 @@ fn properties_editor(props: &PropertiesEditorProps) -> Html {
                 </div>
             }
         }
+        ObjectRole::Guideline => {
+            let guideline = props.properties.guideline.clone().unwrap_or_default();
+            html! {
+                <div class="property-section">
+                    <div class="property-section-title">{"Guideline Properties"}</div>
+                    <div class="property-field property-field-checkbox">
+                        <label>
+                            <input
+                                type="checkbox"
+                                checked={guideline.show_ruler}
+                                onchange={{
+                                    let on_update = on_update.clone();
+                                    let object = object.clone();
+                                    let guideline = guideline.clone();
+                                    Callback::from(move |e: Event| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        let mut new_obj = object.clone();
+                                        new_obj.properties.guideline = Some(GuidelineProperties {
+                                            show_ruler: input.checked(),
+                                            ..guideline.clone()
+                                        });
+                                        on_update.emit((index, new_obj));
+                                    })
+                                }}
+                            />
+                            {"Show Ruler"}
+                        </label>
+                    </div>
+                    <div class="property-field property-field-checkbox">
+                        <label>
+                            <input
+                                type="checkbox"
+                                checked={guideline.snap_enabled}
+                                onchange={{
+                                    let on_update = on_update.clone();
+                                    let object = object.clone();
+                                    let guideline = guideline.clone();
+                                    Callback::from(move |e: Event| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        let mut new_obj = object.clone();
+                                        new_obj.properties.guideline = Some(GuidelineProperties {
+                                            snap_enabled: input.checked(),
+                                            ..guideline.clone()
+                                        });
+                                        on_update.emit((index, new_obj));
+                                    })
+                                }}
+                            />
+                            {"Snap Enabled"}
+                        </label>
+                    </div>
+                    <NumberField
+                        label="Snap Distance"
+                        value={guideline.snap_distance}
+                        on_change={{
+                            let on_update = on_update.clone();
+                            let object = object.clone();
+                            let guideline = guideline.clone();
+                            Callback::from(move |v: f32| {
+                                let mut new_obj = object.clone();
+                                new_obj.properties.guideline = Some(GuidelineProperties {
+                                    snap_distance: v,
+                                    ..guideline.clone()
+                                });
+                                on_update.emit((index, new_obj));
+                            })
+                        }}
+                    />
+                    <div class="property-group">
+                        <label class="property-label">{"Ruler Interval"}</label>
+                        <div class="interval-presets">
+                            {for [0.25, 0.5, 1.0, 2.0].iter().map(|&interval| {
+                                let on_update = on_update.clone();
+                                let object = object.clone();
+                                let guideline = guideline.clone();
+                                let is_selected = (guideline.ruler_interval - interval).abs() < 0.01;
+                                let onclick = Callback::from(move |_: MouseEvent| {
+                                    let mut new_obj = object.clone();
+                                    new_obj.properties.guideline = Some(GuidelineProperties {
+                                        ruler_interval: interval,
+                                        ..guideline.clone()
+                                    });
+                                    on_update.emit((index, new_obj));
+                                });
+                                html! {
+                                    <button
+                                        class={classes!("interval-btn", is_selected.then_some("selected"))}
+                                        onclick={onclick}
+                                    >
+                                        {format!("{}m", interval)}
+                                    </button>
+                                }
+                            })}
+                        </div>
+                        <NumberField
+                            label="Custom"
+                            value={guideline.ruler_interval}
+                            on_change={{
+                                let on_update = on_update.clone();
+                                let object = object.clone();
+                                let guideline = guideline.clone();
+                                Callback::from(move |v: f32| {
+                                    let mut new_obj = object.clone();
+                                    new_obj.properties.guideline = Some(GuidelineProperties {
+                                        ruler_interval: v.max(0.01),
+                                        ..guideline.clone()
+                                    });
+                                    on_update.emit((index, new_obj));
+                                })
+                            }}
+                        />
+                    </div>
+                </div>
+            }
+        }
     }
 }
 
@@ -717,10 +839,10 @@ struct MetaPropertiesPanelProps {
 /// Panel for editing map metadata.
 #[function_component(MetaPropertiesPanel)]
 fn meta_properties_panel(props: &MetaPropertiesPanelProps) -> Html {
-    let on_name_change = {
+    let on_name_input = {
         let meta = props.meta.clone();
         let on_update = props.on_update.clone();
-        Callback::from(move |e: Event| {
+        Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             let mut new_meta = meta.clone();
             new_meta.name = input.value();
@@ -728,10 +850,10 @@ fn meta_properties_panel(props: &MetaPropertiesPanelProps) -> Html {
         })
     };
 
-    let on_gamerule_change = {
+    let on_gamerule_input = {
         let meta = props.meta.clone();
         let on_update = props.on_update.clone();
-        Callback::from(move |e: Event| {
+        Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             let mut new_meta = meta.clone();
             new_meta.gamerule = input.value()
@@ -752,7 +874,7 @@ fn meta_properties_panel(props: &MetaPropertiesPanelProps) -> Html {
                     <input
                         type="text"
                         value={props.meta.name.clone()}
-                        onchange={on_name_change}
+                        oninput={on_name_input}
                     />
                 </div>
                 <div class="property-field">
@@ -760,7 +882,7 @@ fn meta_properties_panel(props: &MetaPropertiesPanelProps) -> Html {
                     <input
                         type="text"
                         value={props.meta.gamerule.join(", ")}
-                        onchange={on_gamerule_change}
+                        oninput={on_gamerule_input}
                         placeholder="e.g., top_n, elimination"
                     />
                 </div>
@@ -783,9 +905,9 @@ fn vec2_field(props: &Vec2FieldProps) -> Html {
     let value = props.value;
     let on_change = props.on_change.clone();
 
-    let on_x_change = {
+    let on_x_input = {
         let on_change = on_change.clone();
-        Callback::from(move |e: Event| {
+        Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             if let Ok(x) = input.value().parse() {
                 on_change.emit([x, value[1]]);
@@ -793,9 +915,9 @@ fn vec2_field(props: &Vec2FieldProps) -> Html {
         })
     };
 
-    let on_y_change = {
+    let on_y_input = {
         let on_change = on_change.clone();
-        Callback::from(move |e: Event| {
+        Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             if let Ok(y) = input.value().parse() {
                 on_change.emit([value[0], y]);
@@ -810,13 +932,13 @@ fn vec2_field(props: &Vec2FieldProps) -> Html {
                 <input
                     type="number"
                     value={value[0].to_string()}
-                    onchange={on_x_change}
+                    oninput={on_x_input}
                     step="1"
                 />
                 <input
                     type="number"
                     value={value[1].to_string()}
-                    onchange={on_y_change}
+                    oninput={on_y_input}
                     step="1"
                 />
             </div>
@@ -835,9 +957,9 @@ struct NumberFieldProps {
 /// Number input field component.
 #[function_component(NumberField)]
 fn number_field(props: &NumberFieldProps) -> Html {
-    let on_change = {
+    let on_input = {
         let on_change = props.on_change.clone();
-        Callback::from(move |e: Event| {
+        Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             if let Ok(v) = input.value().parse() {
                 on_change.emit(v);
@@ -851,7 +973,7 @@ fn number_field(props: &NumberFieldProps) -> Html {
             <input
                 type="number"
                 value={props.value.to_string()}
-                onchange={on_change}
+                oninput={on_input}
                 step="any"
             />
         </div>
@@ -926,10 +1048,14 @@ fn render_keyframe_editor(
         } => render_apply_editor(translation, rotation, duration, easing, kf_idx, on_update),
         Keyframe::PivotRotate {
             pivot,
+            pivot_mode,
             angle,
             duration,
             easing,
-        } => render_pivot_editor(pivot, angle, duration, easing, kf_idx, on_update),
+        } => render_pivot_editor(pivot, pivot_mode, angle, duration, easing, kf_idx, on_update),
+        Keyframe::ContinuousRotate { speed, direction } => {
+            render_continuous_rotate_editor(speed, direction, kf_idx, on_update)
+        }
     }
 }
 
@@ -1225,15 +1351,40 @@ fn render_apply_editor(
     }
 }
 
-/// PivotRotate editor: pivot, angle, duration, easing
+/// PivotRotate editor: pivot, pivot_mode, angle, duration, easing
 fn render_pivot_editor(
     pivot: [f32; 2],
+    pivot_mode: PivotMode,
     angle: f32,
     duration: f32,
     easing: EasingType,
     kf_idx: usize,
     on_update: &Callback<(usize, Keyframe)>,
 ) -> Html {
+    // Pivot Mode
+    let on_mode_change = {
+        let on_update = on_update.clone();
+        let easing = easing;
+        Callback::from(move |e: Event| {
+            if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
+                let new_mode = match select.value().as_str() {
+                    "relative" => PivotMode::Relative,
+                    _ => PivotMode::Absolute,
+                };
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::PivotRotate {
+                        pivot,
+                        pivot_mode: new_mode,
+                        angle,
+                        duration,
+                        easing,
+                    },
+                ));
+            }
+        })
+    };
+
     // Pivot X
     let on_pivot_x_change = {
         let on_update = on_update.clone();
@@ -1245,6 +1396,7 @@ fn render_pivot_editor(
                     kf_idx,
                     Keyframe::PivotRotate {
                         pivot: [x, pivot[1]],
+                        pivot_mode,
                         angle,
                         duration,
                         easing,
@@ -1265,6 +1417,7 @@ fn render_pivot_editor(
                     kf_idx,
                     Keyframe::PivotRotate {
                         pivot: [pivot[0], y],
+                        pivot_mode,
                         angle,
                         duration,
                         easing,
@@ -1285,6 +1438,7 @@ fn render_pivot_editor(
                     kf_idx,
                     Keyframe::PivotRotate {
                         pivot,
+                        pivot_mode,
                         angle: new_angle,
                         duration,
                         easing,
@@ -1305,6 +1459,7 @@ fn render_pivot_editor(
                     kf_idx,
                     Keyframe::PivotRotate {
                         pivot,
+                        pivot_mode,
                         angle,
                         duration: new_duration,
                         easing,
@@ -1329,6 +1484,7 @@ fn render_pivot_editor(
                     kf_idx,
                     Keyframe::PivotRotate {
                         pivot,
+                        pivot_mode,
                         angle,
                         duration,
                         easing: new_easing,
@@ -1338,6 +1494,11 @@ fn render_pivot_editor(
         })
     };
 
+    let mode_label = match pivot_mode {
+        PivotMode::Absolute => "World coordinates",
+        PivotMode::Relative => "Offset from object center",
+    };
+
     html! {
         <div class="property-fields">
             <div class="property-section">
@@ -1345,19 +1506,27 @@ fn render_pivot_editor(
                     <Icon data={IconData::LUCIDE_ROTATE_CW} width="14px" height="14px" />
                     <span style="margin-left: 6px;">{"Pivot Rotate"}</span>
                 </div>
+                <div class="property-field">
+                    <label>{"Pivot Mode"}</label>
+                    <select onchange={on_mode_change}>
+                        <option value="absolute" selected={pivot_mode == PivotMode::Absolute}>{"Absolute (World)"}</option>
+                        <option value="relative" selected={pivot_mode == PivotMode::Relative}>{"Relative (Object)"}</option>
+                    </select>
+                    <span class="property-note">{mode_label}</span>
+                </div>
                 <div class="property-field property-field-vec2">
                     <label>{"Pivot Point"}</label>
                     <div class="vec2-inputs">
                         <input
                             type="number"
-                            step="1"
+                            step="0.1"
                             placeholder="X"
                             value={pivot[0].to_string()}
                             oninput={on_pivot_x_change}
                         />
                         <input
                             type="number"
-                            step="1"
+                            step="0.1"
                             placeholder="Y"
                             value={pivot[1].to_string()}
                             oninput={on_pivot_y_change}
@@ -1401,5 +1570,76 @@ fn render_easing_select(current: EasingType, on_change: Callback<Event>) -> Html
             <option value="ease_out" selected={current == EasingType::EaseOut}>{"Ease Out"}</option>
             <option value="ease_in_out" selected={current == EasingType::EaseInOut}>{"Ease In Out"}</option>
         </select>
+    }
+}
+
+/// ContinuousRotate editor: speed and direction
+fn render_continuous_rotate_editor(
+    speed: f32,
+    direction: RollDirection,
+    kf_idx: usize,
+    on_update: &Callback<(usize, Keyframe)>,
+) -> Html {
+    let on_speed_change = {
+        let on_update = on_update.clone();
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                let new_speed = input.value().parse::<f32>().unwrap_or(45.0).max(0.0);
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::ContinuousRotate {
+                        speed: new_speed,
+                        direction,
+                    },
+                ));
+            }
+        })
+    };
+
+    let on_direction_change = {
+        let on_update = on_update.clone();
+        Callback::from(move |e: Event| {
+            if let Some(select) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
+                let new_direction = match select.value().as_str() {
+                    "counterclockwise" => RollDirection::Counterclockwise,
+                    _ => RollDirection::Clockwise,
+                };
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::ContinuousRotate {
+                        speed,
+                        direction: new_direction,
+                    },
+                ));
+            }
+        })
+    };
+
+    html! {
+        <div class="property-fields">
+            <div class="property-section">
+                <div class="property-section-title">
+                    <Icon data={IconData::LUCIDE_REFRESH_CW} width="14px" height="14px" />
+                    <span style="margin-left: 6px;">{"Continuous Rotate"}</span>
+                </div>
+                <div class="property-field">
+                    <label>{"Speed (°/s)"}</label>
+                    <input
+                        type="number"
+                        step="5"
+                        min="0"
+                        value={speed.to_string()}
+                        oninput={on_speed_change}
+                    />
+                </div>
+                <div class="property-field">
+                    <label>{"Direction"}</label>
+                    <select onchange={on_direction_change}>
+                        <option value="clockwise" selected={direction == RollDirection::Clockwise}>{"Clockwise"}</option>
+                        <option value="counterclockwise" selected={direction == RollDirection::Counterclockwise}>{"Counter-CW"}</option>
+                    </select>
+                </div>
+            </div>
+        </div>
     }
 }

@@ -1,0 +1,202 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// ===== Object List (Floating Panel) =====
+
+.object-list {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-height: 100%;
+}
+
+.object-list-header {
+    @include panel-header;
+}
+
+.object-list-title {
+    @include panel-title;
+}
+
+.object-list-count {
+    font-size: $font-size-sm;
+    color: $color-text-disabled;
+}
+
+.object-list-items {
+    flex: 1;
+    overflow-y: auto;
+    padding: $spacing-sm;
+    min-height: 0;
+}
+
+.object-list-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    padding: $spacing-md $spacing-md;
+    border-radius: $radius-md;
+    cursor: pointer;
+    transition: all $transition-normal;
+    border: 1px solid transparent;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    &.selected {
+        background: rgba(102, 126, 234, 0.2);
+        border-color: $color-border-accent;
+    }
+}
+
+// ===== Role Badge =====
+
+.object-role-badge {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: $font-weight-bold;
+    border-radius: $radius-md;
+    flex-shrink: 0;
+}
+
+.role-obstacle {
+    background: #4a4a6a;
+    color: $color-text-primary;
+}
+
+.role-spawner {
+    background: $color-success;
+    color: $color-text-primary;
+}
+
+.role-trigger {
+    background: #ff5252;
+    color: $color-text-primary;
+}
+
+.role-guideline {
+    background: #00bcd4;
+    color: $color-text-primary;
+}
+
+.object-name {
+    flex: 1;
+    font-size: $font-size-base;
+    color: $color-text-secondary;
+    @include text-ellipsis;
+}
+
+.object-delete-btn {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    color: $color-text-disabled;
+    background: transparent;
+    border: none;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    opacity: 0;
+    transition: all $transition-normal;
+
+    .object-list-item:hover & {
+        opacity: 1;
+    }
+
+    &:hover {
+        background: rgba(255, 82, 82, 0.2);
+        color: #ff5252;
+    }
+}
+
+.object-list-empty {
+    padding: $spacing-2xl $spacing-lg;
+    text-align: center;
+    color: $color-text-disabled;
+    font-size: $font-size-base;
+    font-style: italic;
+}
+
+.object-list-footer {
+    padding: $spacing-md;
+    border-top: 1px solid $color-border-subtle;
+    flex-shrink: 0;
+}
+
+// ===== Add Button Container =====
+
+.add-button-container {
+    position: relative;
+}
+
+.add-menu {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    margin-bottom: 6px;
+    background: rgba(42, 42, 62, 0.98);
+    border: 1px solid rgba(68, 68, 68, 0.8);
+    border-radius: $radius-lg;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    z-index: 200;
+}
+
+.add-menu-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    width: 100%;
+    padding: $spacing-md $spacing-lg;
+    font-size: $font-size-base;
+    color: $color-text-secondary;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background $transition-normal;
+    text-align: left;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
+
+// ===== Object List Tabs =====
+
+.object-list-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid $color-border-subtle;
+    flex-shrink: 0;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.8rem;
+    font-weight: $font-weight-normal;
+    color: $color-text-muted;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover {
+        color: $color-text-secondary;
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    &.active {
+        color: $color-text-primary;
+        border-bottom-color: $color-accent;
+    }
+}

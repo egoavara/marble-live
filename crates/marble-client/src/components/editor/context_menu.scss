@@ -1,0 +1,117 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// ===== Context Menu =====
+
+.context-menu-overlay {
+    @include fixed-fill;
+    z-index: $z-context-menu;
+}
+
+.context-menu {
+    position: fixed;
+    min-width: 160px;
+    background: rgba(42, 42, 62, 0.98);
+    border: 1px solid rgba(68, 68, 68, 0.8);
+    border-radius: $radius-lg;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    z-index: $z-context-menu + 1;
+    padding: 4px 0;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    padding: $spacing-md $spacing-lg;
+    font-size: $font-size-base;
+    color: $color-text-secondary;
+    cursor: pointer;
+    transition: background $transition-fast;
+
+    &:hover {
+        background: rgba(102, 126, 234, 0.2);
+        color: $color-text-primary;
+    }
+
+    &.disabled {
+        color: $color-text-disabled;
+        cursor: not-allowed;
+
+        &:hover {
+            background: transparent;
+            color: $color-text-disabled;
+        }
+    }
+}
+
+.context-menu-item-danger {
+    color: #ff5252;
+
+    &:hover {
+        background: rgba(255, 82, 82, 0.2);
+        color: #ff5252;
+    }
+}
+
+.context-menu-icon {
+    width: 1.25rem;
+    text-align: center;
+    font-size: 0.9rem;
+}
+
+.context-menu-arrow {
+    margin-left: auto;
+    font-size: 0.65rem;
+    color: $color-text-muted;
+}
+
+.context-menu-divider {
+    height: 1px;
+    background: rgba(68, 68, 68, 0.6);
+    margin: 4px 0;
+}
+
+// ===== Submenu =====
+
+.context-menu-submenu {
+    position: relative;
+}
+
+.context-menu-item-submenu {
+    padding-right: $spacing-md;
+}
+
+.context-menu-submenu-content {
+    position: absolute;
+    left: 100%;
+    top: -4px;
+    min-width: 140px;
+    background: rgba(42, 42, 62, 0.98);
+    border: 1px solid rgba(68, 68, 68, 0.8);
+    border-radius: $radius-lg;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    padding: 4px 0;
+    display: none;
+
+    // Invisible bridge to prevent hover gap
+    &::before {
+        content: "";
+        position: absolute;
+        left: -10px;
+        top: 0;
+        width: 10px;
+        height: 100%;
+    }
+}
+
+.context-menu-submenu:hover .context-menu-submenu-content {
+    display: block;
+}
+
+.context-menu-submenu:hover > .context-menu-item-submenu {
+    background: rgba(102, 126, 234, 0.2);
+    color: $color-text-primary;
+}

@@ -64,6 +64,7 @@ tracing-web = "0.1"
 
 # WASM utilities
 console_error_panic_hook = "0.1"
+serde-wasm-bindgen = "0.6"
 
 # Error handling
 thiserror = "2"
@@ -87,6 +88,30 @@ cel-interpreter = "0.10"
 # Graphics
 wgpu = { version = "28", features = ["webgl"] }
 bytemuck = { version = "1", features = ["derive"] }
+
+# Bevy Game Engine
+bevy = { version = "0.18", default-features = false, features = [
+    "bevy_asset",
+    "bevy_log",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_mesh",
+    "bevy_state",
+    "bevy_winit",
+    "bevy_gizmos",
+    "bevy_gizmos_render",
+    "bevy_text",
+    "default_font",
+    "webgpu",
+] }
+
+# Bevy Rapier2D Physics (bevy 0.18 compatible fork)
+bevy_rapier2d = { git = "https://github.com/Buncys/bevy_rapier", branch = "bevy-0.18.0", features = [
+    "enhanced-determinism",
+    "serde-serialize",
+] }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

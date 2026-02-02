@@ -9,6 +9,7 @@ description = "Core physics and game logic for marble-live"
 workspace = true
 
 [dependencies]
+# Existing dependencies
 rapier2d.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -18,3 +19,14 @@ rand_chacha.workspace = true
 thiserror.workspace = true
 cel-interpreter.workspace = true
 parking_lot.workspace = true
+tracing.workspace = true
+
+# Bevy dependencies
+bevy.workspace = true
+bevy_rapier2d.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+serde-wasm-bindgen.workspace = true
+console_error_panic_hook.workspace = true
+getrandom.workspace = true

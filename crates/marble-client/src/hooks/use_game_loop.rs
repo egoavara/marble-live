@@ -10,11 +10,11 @@ use tonic_web_wasm_client::Client;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::HtmlCanvasElement;
+// use web_sys::HtmlCanvasElement; // Removed - Bevy handles canvas
 use yew::prelude::*;
 
 use crate::camera::{CameraMode, CameraState};
-use crate::renderer::WgpuRenderer;
+// use crate::renderer::WgpuRenderer; // Removed - Bevy handles rendering
 use crate::services::p2p::{should_broadcast_hash, P2pRoomHandle};
 
 /// Fixed timestep for physics simulation (60 FPS)
@@ -320,7 +320,7 @@ impl PartialEq for GameLoopHandle {
 #[hook]
 pub fn use_game_loop(
     p2p: &P2pRoomHandle,
-    canvas_ref: NodeRef,
+    _canvas_ref: NodeRef, // Unused - Bevy handles canvas
     is_host: bool,
     seed: u64,
     initial_camera_mode: CameraMode,
@@ -349,8 +349,8 @@ pub fn use_game_loop(
     let loop_state = use_state(|| GameLoopState::Idle);
     let current_frame = use_state(|| 0u64);
 
-    // Renderer version (to track when canvas is ready)
-    let renderer_version = use_state(|| 0u32);
+    // NOTE: Bevy now handles rendering, so renderer_version is just a placeholder
+    let renderer_version = use_state(|| 1u32); // Always ready (Bevy handles this)
 
     // Accumulated time for fixed timestep
     let accumulated_time = use_mut_ref(|| 0.0f64);
@@ -359,8 +359,7 @@ pub fn use_game_loop(
     // Animation frame ID for cleanup
     let animation_frame_id = use_mut_ref(|| None::<i32>);
 
-    // Renderer reference (wgpu)
-    let renderer_ref: Rc<RefCell<Option<WgpuRenderer>>> = use_mut_ref(|| None);
+    // NOTE: Bevy handles rendering now, renderer_ref removed
 
     // Store my_player_id for the handle
     let my_player_id = p2p.my_player_id();
@@ -385,76 +384,7 @@ pub fn use_game_loop(
         });
     }
 
-    // Initialize wgpu renderer when canvas is ready (run once)
-    {
-        let canvas_ref = canvas_ref.clone();
-        let renderer_ref = renderer_ref.clone();
-        let renderer_version = renderer_version.clone();
-        let camera_state = camera_state.clone();
-
-        use_effect_with((), move |_| {
-            // Use timeout to ensure canvas is mounted
-            let canvas_ref = canvas_ref.clone();
-            let renderer_ref = renderer_ref.clone();
-            let renderer_version = renderer_version.clone();
-            let camera_state = camera_state.clone();
-
-            gloo::timers::callback::Timeout::new(100, move || {
-                if renderer_ref.borrow().is_some() {
-                    return; // Already initialized
-                }
-                if let Some(canvas) = canvas_ref.cast::<HtmlCanvasElement>() {
-                    // Update camera viewport
-                    {
-                        let mut camera = camera_state.borrow_mut();
-                        camera.set_viewport(canvas.width() as f32, canvas.height() as f32);
-                    }
-
-                    // Initialize wgpu renderer asynchronously
-                    let renderer_ref = renderer_ref.clone();
-                    let renderer_version = renderer_version.clone();
-
-                    spawn_local(async move {
-                        match WgpuRenderer::new(canvas).await {
-                            Ok(r) => {
-                                *renderer_ref.borrow_mut() = Some(r);
-                                renderer_version.set(1);
-                                tracing::info!("wgpu renderer initialized");
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to create wgpu renderer: {}", e);
-                            }
-                        }
-                    });
-                }
-            })
-            .forget();
-        });
-    }
-
-    // Idle state rendering (single frame, no physics)
-    {
-        let game_state = game_state.clone();
-        let camera_state = camera_state.clone();
-        let loop_state = loop_state.clone();
-        let renderer_ref = renderer_ref.clone();
-        let renderer_version = *renderer_version;
-
-        use_effect_with(
-            ((*loop_state).clone(), renderer_version),
-            move |(state, _version)| {
-                // Render once when not running but renderer is ready
-                if !matches!(state, GameLoopState::Running) {
-                    if let Some(ref mut renderer) = *renderer_ref.borrow_mut() {
-                        let game = game_state.borrow();
-                        let camera = camera_state.borrow();
-                        renderer.render(&game, &camera);
-                        tracing::debug!("Rendered idle state");
-                    }
-                }
-            },
-        );
-    }
+    // NOTE: Bevy handles rendering initialization and idle state rendering
 
     // Main game loop
     {
@@ -462,7 +392,7 @@ pub fn use_game_loop(
         let camera_state = camera_state.clone();
         let loop_state = loop_state.clone();
         let current_frame = current_frame.clone();
-        let renderer_ref = renderer_ref.clone();
+        // NOTE: renderer_ref removed - Bevy handles rendering
         let p2p = p2p.clone();
         let accumulated_time = accumulated_time.clone();
         let last_time = last_time.clone();
@@ -478,11 +408,15 @@ pub fn use_game_loop(
             move |(state, _version)| {
                 let animation_frame_id_cleanup = animation_frame_id.clone();
 
-                // Only run if in Running state and renderer is ready
-                if matches!(state, GameLoopState::Running) && renderer_ref.borrow().is_some() {
+                // Closure reference for cleanup (to break reference cycle)
+                let closure_for_cleanup: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
+                    Rc::new(RefCell::new(None));
+                let closure_for_cleanup_clone = closure_for_cleanup.clone();
+
+                // Only run if in Running state (Bevy handles rendering separately)
+                if matches!(state, GameLoopState::Running) {
                     // Create the animation loop closure
-                    let closure: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
-                        Rc::new(RefCell::new(None));
+                    let closure = closure_for_cleanup.clone();
                     let closure_clone = closure.clone();
 
                     let game_state = game_state.clone();
@@ -493,7 +427,7 @@ pub fn use_game_loop(
                     let accumulated_time = accumulated_time.clone();
                     let last_time = last_time.clone();
                     let animation_frame_id = animation_frame_id.clone();
-                    let renderer_ref = renderer_ref.clone();
+                    // NOTE: renderer_ref removed - Bevy handles rendering
                     let my_player_id_for_camera = my_player_id_for_camera.clone();
                     let reported_arrivals = reported_arrivals_for_loop.clone();
                     let room_id = room_id_for_loop.clone();
@@ -627,12 +561,7 @@ pub fn use_game_loop(
                             camera.update(&game, my_numeric_id);
                         }
 
-                        // Render
-                        if let Some(ref mut renderer) = *renderer_ref.borrow_mut() {
-                            let game = game_state.borrow();
-                            let camera = camera_state.borrow();
-                            renderer.render(&game, &camera);
-                        }
+                        // NOTE: Bevy handles rendering via its own game loop
 
                         // Request next frame
                         if matches!(*loop_state, GameLoopState::Running) {
@@ -660,11 +589,15 @@ pub fn use_game_loop(
 
                 // Cleanup - always return same closure type
                 move || {
+                    // Cancel any pending animation frame
                     if let Some(id) = *animation_frame_id_cleanup.borrow() {
                         if let Some(window) = web_sys::window() {
                             let _ = window.cancel_animation_frame(id);
                         }
                     }
+                    // Break the reference cycle by clearing the closure
+                    // This allows the Closure to be properly dropped
+                    *closure_for_cleanup_clone.borrow_mut() = None;
                 }
             },
         );

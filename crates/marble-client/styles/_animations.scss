@@ -1,0 +1,81 @@
+// ===== 기본 애니메이션 =====
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+// ===== 카운트다운 =====
+
+@keyframes countdownPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+// ===== 로고 애니메이션 =====
+
+@keyframes marbleDrop {
+    0%   { transform: translateY(0) rotate(0deg); }
+    20%  { transform: translateY(-12px) rotate(-30deg); }
+    60%  { transform: translateY(6px) rotate(180deg); }
+    100% { transform: translateY(0) rotate(360deg); }
+}
+
+@keyframes lineFade {
+    0%   { transform: translateY(-20px); opacity: 0; }
+    30%  { opacity: 0.8; }
+    100% { transform: translateY(30px); opacity: 0; }
+}
+
+// ===== 이모지 플로팅 =====
+
+@keyframes floatUp {
+    0% {
+        opacity: 0;
+        transform: translateY(0) scale(0.5);
+    }
+    15% {
+        opacity: 1;
+        transform: translateY(-30px) scale(1.2);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-150px) scale(0.8);
+    }
+}
+
+// ===== 타임라인 프리뷰 =====
+
+@keyframes pulse-playing {
+    from {
+        box-shadow: 0 0 4px rgba(76, 175, 80, 0.4);
+    }
+    to {
+        box-shadow: 0 0 12px rgba(76, 175, 80, 0.8);
+    }
+}
+
+@keyframes pulse-preview {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}

@@ -1,0 +1,249 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// ===== Debug Index Page =====
+
+.debug-index-page {
+    h1 {
+        font-size: $font-size-2xl;
+        margin-bottom: $spacing-xl;
+    }
+}
+
+.debug-links {
+    list-style: none;
+    padding: 0;
+
+    li {
+        margin-bottom: $spacing-md;
+        font-size: 1.1rem;
+    }
+
+    a {
+        color: $color-accent;
+        text-decoration: none;
+        font-weight: $font-weight-semibold;
+
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+}
+
+.link-desc {
+    color: $color-text-disabled;
+    font-size: 0.9rem;
+}
+
+// ===== Debug Simple Page =====
+
+.debug-simple-page {
+    display: flex;
+    flex-direction: column;
+}
+
+// ===== Debug Panel =====
+
+.debug-panel {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid $color-border-primary;
+    border-radius: $radius-lg;
+    padding: $spacing-lg;
+
+    h3 {
+        font-size: $font-size-md;
+        margin-bottom: $spacing-md;
+        color: $color-text-muted;
+        border-bottom: 1px solid $color-border-primary;
+        padding-bottom: $spacing-sm;
+    }
+}
+
+.debug-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-base;
+}
+
+.debug-label {
+    color: $color-text-muted;
+}
+
+.debug-value {
+    color: #eee;
+    font-family: $font-family-mono;
+
+    &.hash {
+        font-size: $font-size-sm;
+        color: $color-accent;
+    }
+}
+
+// ===== Debug Log Toggle =====
+
+.debug-log-toggle-btn {
+    position: fixed;
+    bottom: $spacing-lg;
+    right: $spacing-lg;
+    padding: $spacing-sm $spacing-lg;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-normal;
+    color: $color-text-muted;
+    background: rgba(26, 26, 46, 0.9);
+    border: 1px solid $color-border-primary;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-normal;
+    z-index: $z-header;
+
+    &:hover {
+        color: $color-text-primary;
+        border-color: $color-border-secondary;
+    }
+}
+
+.debug-log-popup {
+    position: fixed;
+    bottom: 3.5rem;
+    right: $spacing-lg;
+    width: 350px;
+    max-height: 400px;
+    background: $color-bg-primary;
+    border: 1px solid $color-border-primary;
+    border-radius: $radius-lg;
+    overflow: hidden;
+    z-index: $z-header;
+    box-shadow: $shadow-lg;
+    display: flex;
+    flex-direction: column;
+}
+
+.debug-log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: $spacing-md $spacing-lg;
+    background: $color-bg-secondary;
+    color: $color-text-primary;
+    font-weight: $font-weight-normal;
+    font-size: $font-size-base;
+    flex-shrink: 0;
+}
+
+.debug-log-close-btn {
+    padding: $spacing-xs $spacing-sm;
+    font-size: $font-size-base;
+    color: $color-text-muted;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: color $transition-normal;
+
+    &:hover {
+        color: $color-text-primary;
+    }
+}
+
+// ===== Debug Status Section =====
+
+.debug-status-section {
+    padding: $spacing-md $spacing-lg;
+    border-bottom: 1px solid $color-border-primary;
+    flex-shrink: 0;
+}
+
+.debug-status-title {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: $color-accent;
+    text-transform: uppercase;
+    margin-bottom: $spacing-sm;
+}
+
+.debug-status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: $spacing-xs;
+    font-size: $font-size-sm;
+
+    .debug-label {
+        color: $color-text-muted;
+    }
+
+    .debug-value {
+        color: $color-text-primary;
+        font-family: $font-family-mono;
+
+        &.hash {
+            font-size: 0.65rem;
+            color: #a0a0ff;
+        }
+    }
+}
+
+// ===== Debug Log Section =====
+
+.debug-log-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+
+    .debug-status-title {
+        padding: $spacing-sm $spacing-lg;
+        margin-bottom: 0;
+        border-bottom: 1px solid $color-border-primary;
+    }
+}
+
+.debug-log-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: $spacing-sm;
+    font-family: $font-family-mono;
+    font-size: 0.7rem;
+    line-height: 1.5;
+    color: #a0a0a0;
+}
+
+.debug-log-empty {
+    color: $color-text-disabled;
+    text-align: center;
+    padding: $spacing-lg;
+    font-style: italic;
+}
+
+.debug-log-entry {
+    padding: $spacing-xs $spacing-sm;
+    border-bottom: 1px solid $color-bg-secondary;
+
+    &:last-child {
+        border-bottom: none;
+    }
+}
+
+// ===== Not Found Page =====
+
+.not-found-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+
+    h1 {
+        font-size: 5rem;
+        color: $color-border-secondary;
+    }
+
+    p {
+        color: $color-text-disabled;
+        margin-bottom: $spacing-lg;
+    }
+
+    a {
+        color: $color-accent;
+    }
+}

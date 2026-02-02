@@ -1,0 +1,203 @@
+@use 'variables' as *;
+@use 'mixins' as *;
+
+// ===== 기본 버튼 =====
+
+.btn {
+    @include btn-base;
+    @include btn-hover-lift;
+    @include btn-disabled;
+
+    &:hover {
+        box-shadow: $shadow-md;
+    }
+}
+
+// ===== 버튼 변형 =====
+
+.btn-primary {
+    background: $gradient-accent;
+    color: $color-text-primary;
+    border: none;
+    padding: $spacing-md $spacing-xl;
+    font-size: $font-size-md;
+    font-weight: $font-weight-semibold;
+    border-radius: $radius-md;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.btn-secondary {
+    background: $color-border-primary;
+    color: $color-text-primary;
+    border: 1px solid $color-border-secondary;
+    padding: $spacing-md $spacing-xl;
+    font-size: $font-size-md;
+    font-weight: $font-weight-semibold;
+    border-radius: $radius-md;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover:not(:disabled) {
+        background: $color-border-secondary;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.btn-large {
+    padding: $spacing-lg $spacing-2xl;
+    font-size: 1.125rem;
+}
+
+// ===== 상태별 버튼 =====
+
+.btn-start {
+    background: $gradient-success;
+    color: $color-text-primary;
+
+    &:hover {
+        background: linear-gradient(135deg, #5CBF60 0%, #55b059 100%);
+    }
+}
+
+.btn-stop {
+    background: $gradient-danger;
+    color: $color-text-primary;
+
+    &:hover {
+        background: linear-gradient(135deg, #ff5252 0%, #e33f3f 100%);
+    }
+}
+
+.btn-reset {
+    background: linear-gradient(135deg, #555 0%, #444 100%);
+    color: $color-text-primary;
+
+    &:hover {
+        background: linear-gradient(135deg, #666 0%, #555 100%);
+    }
+}
+
+// ===== 확인/취소 버튼 =====
+
+.btn-cancel {
+    padding: $spacing-sm $spacing-lg;
+    font-size: 0.8rem;
+    border: none;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-fast;
+    color: $color-text-muted;
+    background: rgba(255, 255, 255, 0.1);
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+}
+
+.btn-confirm {
+    padding: $spacing-sm $spacing-lg;
+    font-size: 0.8rem;
+    border: none;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-fast;
+    color: $color-text-primary;
+    background: $color-accent;
+
+    &:hover {
+        background: #5a6fd6;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+// ===== 추가 버튼 =====
+
+.add-btn {
+    width: 100%;
+    padding: $spacing-md $spacing-lg;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+    background: $gradient-success;
+    border: none;
+    border-radius: $radius-lg;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+    }
+}
+
+// ===== 컨트롤 버튼 =====
+
+.control-btn {
+    padding: $spacing-md $spacing-2xl;
+    font-size: 1.125rem;
+    font-weight: $font-weight-semibold;
+    border: none;
+    border-radius: $radius-lg;
+    cursor: pointer;
+    transition: all $transition-normal;
+    min-width: 180px;
+
+    &:hover:not(:disabled) {
+        transform: translateY(-2px);
+    }
+}
+
+.ready-btn {
+    background: $color-success;
+    color: $color-text-primary;
+
+    &:hover:not(:disabled) {
+        background: #5CBF60;
+        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+    }
+
+    &.active {
+        background: $color-error;
+
+        &:hover:not(:disabled) {
+            background: #ff5252;
+            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
+        }
+    }
+}
+
+.start-btn {
+    background: $color-warning;
+    color: $color-text-primary;
+
+    &:hover:not(:disabled) {
+        background: #ffb74d;
+        box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4);
+    }
+
+    &.disabled,
+    &:disabled {
+        background: #666;
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+}

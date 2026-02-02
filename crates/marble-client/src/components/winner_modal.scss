@@ -1,0 +1,274 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+@use '../../styles/animations' as *;
+
+// ===== Winner Modal Overlay =====
+
+.winner-modal-overlay {
+    @include fixed-fill;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    animation: fadeIn 0.3s ease;
+}
+
+.winner-modal {
+    background: $color-bg-primary;
+    border-radius: $radius-xl;
+    width: 90%;
+    max-width: 420px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    animation: slideUp 0.3s ease;
+}
+
+.winner-modal-header {
+    padding: 1.25rem;
+    text-align: center;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-bold;
+    color: $color-text-muted;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    background: $color-bg-secondary;
+    border-bottom: 1px solid $color-border-primary;
+}
+
+.winner-modal-content {
+    padding: $spacing-xl;
+}
+
+.winner-announcement {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: $spacing-md;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-bold;
+    color: $color-gold;
+    margin-bottom: $spacing-xl;
+    padding: $spacing-lg;
+    background: rgba(255, 215, 0, 0.1);
+    border-radius: $radius-lg;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+}
+
+.winner-color {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.winner-name {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+
+    .tag.you {
+        padding: $spacing-xs $spacing-sm;
+        font-size: $font-size-xs;
+        font-weight: $font-weight-semibold;
+        background: $color-accent;
+        color: $color-text-primary;
+        border-radius: $radius-sm;
+    }
+}
+
+.winner-text {
+    color: $color-gold;
+}
+
+// ===== Rankings Section =====
+
+.rankings-section {
+    background: $color-bg-secondary;
+    border-radius: $radius-lg;
+    overflow: hidden;
+}
+
+.rankings-header {
+    padding: $spacing-md $spacing-lg;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-muted;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid $color-border-primary;
+}
+
+.rankings-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.rankings-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    padding: $spacing-md $spacing-lg;
+    border-bottom: 1px solid rgba(51, 51, 51, 0.5);
+
+    &:last-child {
+        border-bottom: none;
+    }
+
+    &.winner {
+        background: rgba(255, 215, 0, 0.1);
+        border-left: 3px solid $color-gold;
+    }
+}
+
+.rankings-rank {
+    width: 32px;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-muted;
+    text-align: center;
+
+    .rankings-item.winner & {
+        color: $color-gold;
+    }
+}
+
+.rankings-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.rankings-name {
+    flex: 1;
+    font-size: $font-size-base;
+    color: $color-text-primary;
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+
+    .tag.you {
+        @include tag-base;
+        background: $color-accent;
+        color: $color-text-primary;
+    }
+}
+
+// ===== Actions =====
+
+.winner-modal-actions {
+    display: flex;
+    gap: $spacing-md;
+    padding: 1.25rem;
+    border-top: 1px solid $color-border-primary;
+    background: $color-bg-secondary;
+
+    .btn {
+        flex: 1;
+        padding: $spacing-md $spacing-lg;
+        font-size: $font-size-md;
+        font-weight: $font-weight-semibold;
+        border-radius: $radius-md;
+        cursor: pointer;
+        transition: all $transition-normal;
+    }
+}
+
+.play-again-btn {
+    background: $gradient-success;
+    color: $color-text-primary;
+    border: none;
+
+    &:hover:not(:disabled) {
+        background: linear-gradient(135deg, #5CBF60 0%, #55b059 100%);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+    }
+
+    &.disabled,
+    &:disabled {
+        background: #666;
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+}
+
+.leave-btn {
+    background: transparent;
+    color: $color-text-primary;
+    border: 1px solid $color-border-secondary;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: $color-text-dim;
+    }
+}
+
+// ===== Winner Overlay (alternative) =====
+
+.winner-overlay {
+    @include fixed-fill;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: $z-modal;
+    cursor: pointer;
+}
+
+.winner-overlay .winner-modal {
+    background: linear-gradient(135deg, $color-bg-primary 0%, #16213e 100%);
+    padding: $spacing-2xl;
+    min-width: 320px;
+    max-width: 90vw;
+    box-shadow: $shadow-xl;
+    text-align: center;
+    cursor: default;
+
+    h2 {
+        margin: 0 0 $spacing-xl 0;
+        font-size: $font-size-2xl;
+        color: $color-text-primary;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }
+}
+
+.winner-list {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+    margin-bottom: $spacing-xl;
+}
+
+.winner-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    padding: $spacing-md $spacing-lg;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: $radius-lg;
+
+    &:first-child {
+        background: rgba(255, 215, 0, 0.15);
+        border: 1px solid rgba(255, 215, 0, 0.3);
+    }
+}
+
+.winner-medal {
+    font-size: $font-size-xl;
+    min-width: 2rem;
+}
+
+.winner-rank {
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-muted;
+}
+
+.winner-hint {
+    margin: 0;
+    color: $color-text-disabled;
+    font-size: $font-size-sm;
+}

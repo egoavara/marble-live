@@ -1,0 +1,165 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// ===== Sequence List =====
+
+.sequence-list {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.sequence-list-items {
+    flex: 1;
+    overflow-y: auto;
+    padding: $spacing-sm 0;
+}
+
+.sequence-list-item {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xs;
+    padding: 0.6rem $spacing-md;
+    margin: 0 $spacing-sm $spacing-xs $spacing-sm;
+    background: rgba(40, 40, 40, 0.6);
+    border-radius: $radius-md;
+    cursor: pointer;
+    transition: all $transition-fast;
+    border: 1px solid transparent;
+
+    &:hover {
+        background: rgba(50, 50, 50, 0.8);
+    }
+
+    &.selected {
+        background: rgba(102, 126, 234, 0.2);
+        border-color: rgba(102, 126, 234, 0.5);
+    }
+}
+
+.sequence-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sequence-name {
+    font-size: $font-size-base;
+    font-weight: $font-weight-normal;
+    color: #e0e0e0;
+}
+
+.sequence-item-actions {
+    display: flex;
+    gap: $spacing-xs;
+    opacity: 0;
+    transition: opacity $transition-fast;
+
+    .sequence-list-item:hover & {
+        opacity: 1;
+    }
+}
+
+.sequence-autoplay-btn,
+.sequence-delete-btn {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 0.7rem;
+    color: $color-text-muted;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-fast;
+}
+
+.sequence-autoplay-btn.active {
+    color: $color-success;
+    background: rgba(76, 175, 80, 0.2);
+}
+
+.sequence-delete-btn:hover {
+    color: #ff5252;
+    background: rgba(255, 82, 82, 0.2);
+}
+
+.sequence-item-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: $font-size-sm;
+    color: $color-text-disabled;
+}
+
+.sequence-targets {
+    @include text-ellipsis;
+    max-width: 60%;
+}
+
+.sequence-keyframe-count {
+    color: $color-text-muted;
+}
+
+.sequence-list-empty {
+    padding: $spacing-2xl $spacing-lg;
+    text-align: center;
+    color: $color-text-disabled;
+    font-size: $font-size-base;
+    font-style: italic;
+}
+
+.sequence-list-footer {
+    padding: $spacing-md;
+    border-top: 1px solid $color-border-subtle;
+    flex-shrink: 0;
+}
+
+// ===== Sequence Add Modal =====
+
+.sequence-add-modal {
+    @include absolute-fill;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: $z-header;
+}
+
+.sequence-add-modal-content {
+    background: #2a2a2a;
+    border-radius: $radius-lg;
+    padding: $spacing-lg;
+    width: 90%;
+    max-width: 250px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.sequence-add-modal-header {
+    font-size: 0.9rem;
+    font-weight: $font-weight-semibold;
+    color: #e0e0e0;
+    margin-bottom: $spacing-md;
+}
+
+.sequence-name-input {
+    width: 100%;
+    padding: $spacing-sm;
+    font-size: $font-size-base;
+    color: #e0e0e0;
+    background: #1a1a1a;
+    border: 1px solid $color-border-secondary;
+    border-radius: $radius-sm;
+    margin-bottom: $spacing-md;
+    box-sizing: border-box;
+
+    &:focus {
+        outline: none;
+        border-color: $color-accent;
+    }
+}
+
+.sequence-add-modal-actions {
+    display: flex;
+    gap: $spacing-sm;
+    justify-content: flex-end;
+}

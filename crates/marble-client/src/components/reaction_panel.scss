@@ -1,0 +1,132 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+@use '../../styles/animations' as *;
+
+// ===== Reaction Panel (Inline - Expandable) =====
+
+.reaction-panel-inline {
+    position: absolute;
+    left: 4px;
+    top: 4px;
+    bottom: 4px;
+    width: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    background: transparent;
+    border-radius: $radius-pill;
+    padding: 0 4px;
+    overflow: hidden;
+    transition: all 0.25s ease;
+    z-index: 5;
+    box-sizing: border-box;
+
+    &:not(.expanded) .reaction-btn-inline:not(.primary) {
+        width: 0;
+        min-width: 0;
+        padding: 0;
+        margin: 0;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    // Expanded: overlay on top of chat input with blur effect
+    &.expanded {
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: calc(100% - 4px);
+        gap: $spacing-xs;
+        padding: 4px 8px;
+        background: rgba(20, 20, 35, 0.95);
+        backdrop-filter: blur(4px);
+        border-radius: $radius-pill;
+    }
+}
+
+.reaction-btn-inline {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    font-size: 1.1rem;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all $transition-normal, width $transition-slow, min-width $transition-slow, opacity $transition-slow;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    &:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.15);
+        transform: scale(1.1);
+    }
+
+    &:active:not(:disabled) {
+        transform: scale(0.95);
+    }
+
+    &.primary {
+        background: transparent;
+    }
+
+    &:disabled,
+    &.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+
+        &:hover {
+            transform: none;
+            background: transparent;
+            border-color: transparent;
+        }
+    }
+
+    // Pending (most recently selected) emoji highlight
+    &.pending {
+        background: rgba(99, 102, 241, 0.3);
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.5);
+    }
+}
+
+.reaction-panel-inline.expanded .reaction-btn-inline.primary {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+// ===== Reaction Display (Floating Emojis) =====
+
+.reaction-display {
+    position: absolute;
+    bottom: 100px;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    z-index: $z-floating-panel;
+    overflow: visible;
+}
+
+.floating-emoji {
+    position: absolute;
+    font-size: 2.5rem;
+    animation: floatUp 3s ease-out forwards;
+    text-shadow:
+        2px 2px 4px rgba(0, 0, 0, 0.5),
+        -2px -2px 4px rgba(0, 0, 0, 0.5);
+}
+
+// ===== Responsive =====
+
+@include respond-to('lg') {
+    .reaction-btn-inline {
+        width: 28px;
+        height: 28px;
+        min-width: 28px;
+        font-size: $font-size-md;
+    }
+
+    .reaction-panel-inline:not(.expanded) {
+        width: 32px;
+    }
+}

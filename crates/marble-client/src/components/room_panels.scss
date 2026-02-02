@@ -1,0 +1,302 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// ===== Room Info Panel =====
+
+.room-info-panel {
+    background: $color-bg-primary;
+    border-radius: $radius-lg;
+    padding: $spacing-lg;
+    border: 1px solid $color-bg-secondary;
+}
+
+.room-info-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: $spacing-sm;
+}
+
+.room-info-label {
+    font-size: $font-size-base;
+    color: $color-text-muted;
+    font-weight: $font-weight-normal;
+}
+
+.copy-btn {
+    padding: $spacing-xs $spacing-md;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-normal;
+    color: $color-accent;
+    background: transparent;
+    border: 1px solid $color-accent;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover {
+        background: rgba(102, 126, 234, 0.1);
+    }
+
+    &.copied {
+        color: $color-success;
+        border-color: $color-success;
+        background: rgba(76, 175, 80, 0.1);
+    }
+}
+
+.room-id-display {
+    display: block;
+    padding: $spacing-sm;
+    background: $color-bg-secondary;
+    border-radius: $radius-sm;
+    font-size: $font-size-sm;
+    color: #a0a0ff;
+    word-break: break-all;
+    font-family: $font-family-mono;
+}
+
+.room-id-text {
+    font-family: $font-family-mono;
+    font-size: $font-size-base;
+    color: $color-text-disabled;
+}
+
+// ===== Peer Status Panel (Dark Mode) =====
+
+.peer-status-panel {
+    background: $color-bg-primary;
+    border-radius: $radius-lg;
+    padding: $spacing-lg;
+    border: 1px solid $color-bg-secondary;
+
+    h3 {
+        margin: 0 0 $spacing-md 0;
+        font-size: $font-size-md;
+        color: $color-text-primary;
+        font-weight: $font-weight-semibold;
+    }
+}
+
+.player-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    padding: $spacing-sm;
+    background: $color-bg-secondary;
+    border-radius: $radius-sm;
+    margin-bottom: $spacing-sm;
+
+    &.self {
+        background: rgba(102, 126, 234, 0.15);
+        border: 1px solid rgba(102, 126, 234, 0.3);
+    }
+
+    &.disconnected {
+        opacity: 0.6;
+    }
+}
+
+.player-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.player-name {
+    flex: 1;
+    color: $color-text-primary;
+    font-size: $font-size-base;
+    @include text-ellipsis;
+}
+
+.badge {
+    @include tag-base;
+    border-radius: $radius-sm;
+
+    &.host {
+        background: $color-warning;
+        color: $color-text-primary;
+    }
+
+    &.disconnected {
+        background: $color-text-disabled;
+        color: $color-text-primary;
+    }
+}
+
+.ready-status {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-normal;
+
+    &.ready {
+        color: $color-success;
+    }
+
+    &.not-ready {
+        color: $color-warning;
+    }
+}
+
+.rtt {
+    font-size: $font-size-sm;
+    color: $color-text-muted;
+    font-family: $font-family-mono;
+
+    &.good {
+        color: $color-success;
+    }
+
+    &.medium {
+        color: $color-warning;
+    }
+
+    &.bad {
+        color: $color-error;
+    }
+}
+
+.waiting-message {
+    color: $color-text-disabled;
+    font-style: italic;
+    font-size: $font-size-base;
+    padding: $spacing-sm;
+    text-align: center;
+}
+
+// ===== Lobby Panel =====
+
+.lobby-panel {
+    background: $color-bg-primary;
+    border-radius: $radius-lg;
+    padding: $spacing-lg;
+    border: 1px solid $color-bg-secondary;
+}
+
+.leave-room-btn {
+    width: 100%;
+    padding: $spacing-md $spacing-lg;
+    font-size: $font-size-base;
+    font-weight: $font-weight-normal;
+    color: $color-text-primary;
+    background: $color-text-disabled;
+    border: none;
+    border-radius: $radius-md;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover {
+        background: #777;
+    }
+}
+
+// ===== Game Status Panel =====
+
+.game-status-panel {
+    background: $color-bg-primary;
+    border-radius: $radius-lg;
+    padding: $spacing-lg;
+    border: 1px solid $color-bg-secondary;
+
+    h3 {
+        margin: 0 0 $spacing-md 0;
+        font-size: $font-size-md;
+        color: $color-text-primary;
+        font-weight: $font-weight-semibold;
+    }
+}
+
+.status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: $spacing-sm;
+}
+
+.status-label {
+    color: $color-text-muted;
+    font-size: $font-size-base;
+}
+
+.status-value {
+    font-weight: $font-weight-normal;
+
+    &.running {
+        color: $color-success;
+    }
+
+    &.countdown {
+        color: $color-warning;
+    }
+
+    &.finished {
+        color: $color-accent;
+    }
+
+    &.resyncing {
+        color: $color-error;
+    }
+}
+
+.status-info {
+    font-family: $font-family-mono;
+    font-size: $font-size-sm;
+    color: $color-text-muted;
+    padding: $spacing-sm;
+    background: $color-bg-secondary;
+    border-radius: $radius-sm;
+    margin-bottom: $spacing-sm;
+}
+
+.countdown-display {
+    text-align: center;
+    font-size: $font-size-3xl;
+    font-weight: $font-weight-bold;
+    color: $color-warning;
+    margin: $spacing-lg 0;
+}
+
+.back-to-lobby-btn {
+    width: 100%;
+    padding: $spacing-md $spacing-lg;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+    background: $color-success;
+    border: none;
+    border-radius: $radius-md;
+    cursor: pointer;
+    transition: all $transition-normal;
+    margin-top: $spacing-sm;
+
+    &:hover {
+        background: #5CBF60;
+    }
+}
+
+// ===== Settings Page =====
+
+.settings-page {
+    padding: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.settings-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: $spacing-2xl;
+
+    h2 {
+        margin-bottom: $spacing-2xl;
+    }
+}
+
+.settings-form {
+    width: 100%;
+    max-width: 400px;
+}

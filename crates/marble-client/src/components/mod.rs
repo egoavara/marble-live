@@ -4,6 +4,8 @@ mod camera_controls;
 // mod canvas;
 // mod canvas_controls;
 mod chat_panel;
+mod marble_editor;
+mod marble_game;
 // mod connection_panel;
 // mod controls;
 // mod debug_log;
@@ -29,19 +31,26 @@ mod settings_modal;
 // mod share_button;
 mod welcome_modal;
 
+#[allow(unused_imports)]
 pub use camera_controls::*;
 pub use chat_panel::*;
+#[allow(unused_imports)]
 pub use game_view::*;
+pub use marble_editor::*;
+pub use marble_game::*;
 pub use layout::*;
 pub use logo::*;
 pub use logo_expandable::*;
 pub use meatball::*;
 pub use modal::*;
+#[allow(unused_imports)]
 pub use network_visualization::{NetworkVisualization, PeerNetworkInfo};
 pub use peer_list::*;
 pub use peer_instance_card::{PeerConfig, PeerInstanceCard};
+#[allow(unused_imports)]
 pub use player_dashboard::*;
 pub use reaction_display::*;
+#[allow(unused_imports)]
 pub use reaction_panel::*;
 pub use settings_modal::*;
 pub use welcome_modal::*;

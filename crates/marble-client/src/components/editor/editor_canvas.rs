@@ -14,9 +14,12 @@ use yew::prelude::*;
 
 use super::context_menu::{ContextMenu, ContextMenuState};
 use super::gizmo::{self, generate_bezier_gizmo, generate_gizmo, generate_line_gizmo, generate_pivot_gizmo, hit_test_bezier_gizmo, hit_test_ghost, hit_test_gizmo, hit_test_line_gizmo, hit_test_pivot_gizmo};
+// Re-export instance types from gizmo module
+use super::gizmo::{CircleInstance, LineInstance, RectInstance};
 use super::interaction::{BezierTransform, EditorInteractionState, GhostTransform, GizmoHandle, LineTransform, ObjectTransform, PivotTransform};
 use crate::camera::{CameraMode, CameraState};
-use crate::renderer::{CircleInstance, LineInstance, RectInstance, WgpuRenderer};
+// Use stub renderer during Bevy migration
+use crate::renderer_stub::WgpuRenderer;
 
 /// Preview transform during drag (standard, bezier, line, or pivot).
 #[derive(Debug, Clone, Copy)]
@@ -418,13 +421,14 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                                     easing: easing.clone(),
                                                 })
                                             }
-                                            Keyframe::PivotRotate { pivot, duration, easing, .. } => {
+                                            Keyframe::PivotRotate { pivot, pivot_mode, duration, easing, .. } => {
                                                 let from_angle = (ghost_t.init_pos[1] - pivot[1])
                                                     .atan2(ghost_t.init_pos[0] - pivot[0]);
                                                 let to_angle = (ghost_t.center.1 - pivot[1])
                                                     .atan2(ghost_t.center.0 - pivot[0]);
                                                 Some(Keyframe::PivotRotate {
                                                     pivot: *pivot,
+                                                    pivot_mode: *pivot_mode,
                                                     angle: (to_angle - from_angle).to_degrees(),
                                                     duration: *duration,
                                                     easing: easing.clone(),
@@ -1155,9 +1159,10 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                 // Update keyframe with new pivot position
                                 if let Some(seq) = &selected_sequence {
                                     if let Some(kf) = seq.keyframes.get(kf_idx) {
-                                        if let Keyframe::PivotRotate { angle, duration, easing, .. } = kf {
+                                        if let Keyframe::PivotRotate { pivot_mode, angle, duration, easing, .. } = kf {
                                             let updated_kf = Keyframe::PivotRotate {
                                                 pivot: [pivot_t.point.0, pivot_t.point.1],
+                                                pivot_mode: *pivot_mode,
                                                 angle: *angle,
                                                 duration: *duration,
                                                 easing: easing.clone(),
@@ -1183,13 +1188,14 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                                     easing: easing.clone(),
                                                 }
                                             }
-                                            Keyframe::PivotRotate { pivot, duration, easing, .. } => {
+                                            Keyframe::PivotRotate { pivot, pivot_mode, duration, easing, .. } => {
                                                 let from_angle = (ghost_t.init_pos[1] - pivot[1])
                                                     .atan2(ghost_t.init_pos[0] - pivot[0]);
                                                 let to_angle = (ghost_t.center.1 - pivot[1])
                                                     .atan2(ghost_t.center.0 - pivot[0]);
                                                 Keyframe::PivotRotate {
                                                     pivot: *pivot,
+                                                    pivot_mode: *pivot_mode,
                                                     angle: (to_angle - from_angle).to_degrees(),
                                                     duration: *duration,
                                                     easing: easing.clone(),
@@ -1659,9 +1665,10 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                     // Update keyframe with new pivot position
                     if let Some(seq) = &selected_sequence {
                         if let Some(kf) = seq.keyframes.get(kf_idx) {
-                            if let Keyframe::PivotRotate { angle, duration, easing, .. } = kf {
+                            if let Keyframe::PivotRotate { pivot_mode, angle, duration, easing, .. } = kf {
                                 let updated_kf = Keyframe::PivotRotate {
                                     pivot: [pivot_t.point.0, pivot_t.point.1],
+                                    pivot_mode: *pivot_mode,
                                     angle: *angle,
                                     duration: *duration,
                                     easing: easing.clone(),
@@ -1687,13 +1694,14 @@ pub fn editor_canvas(props: &EditorCanvasProps) -> Html {
                                         easing: easing.clone(),
                                     }
                                 }
-                                Keyframe::PivotRotate { pivot, duration, easing, .. } => {
+                                Keyframe::PivotRotate { pivot, pivot_mode, duration, easing, .. } => {
                                     let from_angle = (ghost_t.init_pos[1] - pivot[1])
                                         .atan2(ghost_t.init_pos[0] - pivot[0]);
                                     let to_angle = (ghost_t.center.1 - pivot[1])
                                         .atan2(ghost_t.center.0 - pivot[0]);
                                     Keyframe::PivotRotate {
                                         pivot: *pivot,
+                                        pivot_mode: *pivot_mode,
                                         angle: (to_angle - from_angle).to_degrees(),
                                         duration: *duration,
                                         easing: easing.clone(),

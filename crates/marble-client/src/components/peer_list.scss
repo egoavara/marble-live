@@ -1,0 +1,177 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+@use '../../styles/animations' as *;
+
+// ===== PeerList (Overlay) =====
+
+.peer-list {
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 220px;
+    @include floating-panel;
+    z-index: $z-floating-panel;
+}
+
+.peer-list-header {
+    padding: $spacing-md $spacing-lg;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-muted;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: $color-bg-panel-header;
+    border-bottom: 1px solid $color-border-subtle;
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+}
+
+.peer-list-title {
+    flex: 1;
+}
+
+.peer-list-count {
+    font-size: $font-size-sm;
+    color: $color-text-disabled;
+}
+
+.peer-list-debug {
+    padding: $spacing-xs $spacing-lg;
+    font-size: 0.65rem;
+    color: $color-warning;
+    background: rgba(255, 152, 0, 0.1);
+    font-family: $font-family-mono;
+}
+
+.peer-list-items {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.peer-list-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    padding: $spacing-md $spacing-md;
+    border-bottom: 1px solid rgba(51, 51, 51, 0.3);
+    transition: background $transition-normal;
+
+    &:last-child {
+        border-bottom: none;
+    }
+
+    &.self {
+        background: rgba(102, 126, 234, 0.15);
+        border-left: 3px solid $color-accent;
+        padding-left: calc($spacing-md - 3px);
+    }
+
+    &.arrived {
+        background: rgba(76, 175, 80, 0.15);
+
+        &.self {
+            background: linear-gradient(90deg, rgba(102, 126, 234, 0.15) 0%, rgba(76, 175, 80, 0.15) 100%);
+        }
+    }
+}
+
+.peer-rank {
+    width: 20px;
+    font-size: $font-size-sm;
+    color: $color-text-disabled;
+    text-align: center;
+    font-weight: $font-weight-semibold;
+    flex-shrink: 0;
+
+    &.arrived {
+        color: $color-success;
+        font-weight: $font-weight-bold;
+    }
+
+    &.pending {
+        color: $color-text-disabled;
+    }
+
+    &.live {
+        color: $color-warning;
+        font-style: italic;
+    }
+}
+
+.peer-status {
+    font-size: $font-size-xs;
+    flex-shrink: 0;
+
+    &.connected {
+        color: $color-success;
+    }
+
+    &.disconnected {
+        color: $color-text-disabled;
+    }
+}
+
+.peer-name {
+    flex: 1;
+    font-size: $font-size-base;
+    color: $color-text-primary;
+    @include text-ellipsis;
+}
+
+.peer-tag {
+    @include tag-base;
+    flex-shrink: 0;
+
+    &.you {
+        background: $gradient-accent;
+        color: $color-text-primary;
+    }
+}
+
+.peer-rtt {
+    font-size: 0.7rem;
+    color: $color-text-muted;
+    font-family: $font-family-mono;
+    flex-shrink: 0;
+}
+
+.peer-arrived-check {
+    color: $color-success;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-bold;
+    flex-shrink: 0;
+}
+
+// ===== Connection Indicator =====
+
+.connection-indicator {
+    font-size: $font-size-sm;
+
+    &.connected {
+        color: $color-success;
+    }
+
+    &.connecting {
+        color: $color-warning;
+        animation: pulse 1.5s infinite;
+    }
+
+    &.disconnected {
+        color: $color-text-disabled;
+    }
+
+    &.error {
+        color: $color-error;
+    }
+}
+
+// ===== Responsive =====
+
+@include respond-to('lg') {
+    .peer-list {
+        left: 10px;
+        width: 180px;
+    }
+}

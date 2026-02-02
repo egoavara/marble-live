@@ -1,0 +1,699 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+@use '../../../styles/animations' as *;
+
+// ===== 타임라인 패널 (하단 고정) =====
+
+.editor-panel-bottom {
+    // .editor-floating-panel 스타일 오버라이드
+    position: fixed !important;
+    bottom: 20px !important;
+    left: 50% !important;
+    right: auto !important;
+    top: auto !important;
+    transform: translateX(-50%) !important;
+    width: calc(100% - 560px);
+    max-width: 800px;
+    min-width: 400px;
+    height: auto !important;
+    max-height: none !important;
+    min-height: auto !important;
+    background: rgba(24, 24, 24, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: $radius-xl;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    border: 1px solid $color-border-subtle;
+    z-index: $z-header;
+}
+
+.timeline-panel {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+}
+
+.timeline-empty {
+    padding: $spacing-sm $spacing-lg;
+    text-align: center;
+    color: $color-text-disabled;
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+// ===== 헤더 =====
+
+.timeline-header {
+    padding: $spacing-sm $spacing-md;
+    border-bottom: 1px solid $color-border-subtle;
+    flex-shrink: 0;
+}
+
+.timeline-sequence-info {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    margin-bottom: $spacing-xs;
+}
+
+.timeline-sequence-name {
+    font-size: $font-size-md;
+    font-weight: $font-weight-semibold;
+    color: #e0e0e0;
+}
+
+.timeline-edit-targets-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: $color-text-muted;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+        color: $color-text-primary;
+        background: rgba(102, 126, 234, 0.3);
+    }
+}
+
+.timeline-targets-display {
+    font-size: 0.8rem;
+    color: $color-text-muted;
+}
+
+.timeline-no-targets {
+    font-style: italic;
+    color: $color-text-disabled;
+}
+
+.timeline-targets-summary {
+    @include text-ellipsis;
+}
+
+// ===== 타겟 에디터 =====
+
+.timeline-targets-editor {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: $radius-md;
+    padding: $spacing-sm;
+}
+
+.timeline-targets-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $spacing-xs;
+    margin-bottom: $spacing-sm;
+    min-height: 24px;
+}
+
+.timeline-target-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+    padding: 0.2rem $spacing-sm;
+    font-size: $font-size-sm;
+    color: #e0e0e0;
+    background: rgba(102, 126, 234, 0.3);
+    border-radius: $radius-sm;
+}
+
+.timeline-target-remove {
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    font-size: 0.65rem;
+    color: $color-text-muted;
+    background: transparent;
+    border: none;
+    border-radius: $radius-xs;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+        color: #ff5252;
+        background: rgba(255, 82, 82, 0.2);
+    }
+}
+
+.timeline-targets-add {
+    display: flex;
+    gap: $spacing-xs;
+}
+
+.timeline-target-select,
+.timeline-target-input {
+    flex: 1;
+    padding: 0.35rem $spacing-sm;
+    font-size: 0.8rem;
+    color: #e0e0e0;
+    background: #1a1a1a;
+    border: 1px solid $color-border-secondary;
+    border-radius: $radius-sm;
+
+    &:focus {
+        outline: none;
+        border-color: $color-accent;
+    }
+}
+
+.timeline-target-add-btn {
+    width: 28px;
+    padding: 0;
+    font-size: $font-size-md;
+    color: $color-text-primary;
+    background: $color-success;
+    border: none;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+        background: #45a049;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+// ===== 키프레임 트랙 =====
+
+.timeline-track {
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: $spacing-sm $spacing-md;
+}
+
+.timeline-keyframes {
+    display: flex;
+    gap: 0;
+    min-width: min-content;
+    align-items: center;
+}
+
+// ===== 키프레임 =====
+
+.timeline-keyframe {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.4rem $spacing-sm;
+    background: rgba(40, 40, 40, 0.8);
+    border-radius: $radius-sm;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all $transition-fast;
+    position: relative;
+    font-size: $font-size-sm;
+
+    &:hover {
+        background: rgba(50, 50, 50, 0.9);
+    }
+
+    &.selected {
+        border-color: $color-accent;
+        background: rgba(102, 126, 234, 0.2);
+    }
+
+    &.playing {
+        border-color: $color-success;
+        background: rgba(76, 175, 80, 0.3);
+        box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+        animation: pulse-playing 0.5s ease-in-out infinite alternate;
+    }
+
+    // 드래그 앤 드롭
+    &.dragging {
+        opacity: 0.5;
+        transform: scale(0.95);
+        cursor: grabbing;
+    }
+
+    &.drag-over {
+        border-left: 3px solid $color-accent;
+        margin-left: -1px;
+    }
+
+    &:not(.dragging) {
+        cursor: grab;
+    }
+
+    // 키프레임 타입별 스타일
+    &.loop-start {
+        background: rgba(158, 158, 158, 0.2);
+        border-left: 2px solid #9e9e9e;
+    }
+
+    &.loop-end {
+        background: rgba(158, 158, 158, 0.2);
+        border-right: 2px solid #9e9e9e;
+    }
+
+    &.delay {
+        background: rgba(189, 189, 189, 0.15);
+    }
+
+    &.apply {
+        background: rgba(33, 150, 243, 0.2);
+    }
+
+    &.pivot {
+        background: rgba(255, 152, 0, 0.2);
+    }
+
+    // CEL 표현식
+    &.cel-expr {
+        background-color: rgba(189, 189, 189, 0.25);
+        border: none;
+        position: relative;
+        min-width: 50px;
+        border-radius: $radius-sm 0 0 $radius-sm;
+        overflow: visible;
+        margin-right: 4px;
+
+        &:hover {
+            background-color: rgba(189, 189, 189, 0.35);
+        }
+    }
+}
+
+.timeline-keyframe-badge {
+    font-size: 0.65rem;
+    font-weight: $font-weight-bold;
+    color: $color-text-muted;
+
+    .timeline-keyframe.loop-start &,
+    .timeline-keyframe.loop-end & {
+        color: #9e9e9e;
+    }
+
+    .timeline-keyframe.delay & {
+        color: #bdbdbd;
+    }
+
+    .timeline-keyframe.apply & {
+        color: $color-info;
+    }
+
+    .timeline-keyframe.pivot & {
+        color: $color-warning;
+    }
+}
+
+.timeline-keyframe-icon {
+    color: inherit;
+    flex-shrink: 0;
+}
+
+.timeline-keyframe-label {
+    font-size: 0.6rem;
+    color: #aaa;
+    white-space: nowrap;
+}
+
+.timeline-keyframe-delete {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: $color-text-muted;
+    background: $color-border-primary;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    opacity: 0;
+    transition: all $transition-fast;
+
+    .timeline-keyframe:hover & {
+        opacity: 1;
+    }
+
+    &:hover {
+        color: #ff5252;
+        background: rgba(255, 82, 82, 0.3);
+    }
+}
+
+// ===== CEL Wave =====
+
+.timeline-cel-wave {
+    position: absolute;
+    right: -4px;
+    top: 0;
+    width: 4px;
+    height: 100%;
+    pointer-events: none;
+    fill: inherit;
+
+    .timeline-keyframe.cel-expr & {
+        fill: rgba(189, 189, 189, 0.25);
+    }
+
+    .timeline-keyframe.cel-expr:hover & {
+        fill: rgba(189, 189, 189, 0.35);
+    }
+}
+
+// ===== 인라인 삽입 버튼 =====
+
+.timeline-insert-btn-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 0 3px;
+}
+
+.timeline-insert-btn {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: $color-text-muted;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px dashed $color-text-dim;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all $transition-fast;
+
+    &:hover,
+    .timeline-insert-btn-wrapper.menu-open & {
+        opacity: 1;
+        color: $color-accent;
+        border-color: $color-accent;
+        border-style: solid;
+        background: rgba(102, 126, 234, 0.15);
+    }
+}
+
+.timeline-insert-menu,
+.timeline-insert-menu-fixed {
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    background: #2a2a2a;
+    border-radius: $radius-md;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    z-index: $z-header;
+}
+
+.timeline-insert-menu {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 4px;
+}
+
+.timeline-insert-menu-fixed {
+    position: fixed;
+    transform: translate(-50%, -100%);
+    margin: 0;
+    z-index: $z-toast;
+}
+
+.timeline-insert-menu-item {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: $color-text-muted;
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.15);
+        color: $color-text-primary;
+    }
+
+    &.loop-start,
+    &.loop-end {
+        color: #9e9e9e;
+
+        &:hover {
+            color: #bdbdbd;
+            background: rgba(158, 158, 158, 0.2);
+        }
+    }
+
+    &.delay {
+        color: #bdbdbd;
+
+        &:hover {
+            color: #e0e0e0;
+            background: rgba(189, 189, 189, 0.2);
+        }
+    }
+
+    &.apply {
+        color: $color-info;
+
+        &:hover {
+            background: rgba(33, 150, 243, 0.2);
+        }
+    }
+
+    &.pivot {
+        color: $color-warning;
+
+        &:hover {
+            background: rgba(255, 152, 0, 0.2);
+        }
+    }
+}
+
+// ===== 레거시 추가 메뉴 =====
+
+.timeline-add-menu-old {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: $spacing-sm;
+    background: #2a2a2a;
+    border-radius: $radius-lg;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    z-index: 10;
+}
+
+.timeline-add-menu-item {
+    display: block;
+    width: 100%;
+    padding: 0.6rem $spacing-lg;
+    font-size: $font-size-base;
+    color: #e0e0e0;
+    background: transparent;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    transition: background $transition-fast;
+
+    &:hover {
+        background: rgba(102, 126, 234, 0.2);
+    }
+
+    &.loop-start,
+    &.loop-end {
+        border-left: 3px solid #9e9e9e;
+    }
+
+    &.delay {
+        border-left: 3px solid #bdbdbd;
+    }
+
+    &.apply {
+        border-left: 3px solid $color-info;
+    }
+
+    &.pivot {
+        border-left: 3px solid $color-warning;
+    }
+}
+
+// ===== 키프레임 에디터 =====
+
+.timeline-keyframe-editor {
+    padding: $spacing-md $spacing-lg;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid $color-border-subtle;
+}
+
+.timeline-editor-header {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    font-size: 0.9rem;
+    font-weight: $font-weight-semibold;
+    color: #e0e0e0;
+    margin-bottom: $spacing-md;
+    padding-bottom: $spacing-sm;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.timeline-play-btn {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    height: 28px;
+    padding: 4px 12px;
+    background: rgba(76, 175, 80, 0.3);
+    border: 1px solid $color-success;
+    border-radius: $radius-sm;
+    color: $color-success;
+    cursor: pointer;
+    transition: all $transition-fast;
+    font-size: 0.8rem;
+    font-weight: $font-weight-semibold;
+
+    &:hover:not(:disabled) {
+        background: rgba(76, 175, 80, 0.5);
+        border-color: #66bb6a;
+    }
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    &.playing {
+        background: rgba(255, 152, 0, 0.3);
+        border-color: $color-warning;
+        color: $color-warning;
+        animation: pulse-preview 1s infinite;
+    }
+}
+
+.timeline-deselect-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    margin-left: 4px;
+    background: rgba(244, 67, 54, 0.3);
+    border: 1px solid $color-error;
+    border-radius: $radius-sm;
+    color: $color-error;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+        background: rgba(244, 67, 54, 0.5);
+        border-color: #ef5350;
+    }
+}
+
+.timeline-editor-content {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+}
+
+// ===== 에디터 필드 =====
+
+.editor-row {
+    display: flex;
+    gap: $spacing-lg;
+
+    .editor-field {
+        flex: 1;
+    }
+}
+
+.editor-field {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xs;
+
+    label {
+        font-size: $font-size-sm;
+        color: #9e9e9e;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+}
+
+.editor-input {
+    padding: 0.4rem 0.6rem;
+    font-size: $font-size-base;
+    color: #e0e0e0;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: $radius-sm;
+    outline: none;
+    transition: border-color $transition-fast, background $transition-fast;
+
+    &:focus {
+        border-color: $color-accent;
+        background: rgba(0, 0, 0, 0.4);
+    }
+
+    &::placeholder {
+        color: $color-text-disabled;
+    }
+
+    &.cel-expr {
+        border-color: rgba(255, 152, 0, 0.5);
+        background: rgba(255, 152, 0, 0.1);
+
+        &:focus {
+            border-color: $color-warning;
+        }
+    }
+}
+
+.editor-select {
+    padding: 0.4rem 0.6rem;
+    font-size: $font-size-base;
+    color: #e0e0e0;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: $radius-sm;
+    outline: none;
+    cursor: pointer;
+
+    &:focus {
+        border-color: $color-accent;
+    }
+}
+
+.editor-hint {
+    font-size: 0.7rem;
+    color: $color-text-disabled;
+    font-style: italic;
+
+    &.cel {
+        color: $color-warning;
+    }
+}
+
+.editor-info {
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    font-style: italic;
+    padding: $spacing-sm;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: $radius-sm;
+}

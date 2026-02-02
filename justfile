@@ -10,10 +10,13 @@ clt:
 
 # Run server development (watch mode)
 svr:
-    SKIP_CLIENT_BUILD=1 watchexec -r -e rs,toml,proto -- cargo run -p marble-server
+    SKIP_CLIENT_BUILD=1 watchexec -w ./crates/marble-server -w ./crates/marble-proto -r -e rs,toml,proto -- cargo run -p marble-server
 
 check-clt:
     cargo check -p marble-client --target wasm32-unknown-unknown
+
+check-svr:
+    cargo check -p marble-server
 
 # Force rebuild proto
 build-proto:
@@ -23,10 +26,6 @@ build-proto:
 # Build all crates
 build:
     cargo build --all
-
-# Build client for WASM
-build-wasm:
-    cargo build -p marble-client --target wasm32-unknown-unknown --release
 
 # Build release
 build-release:
@@ -63,10 +62,3 @@ clean:
     cargo clean
     trunk clean
 
-# Watch and run tests
-watch-test:
-    watchexec -e rs,toml -- cargo test --all
-
-# Watch server
-watch-server:
-    watchexec -r -e rs,toml,proto -- cargo run -p marble-server

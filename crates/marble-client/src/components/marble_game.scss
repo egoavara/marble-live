@@ -1,0 +1,188 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// ===== MarbleGame Component =====
+
+.marble-game {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+    background: $color-bg-primary;
+}
+
+.marble-game__canvas-container {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.marble-game__canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.marble-game__overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    padding: $spacing-lg;
+    gap: $spacing-lg;
+
+    > * {
+        pointer-events: auto;
+    }
+}
+
+// ===== Status Bar =====
+
+.marble-game__status {
+    display: flex;
+    align-items: center;
+    gap: $spacing-lg;
+    padding: $spacing-sm $spacing-lg;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: $radius-lg;
+    color: $color-text-primary;
+    font-size: $font-size-base;
+    width: fit-content;
+
+    &--loading {
+        border-left: 3px solid #ffc107;
+    }
+
+    &--ready {
+        border-left: 3px solid $color-success;
+    }
+
+    &--running {
+        border-left: 3px solid $color-info;
+    }
+}
+
+.marble-game__status-text {
+    font-weight: $font-weight-normal;
+}
+
+.marble-game__map-name {
+    color: #aaa;
+    font-size: $font-size-sm;
+}
+
+// ===== Leaderboard =====
+
+.marble-game__leaderboard {
+    position: absolute;
+    top: $spacing-lg;
+    right: $spacing-lg;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: $radius-lg;
+    padding: $spacing-lg;
+    min-width: 180px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.marble-game__leaderboard-title {
+    margin: 0 0 $spacing-md 0;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.marble-game__player-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+}
+
+.marble-game__player {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    padding: 0.375rem $spacing-sm;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: $radius-sm;
+    transition: background $transition-normal;
+
+    &--arrived {
+        background: rgba(76, 175, 80, 0.2);
+    }
+}
+
+.marble-game__player-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.marble-game__player-name {
+    flex: 1;
+    color: $color-text-primary;
+    font-size: 0.8125rem;
+    @include text-ellipsis;
+}
+
+.marble-game__player-rank {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: #ffc107;
+}
+
+.marble-game__player-live-rank {
+    font-size: $font-size-sm;
+    color: $color-text-muted;
+}
+
+// ===== Controls =====
+
+.marble-game__controls {
+    position: absolute;
+    bottom: $spacing-lg;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: $spacing-md;
+}
+
+.marble-game__btn {
+    padding: $spacing-md $spacing-xl;
+    border: none;
+    border-radius: $radius-lg;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    cursor: pointer;
+    transition: all $transition-normal;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+
+    &--spawn {
+        background: $gradient-accent;
+        color: $color-text-primary;
+
+        &:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+    }
+
+    &--clear {
+        background: rgba(255, 255, 255, 0.1);
+        color: $color-text-primary;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+    }
+}

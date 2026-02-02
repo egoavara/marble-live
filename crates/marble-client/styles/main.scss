@@ -1,0 +1,45 @@
+// ===== Marble Live Main Stylesheet =====
+// 진입점 - 모든 SCSS 파일을 import
+
+// ===== 추상화 (변수, mixin) =====
+@use 'variables' as *;
+@use 'mixins' as *;
+@use 'animations';
+
+// ===== 기본 스타일 =====
+@use 'reset';
+@use 'buttons';
+@use 'modals';
+@use 'forms';
+
+// ===== 페이지 =====
+@use '../src/pages/home';
+@use '../src/pages/play';
+@use '../src/pages/editor';
+@use '../src/pages/debug';
+
+// ===== 컴포넌트: 에디터 =====
+@use '../src/components/editor/property_panel';
+@use '../src/components/editor/timeline_panel';
+@use '../src/components/editor/toolbar';
+@use '../src/components/editor/object_list';
+@use '../src/components/editor/sequence_list';
+@use '../src/components/editor/context_menu';
+
+// ===== 컴포넌트: 게임 =====
+@use '../src/components/marble_editor';
+@use '../src/components/marble_game';
+@use '../src/components/game_view';
+@use '../src/components/player_dashboard';
+@use '../src/components/peer_list';
+@use '../src/components/chat_panel';
+@use '../src/components/leaderboard';
+@use '../src/components/reaction_panel';
+
+// ===== 컴포넌트: UI =====
+@use '../src/components/meatball';
+@use '../src/components/logo';
+@use '../src/components/welcome_modal';
+@use '../src/components/settings_modal';
+@use '../src/components/winner_modal';
+@use '../src/components/room_panels';

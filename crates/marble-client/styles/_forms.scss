@@ -1,0 +1,118 @@
+@use 'variables' as *;
+@use 'mixins' as *;
+
+// ===== 폼 그룹 =====
+
+.form-group {
+    margin-bottom: 1.25rem;
+
+    label {
+        display: block;
+        margin-bottom: $spacing-sm;
+        color: $color-text-secondary;
+        font-weight: $font-weight-normal;
+    }
+}
+
+.form-actions {
+    margin-top: $spacing-xl;
+
+    .btn {
+        width: 100%;
+    }
+}
+
+// ===== 입력 필드 =====
+
+.name-input,
+.room-id-input {
+    @include input-field;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.room-id-input {
+    text-align: center;
+}
+
+// ===== 색상 선택기 =====
+
+.color-picker {
+    display: flex;
+    gap: $spacing-sm;
+    flex-wrap: wrap;
+}
+
+.color-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover {
+        transform: scale(1.1);
+    }
+
+    &.selected {
+        border-color: $color-text-primary;
+        box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+    }
+}
+
+// ===== 미리보기 =====
+
+.display-name-preview {
+    background: $color-bg-secondary;
+    padding: $spacing-md $spacing-lg;
+    border-radius: $radius-md;
+    margin-bottom: 1.25rem;
+    text-align: center;
+}
+
+.preview-label {
+    color: $color-text-muted;
+}
+
+.preview-value {
+    color: $color-accent;
+    font-weight: $font-weight-semibold;
+}
+
+// ===== 제출 버튼 =====
+
+.submit-btn {
+    width: 100%;
+    margin-top: $spacing-lg;
+}
+
+// ===== 분리선 =====
+
+.divider {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    color: $color-text-disabled;
+
+    &::before,
+    &::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: $color-border-primary;
+    }
+
+    span {
+        padding: 0 $spacing-lg;
+    }
+}
+
+// ===== 참여 폼 =====
+
+.join-form {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+    width: 100%;
+}

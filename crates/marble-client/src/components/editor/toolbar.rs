@@ -7,6 +7,8 @@ use web_sys::{HtmlInputElement, Url};
 use yew::prelude::*;
 use yew_icons::{Icon, IconData};
 
+use crate::hooks::{send_command, SnapConfigSummary};
+
 /// Props for the EditorToolbar component.
 #[derive(Properties, PartialEq)]
 pub struct EditorToolbarProps {
@@ -22,6 +24,8 @@ pub struct EditorToolbarProps {
     pub on_spawn_count_change: Callback<u32>,
     pub on_spawn: Callback<()>,
     pub on_reset: Callback<()>,
+    // Snap configuration
+    pub snap_config: SnapConfigSummary,
 }
 
 /// Editor toolbar with meatball-style buttons.
@@ -36,7 +40,7 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
         Callback::from(move |_: MouseEvent| {
             if is_dirty {
                 let confirmed = web_sys::window()
-                    .and_then(|w| w.confirm_with_message("Unsaved changes will be lost. Continue?").ok())
+                    .and_then(|w| w.confirm_with_message("Unsaved changes will be lost.").ok())
                     .unwrap_or(false);
                 if !confirmed {
                     return;
@@ -143,6 +147,114 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
     // Simulation control callbacks
     let show_spawn_input = use_state(|| false);
 
+    // Snap settings state
+    let show_snap_settings = use_state(|| false);
+
+    let on_snap_hover_enter = {
+        let show = show_snap_settings.clone();
+        Callback::from(move |_: MouseEvent| {
+            show.set(true);
+        })
+    };
+
+    let on_snap_hover_leave = {
+        let show = show_snap_settings.clone();
+        Callback::from(move |_: MouseEvent| {
+            show.set(false);
+        })
+    };
+
+    let on_grid_snap_toggle = {
+        let current = props.snap_config.grid_snap_enabled;
+        Callback::from(move |_: Event| {
+            let cmd = serde_json::json!({
+                "type": "update_snap_config",
+                "grid_snap_enabled": !current
+            });
+            let _ = send_command(&cmd.to_string());
+        })
+    };
+
+    let on_grid_interval_change = {
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                if let Ok(value) = input.value().parse::<f32>() {
+                    let clamped = value.max(0.01).min(10.0);
+                    let cmd = serde_json::json!({
+                        "type": "update_snap_config",
+                        "grid_snap_interval": clamped
+                    });
+                    let _ = send_command(&cmd.to_string());
+                }
+            }
+        })
+    };
+
+    let on_angle_snap_toggle = {
+        let current = props.snap_config.angle_snap_enabled;
+        Callback::from(move |_: Event| {
+            let cmd = serde_json::json!({
+                "type": "update_snap_config",
+                "angle_snap_enabled": !current
+            });
+            let _ = send_command(&cmd.to_string());
+        })
+    };
+
+    // Grid interval - number input
+    let on_grid_interval_change = {
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                if let Ok(value) = input.value().parse::<f32>() {
+                    let clamped = value.max(0.01).min(10.0);
+                    let cmd = serde_json::json!({
+                        "type": "update_snap_config",
+                        "grid_snap_interval": clamped
+                    });
+                    let _ = send_command(&cmd.to_string());
+                }
+            }
+        })
+    };
+
+    // Angle interval - number input
+    let on_angle_interval_change = {
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<HtmlInputElement>() {
+                if let Ok(value) = input.value().parse::<f32>() {
+                    let clamped = value.max(0.1).min(90.0);
+                    let cmd = serde_json::json!({
+                        "type": "update_snap_config",
+                        "angle_snap_interval": clamped
+                    });
+                    let _ = send_command(&cmd.to_string());
+                }
+            }
+        })
+    };
+
+    // Grid interval option buttons
+    let make_grid_option_callback = |value: f32| {
+        Callback::from(move |_: MouseEvent| {
+            let cmd = serde_json::json!({
+                "type": "update_snap_config",
+                "grid_snap_interval": value
+            });
+            let _ = send_command(&cmd.to_string());
+        })
+    };
+
+    // Angle interval option buttons
+    let make_angle_option_callback = |value: f32| {
+        Callback::from(move |_: MouseEvent| {
+            let cmd = serde_json::json!({
+                "type": "update_snap_config",
+                "angle_snap_interval": value
+            });
+            let _ = send_command(&cmd.to_string());
+        })
+    };
+
     let on_play_pause_click = {
         let on_toggle = props.on_toggle_simulation.clone();
         Callback::from(move |_: MouseEvent| {
@@ -234,8 +346,122 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
                 </span>
             </div>
 
-            // Right group: Simulation controls
+            // Right group: Snap settings + Simulation controls
             <div class="editor-toolbar-group">
+                // Snap settings dropdown
+                <div
+                    class="editor-snap-container"
+                    onmouseenter={on_snap_hover_enter}
+                    onmouseleave={on_snap_hover_leave}
+                >
+                    <button
+                        class={classes!(
+                            "editor-meatball-btn",
+                            (props.snap_config.grid_snap_enabled || props.snap_config.angle_snap_enabled).then_some("active")
+                        )}
+                        title="Snap Settings"
+                    >
+                        <Icon data={IconData::LUCIDE_MAGNET} width="18px" height="18px" />
+                        <span class="editor-snap-arrow">{"▼"}</span>
+                    </button>
+                    if *show_snap_settings {
+                        <div class="editor-snap-dropdown">
+                            // Grid snap section
+                            <div class="editor-snap-section">
+                                <div class="editor-snap-header">
+                                    <label class="editor-snap-label">
+                                        <input
+                                            type="checkbox"
+                                            checked={props.snap_config.grid_snap_enabled}
+                                            onchange={on_grid_snap_toggle}
+                                        />
+                                        {"Grid"}
+                                    </label>
+                                    <input
+                                        type="number"
+                                        class="editor-snap-input"
+                                        value={format!("{:.2}", props.snap_config.grid_snap_interval)}
+                                        step="0.01"
+                                        min="0.01"
+                                        max="10"
+                                        oninput={on_grid_interval_change}
+                                        disabled={!props.snap_config.grid_snap_enabled}
+                                    />
+                                </div>
+                                <div class="editor-snap-options">
+                                    {
+                                        [0.05, 0.1, 0.5, 1.0].iter().map(|&val| {
+                                            let is_selected = (props.snap_config.grid_snap_interval - val).abs() < 0.001;
+                                            let disabled = !props.snap_config.grid_snap_enabled;
+                                            html! {
+                                                <button
+                                                    class={classes!(
+                                                        "editor-snap-option",
+                                                        is_selected.then_some("selected"),
+                                                        disabled.then_some("disabled")
+                                                    )}
+                                                    onclick={make_grid_option_callback(val)}
+                                                    disabled={disabled}
+                                                >
+                                                    {if val < 1.0 { format!("{}", val) } else { "1".to_string() }}
+                                                </button>
+                                            }
+                                        }).collect::<Html>()
+                                    }
+                                </div>
+                            </div>
+
+                            // Angle snap section
+                            <div class="editor-snap-section">
+                                <div class="editor-snap-header">
+                                    <label class="editor-snap-label">
+                                        <input
+                                            type="checkbox"
+                                            checked={props.snap_config.angle_snap_enabled}
+                                            onchange={on_angle_snap_toggle}
+                                        />
+                                        {"Angle"}
+                                    </label>
+                                    <div class="editor-snap-input-group">
+                                        <input
+                                            type="number"
+                                            class="editor-snap-input"
+                                            value={format!("{:.1}", props.snap_config.angle_snap_interval)}
+                                            step="0.5"
+                                            min="0.1"
+                                            max="90"
+                                            oninput={on_angle_interval_change}
+                                            disabled={!props.snap_config.angle_snap_enabled}
+                                        />
+                                        <span class="editor-snap-unit">{"°"}</span>
+                                    </div>
+                                </div>
+                                <div class="editor-snap-options">
+                                    {
+                                        [0.5, 1.0, 5.0, 10.0].iter().map(|&val| {
+                                            let is_selected = (props.snap_config.angle_snap_interval - val).abs() < 0.001;
+                                            let disabled = !props.snap_config.angle_snap_enabled;
+                                            html! {
+                                                <button
+                                                    class={classes!(
+                                                        "editor-snap-option",
+                                                        is_selected.then_some("selected"),
+                                                        disabled.then_some("disabled")
+                                                    )}
+                                                    onclick={make_angle_option_callback(val)}
+                                                    disabled={disabled}
+                                                >
+                                                    {if val < 1.0 { format!("{}°", val) } else { format!("{}°", val as i32) }}
+                                                </button>
+                                            }
+                                        }).collect::<Html>()
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
                 <button
                     class={classes!(
                         "editor-meatball-btn",
@@ -256,9 +482,13 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
                     onmouseleave={on_spawn_hover_leave}
                 >
                     <button
-                        class="editor-meatball-btn"
+                        class={classes!(
+                            "editor-meatball-btn",
+                            (!props.is_simulating).then_some("disabled")
+                        )}
                         onclick={on_spawn_click}
-                        title="Spawn Marbles"
+                        disabled={!props.is_simulating}
+                        title={if props.is_simulating { "Spawn Marbles" } else { "Start simulation first" }}
                     >
                         <Icon data={IconData::LUCIDE_CIRCLE_DOT} width="18px" height="18px" />
                         <span class="editor-spawn-arrow">{"▼"}</span>

@@ -1,0 +1,240 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+@use '../../styles/animations' as *;
+
+// ===== Play Page =====
+
+.play-page {
+    padding: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.play-content {
+    flex: 1;
+    padding: $spacing-lg;
+}
+
+.play-layout {
+    display: flex;
+    gap: $spacing-xl;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.play-main {
+    flex: 1;
+    position: relative;
+}
+
+.play-sidebar {
+    width: $sidebar-width;
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-lg;
+}
+
+.canvas-wrapper {
+    background: $color-bg-primary;
+    border-radius: $radius-lg;
+    overflow: hidden;
+    box-shadow: $shadow-md;
+
+    &.hidden {
+        display: none;
+    }
+}
+
+.game-canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+
+    &.fullscreen {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+}
+
+.canvas-overlay-text {
+    text-align: center;
+    padding: $spacing-lg;
+    color: $color-text-muted;
+}
+
+// ===== Connecting/Error overlays =====
+
+.connecting-overlay,
+.error-overlay {
+    @include flex-center;
+    flex-direction: column;
+    padding: 3rem;
+    background: $color-bg-primary;
+    border-radius: $radius-lg;
+    min-height: 300px;
+}
+
+.connecting-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid $color-border-primary;
+    border-top-color: $color-accent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: $spacing-lg;
+}
+
+.connecting-overlay {
+    p {
+        color: $color-text-muted;
+        margin: $spacing-sm 0;
+    }
+
+    .room-id {
+        font-family: $font-family-mono;
+        font-size: $font-size-base;
+        color: $color-text-disabled;
+    }
+}
+
+.error-message {
+    font-size: $font-size-xl;
+    font-weight: $font-weight-semibold;
+    color: $color-error;
+    margin-bottom: $spacing-sm;
+}
+
+.error-detail {
+    font-size: $font-size-base;
+    color: $color-text-muted;
+    max-width: 400px;
+    text-align: center;
+    background: $color-bg-tertiary;
+    min-height: auto;
+    z-index: 10;
+}
+
+// ===== Fullscreen Game Layout =====
+
+.game-fullscreen {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    background: $color-bg-tertiary;
+}
+
+.game-canvas-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    @include flex-center;
+
+    &.hidden {
+        display: none;
+    }
+}
+
+.connecting-overlay.fullscreen,
+.error-overlay.fullscreen {
+    @include absolute-fill;
+}
+
+// ===== Canvas Controls Overlay =====
+
+.canvas-controls-overlay {
+    @include absolute-fill;
+    @include flex-center;
+    background: rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+
+    &.finished {
+        background: rgba(0, 0, 0, 0.7);
+    }
+}
+
+.canvas-controls-content {
+    text-align: center;
+    pointer-events: auto;
+}
+
+.player-count {
+    font-size: $font-size-2xl;
+    font-weight: $font-weight-bold;
+    color: $color-text-primary;
+    margin-bottom: $spacing-sm;
+}
+
+.status-message {
+    color: #aaa;
+    margin-bottom: $spacing-xl;
+    font-size: $font-size-base;
+}
+
+.control-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+    align-items: center;
+}
+
+.finished-message {
+    font-size: $font-size-2xl;
+    font-weight: $font-weight-bold;
+    color: $color-accent;
+    margin-bottom: $spacing-xl;
+}
+
+// ===== Top Left Controls =====
+
+.top-left-controls {
+    position: absolute;
+    top: $spacing-lg;
+    left: 270px;
+    z-index: $z-floating-panel;
+    display: flex;
+    gap: $spacing-sm;
+}
+
+// ===== Share Button =====
+
+.share-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: $radius-lg;
+    background: rgba(26, 26, 46, 0.9);
+    border: 1px solid $color-border-subtle;
+    cursor: pointer;
+    @include flex-center;
+    transition: all $transition-normal;
+    backdrop-filter: blur(8px);
+
+    &:hover {
+        background: rgba(42, 42, 62, 0.95);
+        border-color: $color-accent;
+        transform: scale(1.05);
+    }
+
+    &.copied {
+        background: rgba(76, 175, 80, 0.3);
+        border-color: $color-success;
+    }
+}
+
+.share-icon {
+    font-size: 1.125rem;
+}
+
+// ===== Responsive =====
+
+@include respond-to('lg') {
+    .play-layout {
+        flex-direction: column;
+    }
+
+    .play-sidebar {
+        width: 100%;
+    }
+}

@@ -14,7 +14,8 @@ mod fingerprint;
 mod hooks;
 mod pages;
 mod ranking;
-mod renderer;
+// mod renderer; // Removed - Bevy handles rendering now
+mod renderer_stub; // Stub for migration period
 mod routes;
 mod services;
 mod state;
@@ -23,6 +24,7 @@ mod util;
 use app::App;
 use tracing_subscriber::fmt::format::Pretty;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::{EnvFilter, Layer};
 use tracing_web::{performance_layer, MakeWebConsoleWriter};
 
 fn main() {
@@ -30,10 +32,13 @@ fn main() {
     pages::set_panic_hook();
 
     // Initialize tracing for wasm with tracing-web
+    let filter = EnvFilter::new("info,wgpu=error,naga=warn");
+
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_ansi(false)
         .without_time()
-        .with_writer(MakeWebConsoleWriter::new());
+        .with_writer(MakeWebConsoleWriter::new())
+        .with_filter(filter);
 
     let perf_layer = performance_layer().with_details_from_fields(Pretty::default());
 

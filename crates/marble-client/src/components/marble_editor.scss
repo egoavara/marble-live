@@ -1,0 +1,93 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+@use '../../styles/animations' as *;
+
+// ===== Marble Editor (Bevy-based) =====
+
+.marble-editor {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: $color-bg-primary;
+}
+
+.marble-editor__canvas-container {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.marble-editor__canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.marble-editor__loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: $spacing-lg;
+    color: $color-text-muted;
+    font-size: $font-size-md;
+    z-index: 10;
+}
+
+.marble-editor__spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top-color: $color-accent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+// ===== Map Editor (Fullscreen Style) =====
+
+.editor-fullscreen {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    background: $color-bg-tertiary;
+}
+
+.editor-canvas-fullscreen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: $color-bg-primary;
+}
+
+// ===== Floating Panels =====
+
+.editor-floating-panel {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    @include floating-panel;
+    z-index: $z-floating-panel;
+    height: calc(100vh - 160px);
+    max-height: 700px;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+.editor-panel-left {
+    left: $spacing-lg;
+    width: $panel-left-width;
+}
+
+.editor-panel-right {
+    right: $spacing-lg;
+    width: $panel-right-width;
+}

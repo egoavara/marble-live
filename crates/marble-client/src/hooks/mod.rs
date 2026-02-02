@@ -1,9 +1,11 @@
+mod use_bevy;
 mod use_config;
 mod use_editor_state;
 mod use_fingerprint;
 mod use_game_loop;
 mod use_grpc_room_service;
 mod use_join_room;
+mod use_keyboard_shortcuts;
 mod use_localstorage;
 mod use_p2p_room;
 mod use_querystring;
@@ -11,6 +13,8 @@ mod use_room_info;
 mod use_room_player;
 mod use_userhash;
 
+pub use use_bevy::*;
+pub use use_keyboard_shortcuts::*;
 pub use use_config::*;
 pub use use_editor_state::*;
 pub use use_fingerprint::use_fingerprint;

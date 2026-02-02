@@ -1,0 +1,300 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// ===== Floating Toolbar (top-center) =====
+
+.editor-toolbar-floating {
+    position: absolute;
+    top: $spacing-lg;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: $spacing-lg;
+    padding: $spacing-sm;
+    background: $color-bg-panel;
+    border-radius: $radius-xl;
+    border: 1px solid $color-border-subtle;
+    backdrop-filter: blur(12px);
+    z-index: $z-header;
+    box-shadow: $shadow-lg;
+}
+
+.editor-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.editor-toolbar-info {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    padding: 0 $spacing-md;
+}
+
+.editor-toolbar-title {
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+}
+
+.editor-toolbar-dirty {
+    color: $color-warning;
+    font-size: $font-size-md;
+    font-weight: $font-weight-bold;
+}
+
+.editor-toolbar-count {
+    font-size: $font-size-sm;
+    color: $color-text-disabled;
+}
+
+// ===== Meatball-style buttons =====
+
+.editor-meatball-btn {
+    @include icon-btn(40px);
+    border-radius: $radius-lg;
+
+    &.active {
+        background: $gradient-accent;
+        color: $color-text-primary;
+    }
+
+    &:disabled,
+    &.disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+
+        &:hover {
+            background: transparent;
+            color: $color-text-muted;
+        }
+    }
+}
+
+.editor-meatball-btn-primary {
+    background: rgba(102, 126, 234, 0.2);
+    color: $color-accent;
+
+    &:hover {
+        background: $gradient-accent;
+        color: $color-text-primary;
+    }
+}
+
+// ===== Spawn button container =====
+
+.editor-spawn-container {
+    position: relative;
+    display: inline-block;
+}
+
+.editor-spawn-arrow {
+    font-size: 8px;
+    margin-left: 2px;
+    opacity: 0.6;
+}
+
+.editor-spawn-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px;
+    background: $color-bg-panel;
+    border-radius: $radius-lg;
+    border: 1px solid $color-border-subtle;
+    backdrop-filter: blur(12px);
+    box-shadow: $shadow-md;
+    z-index: $z-header;
+
+    // Invisible bridge to prevent hover gap
+    &::before {
+        content: "";
+        position: absolute;
+        top: -8px;
+        left: 0;
+        right: 0;
+        height: 8px;
+    }
+}
+
+.editor-spawn-input {
+    width: 60px;
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: $radius-sm;
+    color: $color-text-primary;
+    font-size: 14px;
+    text-align: center;
+
+    &:focus {
+        outline: none;
+        border-color: $color-accent;
+    }
+
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button {
+        opacity: 1;
+    }
+}
+
+// ===== Snap settings container =====
+
+.editor-snap-container {
+    position: relative;
+    display: inline-block;
+}
+
+.editor-snap-arrow {
+    font-size: 8px;
+    margin-left: 2px;
+    opacity: 0.6;
+}
+
+.editor-snap-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(26, 26, 46, 0.98);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: $radius-lg;
+    padding: 10px 12px;
+    min-width: 160px;
+    z-index: $z-header;
+
+    // Invisible bridge to prevent hover gap
+    &::before {
+        content: "";
+        position: absolute;
+        top: -8px;
+        left: 0;
+        right: 0;
+        height: 8px;
+    }
+}
+
+.editor-snap-section {
+    margin-bottom: 10px;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+}
+
+.editor-snap-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+
+    input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        accent-color: $color-accent;
+        cursor: pointer;
+    }
+}
+
+.editor-snap-options {
+    display: flex;
+    gap: 4px;
+}
+
+.editor-snap-option {
+    flex: 1;
+    padding: 4px 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: $radius-sm;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-family: $font-family-mono;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover:not(.disabled) {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.25);
+        color: $color-text-primary;
+    }
+
+    &.selected {
+        background: rgba(102, 126, 234, 0.3);
+        border-color: $color-accent;
+        color: $color-text-primary;
+    }
+
+    &.disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+}
+
+.editor-snap-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.editor-snap-input {
+    width: 50px;
+    padding: 3px 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: $radius-sm;
+    color: $color-text-primary;
+    font-size: 11px;
+    font-family: $font-family-mono;
+    text-align: right;
+    -moz-appearance: textfield;
+
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    &:focus {
+        outline: none;
+        border-color: $color-accent;
+    }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+}
+
+.editor-snap-input-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.editor-snap-unit {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+// ===== 캔버스 로딩 =====
+
+.editor-canvas-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: $spacing-lg;
+    color: $color-text-muted;
+    font-size: $font-size-md;
+    z-index: 10;
+}

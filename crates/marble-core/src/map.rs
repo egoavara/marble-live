@@ -200,6 +200,9 @@ pub enum ObjectRole {
     Spawner,
     Obstacle,
     Trigger,
+    /// Editor-only guideline for alignment assistance.
+    /// Not spawned in game mode.
+    Guideline,
 }
 
 /// Spawn properties for spawner objects.
@@ -271,6 +274,17 @@ pub enum EasingType {
     EaseInOut,
 }
 
+/// Pivot coordinate mode for PivotRotate keyframes.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PivotMode {
+    /// Pivot is in world (absolute) coordinates.
+    #[default]
+    Absolute,
+    /// Pivot is relative to the object's current center.
+    Relative,
+}
+
 impl EasingType {
     /// Applies the easing function to a normalized time value (0.0 to 1.0).
     pub fn apply(&self, t: f32) -> f32 {
@@ -323,15 +337,29 @@ pub enum Keyframe {
     },
     /// Rotates objects around a pivot point (for flippers).
     PivotRotate {
-        /// Pivot point in world coordinates.
+        /// Pivot point coordinates.
+        /// When `pivot_mode` is `Absolute`: world coordinates.
+        /// When `pivot_mode` is `Relative`: offset from object's current center.
         pivot: [f32; 2],
-        /// Target angle offset from initial rotation (degrees).
+        /// Pivot coordinate mode (absolute or relative to object center).
+        #[serde(default)]
+        pivot_mode: PivotMode,
+        /// Target angle offset from current rotation (degrees).
         angle: f32,
         /// Duration of the animation in seconds.
         duration: f32,
         /// Easing function to use.
         #[serde(default)]
         easing: EasingType,
+    },
+    /// Continuous rotation (for spinners).
+    /// This keyframe advances immediately and is meant to run inside an infinite loop.
+    ContinuousRotate {
+        /// Rotation speed in degrees per second.
+        speed: f32,
+        /// Direction of rotation.
+        #[serde(default)]
+        direction: RollDirection,
     },
 }
 
@@ -348,10 +376,54 @@ pub struct KeyframeSequence {
     /// Whether to automatically start this animation.
     #[serde(default = "default_true")]
     pub autoplay: bool,
+    /// Whether this sequence is auto-generated from object properties (e.g., roll).
+    /// Property-managed sequences are regenerated on map load.
+    #[serde(default)]
+    pub property_managed: bool,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_snap_distance() -> f32 {
+    0.15
+}
+
+fn default_ruler_interval() -> f32 {
+    0.5
+}
+
+/// Guideline properties for alignment assistance.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuidelineProperties {
+    /// Guideline color (RGBA, default: cyan).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f32; 4]>,
+    /// Whether to show ruler ticks (default: true).
+    #[serde(default = "default_true")]
+    pub show_ruler: bool,
+    /// Whether snap is enabled for this guideline (default: true).
+    #[serde(default = "default_true")]
+    pub snap_enabled: bool,
+    /// Snap distance in meters (default: 0.15).
+    #[serde(default = "default_snap_distance")]
+    pub snap_distance: f32,
+    /// Ruler interval in meters (default: 0.5).
+    #[serde(default = "default_ruler_interval")]
+    pub ruler_interval: f32,
+}
+
+impl Default for GuidelineProperties {
+    fn default() -> Self {
+        Self {
+            color: None,
+            show_ruler: true,
+            snap_enabled: true,
+            snap_distance: 0.15,
+            ruler_interval: 0.5,
+        }
+    }
 }
 
 /// Combined object properties.
@@ -367,6 +439,8 @@ pub struct ObjectProperties {
     pub trigger: Option<TriggerProperties>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roll: Option<RollProperties>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guideline: Option<GuidelineProperties>,
 }
 
 /// A map object with role, shape, and properties.
@@ -630,6 +704,9 @@ impl RouletteConfig {
                         shape: obj.shape.clone(),
                         properties: obj.properties.spawn.clone(),
                     });
+                }
+                ObjectRole::Guideline => {
+                    // Guidelines are editor-only, not applied to physics world
                 }
             }
 

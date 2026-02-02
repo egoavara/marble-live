@@ -1,0 +1,238 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// ===== Property Panel =====
+
+.property-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-height: 100%;
+}
+
+.property-panel-contextual {
+    // context-based property panel (no tabs)
+}
+
+.property-panel-header {
+    display: flex;
+    align-items: center;
+    padding: $spacing-md $spacing-lg;
+    background: $color-bg-panel-header;
+    border-bottom: 1px solid $color-border-subtle;
+    flex-shrink: 0;
+}
+
+.context-indicator {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+}
+
+.context-icon {
+    font-size: $font-size-md;
+    line-height: 1;
+}
+
+.context-label {
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-accent;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+// ===== 탭 스타일 (레거시 호환) =====
+
+.property-tabs {
+    display: flex;
+    background: $color-bg-panel-header;
+    border-bottom: 1px solid $color-border-subtle;
+    flex-shrink: 0;
+}
+
+.property-tab {
+    flex: 1;
+    padding: $spacing-md $spacing-lg;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: $color-text-muted;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover {
+        color: $color-text-secondary;
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    &.active {
+        color: $color-accent;
+        border-bottom-color: $color-accent;
+    }
+}
+
+// ===== 콘텐츠 영역 =====
+
+.property-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: $spacing-md;
+    min-height: 0;
+}
+
+.property-empty {
+    padding: $spacing-2xl $spacing-lg;
+    text-align: center;
+    color: $color-text-disabled;
+    font-size: $font-size-base;
+}
+
+.property-fields {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-md;
+}
+
+// ===== 섹션 =====
+
+.property-section {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: $radius-lg;
+    padding: $spacing-md;
+}
+
+.property-section-title {
+    font-size: 0.7rem;
+    font-weight: $font-weight-semibold;
+    color: $color-accent;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: $spacing-md;
+    padding-bottom: $spacing-sm;
+    border-bottom: 1px solid $color-border-subtle;
+}
+
+// ===== 필드 =====
+
+.property-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    margin-bottom: $spacing-md;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+
+    label {
+        font-size: $font-size-sm;
+        color: $color-text-muted;
+    }
+
+    input,
+    select {
+        padding: $spacing-md $spacing-md;
+        font-size: $font-size-base;
+        color: $color-text-primary;
+        background: rgba(42, 42, 62, 0.8);
+        border: 1px solid rgba(68, 68, 68, 0.6);
+        border-radius: $radius-md;
+        outline: none;
+        transition: all $transition-normal;
+
+        &:focus {
+            border-color: $color-accent;
+            background: rgba(42, 42, 62, 1);
+        }
+    }
+
+    input::placeholder {
+        color: $color-text-dim;
+    }
+}
+
+.property-field-checkbox {
+    flex-direction: row;
+    align-items: center;
+
+    label {
+        display: flex;
+        align-items: center;
+        gap: $spacing-sm;
+        cursor: pointer;
+    }
+
+    input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: $color-accent;
+    }
+}
+
+.property-field-vec2 {
+    .vec2-inputs {
+        display: flex;
+        gap: $spacing-sm;
+
+        input {
+            flex: 1;
+            min-width: 0;
+        }
+    }
+}
+
+.property-note {
+    font-size: $font-size-sm;
+    color: $color-text-disabled;
+    font-style: italic;
+    padding: $spacing-md;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: $radius-sm;
+}
+
+.property-group {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+}
+
+.property-label {
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    font-weight: $font-weight-normal;
+}
+
+// ===== 간격 프리셋 =====
+
+.interval-presets {
+    display: flex;
+    gap: 0.375rem;
+}
+
+.interval-btn {
+    flex: 1;
+    padding: $spacing-sm $spacing-xs;
+    font-size: 0.8rem;
+    font-weight: $font-weight-normal;
+    color: $color-text-muted;
+    background: rgba(42, 42, 62, 0.8);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+        color: $color-text-secondary;
+        background: rgba(102, 126, 234, 0.2);
+        border-color: rgba(102, 126, 234, 0.5);
+    }
+
+    &.selected {
+        color: $color-text-primary;
+        background: rgba(102, 126, 234, 0.4);
+        border-color: $color-accent;
+    }
+}

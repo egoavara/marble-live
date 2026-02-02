@@ -6,7 +6,80 @@ use marble_core::Color;
 use marble_core::map::{EvaluatedShape, Keyframe};
 
 use super::interaction::{BezierTransform, GhostTransform, GizmoHandle, LineTransform, ObjectTransform, PivotTransform};
-use crate::renderer::{CircleInstance, LineInstance, RectInstance};
+
+// ============================================================================
+// Simple instance types for gizmo rendering
+// These mirror the old renderer types but are standalone.
+// Will be replaced with Bevy Gizmos API in the future.
+// ============================================================================
+
+/// Circle instance for gizmo rendering.
+#[derive(Clone, Debug)]
+pub struct CircleInstance {
+    pub center: (f32, f32),
+    pub radius: f32,
+    pub color: Color,
+    pub border_color: Color,
+    pub border_width: f32,
+}
+
+impl CircleInstance {
+    pub fn new(
+        center: (f32, f32),
+        radius: f32,
+        color: Color,
+        border_color: Color,
+        border_width: f32,
+    ) -> Self {
+        Self { center, radius, color, border_color, border_width }
+    }
+}
+
+/// Line instance for gizmo rendering.
+#[derive(Clone, Debug)]
+pub struct LineInstance {
+    pub start: (f32, f32),
+    pub end: (f32, f32),
+    pub width: f32,
+    pub color: Color,
+}
+
+impl LineInstance {
+    pub fn new(start: (f32, f32), end: (f32, f32), width: f32, color: Color) -> Self {
+        Self { start, end, width, color }
+    }
+}
+
+/// Rectangle instance for gizmo rendering.
+#[derive(Clone, Debug)]
+pub struct RectInstance {
+    pub center: (f32, f32),
+    pub half_size: (f32, f32),
+    pub rotation: f32,
+    pub color: Color,
+    pub border_color: Color,
+    pub border_width: f32,
+}
+
+impl RectInstance {
+    pub fn new(
+        center: (f32, f32),
+        half_size: (f32, f32),
+        rotation_degrees: f32,
+        color: Color,
+        border_color: Color,
+        border_width: f32,
+    ) -> Self {
+        Self {
+            center,
+            half_size,
+            rotation: rotation_degrees.to_radians(),
+            color,
+            border_color,
+            border_width,
+        }
+    }
+}
 
 /// Gizmo visual constants.
 pub mod constants {

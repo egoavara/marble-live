@@ -1,6 +1,5 @@
 //! Meatball menu component for settings access.
 
-use crate::components::SettingsModal;
 use yew::prelude::*;
 use yew_icons::{Icon, IconData};
 

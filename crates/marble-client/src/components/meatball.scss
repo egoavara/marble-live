@@ -1,0 +1,28 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// ===== Meatball Menu Button =====
+
+.meatball-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(26, 26, 46, 0.9);
+    border: 1px solid $color-border-primary;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all $transition-normal;
+    backdrop-filter: blur(8px);
+
+    &:hover {
+        background: rgba(42, 42, 62, 0.95);
+        border-color: $color-border-secondary;
+        transform: scale(1.05);
+    }
+}
+
+.meatball-icon {
+    color: $color-text-primary;
+}
