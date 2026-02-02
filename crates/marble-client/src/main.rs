@@ -22,10 +22,9 @@ mod state;
 mod util;
 
 use app::App;
-use tracing_subscriber::fmt::format::Pretty;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, Layer};
-use tracing_web::{performance_layer, MakeWebConsoleWriter};
+use tracing_web::MakeWebConsoleWriter;
 
 fn main() {
     // Initialize custom panic hook that redirects to panic page
@@ -40,11 +39,11 @@ fn main() {
         .with_writer(MakeWebConsoleWriter::new())
         .with_filter(filter);
 
-    let perf_layer = performance_layer().with_details_from_fields(Pretty::default());
-
+    // NOTE: performance_layer() removed - it records ALL tracing events to
+    // browser's Performance API, causing memory leak (Bevy generates hundreds
+    // of spans per frame). Use Chrome DevTools Performance tab instead.
     tracing_subscriber::registry()
         .with(fmt_layer)
-        .with(perf_layer)
         .init();
 
     yew::Renderer::<App>::new().render();
