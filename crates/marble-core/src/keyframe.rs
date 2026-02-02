@@ -256,15 +256,26 @@ impl KeyframeExecutor {
                             let (world_pivot, offset, end_rotation) = match pivot_mode {
                                 PivotMode::Absolute => {
                                     // Absolute mode: pivot is in world coordinates
-                                    // angle is relative to initial rotation (existing behavior)
-                                    let offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                                    // angle is relative to initial rotation
+                                    // Convert world offset to local coordinates (remove initial rotation)
+                                    let world_offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                                    let (sin_init, cos_init) = (-init_rot).sin_cos();
+                                    let offset = [
+                                        world_offset[0] * cos_init - world_offset[1] * sin_init,
+                                        world_offset[0] * sin_init + world_offset[1] * cos_init,
+                                    ];
                                     let end_rot = init_rot + angle.to_radians();
                                     (*pivot, offset, end_rot)
                                 }
                                 PivotMode::Relative => {
-                                    // Relative mode: pivot is offset from current position
+                                    // Relative mode: pivot is offset from current position in local coordinates
                                     // angle is relative to current rotation
-                                    let world_pivot = [cur_pos[0] + pivot[0], cur_pos[1] + pivot[1]];
+                                    // Rotate pivot offset by current rotation to get world coordinates
+                                    let (sin, cos) = cur_rot.sin_cos();
+                                    let rotated_pivot_x = pivot[0] * cos - pivot[1] * sin;
+                                    let rotated_pivot_y = pivot[0] * sin + pivot[1] * cos;
+                                    let world_pivot = [cur_pos[0] + rotated_pivot_x, cur_pos[1] + rotated_pivot_y];
+                                    // offset is in local coordinates (-pivot)
                                     let offset = [-pivot[0], -pivot[1]];
                                     let end_rot = cur_rot + angle.to_radians();
                                     (world_pivot, offset, end_rot)
@@ -418,18 +429,29 @@ impl KeyframeExecutor {
                             let (world_pivot, offset, final_rot) = match pivot_mode {
                                 PivotMode::Absolute => {
                                     // Absolute mode: use initial position for offset calculation
-                                    let offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                                    // Convert world offset to local coordinates (remove initial rotation)
+                                    let world_offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                                    let (sin_init, cos_init) = (-init_rot).sin_cos();
+                                    let offset = [
+                                        world_offset[0] * cos_init - world_offset[1] * sin_init,
+                                        world_offset[0] * sin_init + world_offset[1] * cos_init,
+                                    ];
                                     let final_rot = init_rot + angle.to_radians();
                                     (*pivot, offset, final_rot)
                                 }
                                 PivotMode::Relative => {
-                                    // Relative mode: use current position
-                                    let world_pivot = [cur_pos[0] + pivot[0], cur_pos[1] + pivot[1]];
-                                    let offset = [-pivot[0], -pivot[1]];
-                                    // For relative mode, get current rotation from state
+                                    // Relative mode: pivot is offset from current position in local coordinates
+                                    // Get current rotation from state
                                     let cur_rot = state.get(target_id)
                                         .map(|(_, r)| *r)
                                         .unwrap_or(init_rot);
+                                    // Rotate pivot offset by current rotation to get world coordinates
+                                    let (sin, cos) = cur_rot.sin_cos();
+                                    let rotated_pivot_x = pivot[0] * cos - pivot[1] * sin;
+                                    let rotated_pivot_y = pivot[0] * sin + pivot[1] * cos;
+                                    let world_pivot = [cur_pos[0] + rotated_pivot_x, cur_pos[1] + rotated_pivot_y];
+                                    // offset is in local coordinates (-pivot)
+                                    let offset = [-pivot[0], -pivot[1]];
                                     let final_rot = cur_rot + angle.to_radians();
                                     (world_pivot, offset, final_rot)
                                 }
