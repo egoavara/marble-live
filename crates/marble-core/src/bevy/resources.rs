@@ -207,11 +207,38 @@ impl KeyframeExecutors {
 #[derive(Resource, Default)]
 pub struct ObjectEntityMap {
     pub map: HashMap<String, Entity>,
+    /// Index-based mapping (MapConfig.objects index → Entity)
+    pub by_index: Vec<Entity>,
 }
 
 impl ObjectEntityMap {
     pub fn insert(&mut self, id: String, entity: Entity) {
         self.map.insert(id, entity);
+    }
+
+    /// Insert entity at specific index (for index-based lookup)
+    pub fn insert_at_index(&mut self, index: usize, entity: Entity) {
+        if index >= self.by_index.len() {
+            self.by_index.resize(index + 1, Entity::PLACEHOLDER);
+        }
+        self.by_index[index] = entity;
+    }
+
+    /// Get entity by index
+    pub fn get_by_index(&self, index: usize) -> Option<Entity> {
+        self.by_index.get(index).copied().filter(|e| *e != Entity::PLACEHOLDER)
+    }
+
+    /// Remove entity at index (shifts subsequent indices)
+    pub fn remove_at_index(&mut self, index: usize) {
+        if index < self.by_index.len() {
+            self.by_index.remove(index);
+        }
+    }
+
+    /// Clear index mapping (called when map is reloaded)
+    pub fn clear_indices(&mut self) {
+        self.by_index.clear();
     }
 
     pub fn get(&self, id: &str) -> Option<Entity> {
@@ -220,6 +247,7 @@ impl ObjectEntityMap {
 
     pub fn clear(&mut self) {
         self.map.clear();
+        self.by_index.clear();
     }
 }
 

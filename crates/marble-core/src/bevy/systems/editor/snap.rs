@@ -1,370 +1,214 @@
-//! Snap system for guideline and axis snapping.
+//! 스냅 시스템
 //!
-//! Provides:
-//! - SnapTarget trait for abstracting snap targets (guidelines, world axes)
-//! - SnapConfig resource for global snap settings
-//! - Utility functions for snap calculations
+//! - 격자 스냅: Global/Local 축 기준, 공유 interval
+//! - Guideline 스냅: Shift 누르면 가장 가까운 guideline에 스냅 (각 guideline별 interval)
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-/// Snap target abstraction for guidelines, world axes, etc.
-pub trait SnapTarget {
-    /// Project a point onto this target, returning the closest point on the target.
-    fn project_point(&self, point: Vec2) -> Vec2;
-
-    /// Calculate perpendicular distance from a point to this target.
-    fn perpendicular_distance(&self, point: Vec2) -> f32;
-
-    /// Get the snap distance threshold.
-    fn snap_distance(&self) -> f32;
-
-    /// Get the ruler interval for shift-snap.
-    fn ruler_interval(&self) -> f32;
-
-    /// Check if this target is enabled.
-    fn is_enabled(&self) -> bool;
-
-    /// Get the direction vector of this target (for distance lines).
-    fn direction(&self) -> Vec2;
-
-    /// Get start point of the target line.
-    fn start(&self) -> Vec2;
-
-    /// Get end point of the target line.
-    fn end(&self) -> Vec2;
-}
-
-/// Line-based snap target (for guidelines and world axes).
-#[derive(Debug, Clone)]
-pub struct LineSnapTarget {
-    pub start: Vec2,
-    pub end: Vec2,
-    pub snap_distance: f32,
-    pub ruler_interval: f32,
-    pub enabled: bool,
-    /// If true, treat as infinite line (perpendicular distance only).
-    /// If false, treat as line segment (distance to nearest point on segment).
-    pub is_infinite: bool,
-}
-
-impl LineSnapTarget {
-    /// Create a new line snap target (defaults to infinite line for guidelines).
-    pub fn new(start: Vec2, end: Vec2, snap_distance: f32, ruler_interval: f32) -> Self {
-        Self {
-            start,
-            end,
-            snap_distance,
-            ruler_interval,
-            enabled: true,
-            is_infinite: true, // Default to infinite for backwards compatibility with guidelines
-        }
-    }
-
-    /// Create a line segment snap target (finite, uses segment distance).
-    pub fn new_segment(start: Vec2, end: Vec2, snap_distance: f32, ruler_interval: f32) -> Self {
-        Self {
-            start,
-            end,
-            snap_distance,
-            ruler_interval,
-            enabled: true,
-            is_infinite: false,
-        }
-    }
-
-    /// Create a horizontal guideline at the given Y position.
-    pub fn horizontal(y: f32, extent: f32, snap_distance: f32, ruler_interval: f32) -> Self {
-        Self::new(
-            Vec2::new(-extent, y),
-            Vec2::new(extent, y),
-            snap_distance,
-            ruler_interval,
-        )
-    }
-
-    /// Create a vertical guideline at the given X position.
-    pub fn vertical(x: f32, extent: f32, snap_distance: f32, ruler_interval: f32) -> Self {
-        Self::new(
-            Vec2::new(x, -extent),
-            Vec2::new(x, extent),
-            snap_distance,
-            ruler_interval,
-        )
-    }
-}
-
-impl SnapTarget for LineSnapTarget {
-    fn project_point(&self, point: Vec2) -> Vec2 {
-        project_point_to_line(point, self.start, self.end)
-    }
-
-    fn perpendicular_distance(&self, point: Vec2) -> f32 {
-        if self.is_infinite {
-            perpendicular_distance_to_line(point, self.start, self.end)
-        } else {
-            distance_to_line_segment(point, self.start, self.end)
-        }
-    }
-
-    fn snap_distance(&self) -> f32 {
-        self.snap_distance
-    }
-
-    fn ruler_interval(&self) -> f32 {
-        self.ruler_interval
-    }
-
-    fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    fn direction(&self) -> Vec2 {
-        (self.end - self.start).normalize_or_zero()
-    }
-
-    fn start(&self) -> Vec2 {
-        self.start
-    }
-
-    fn end(&self) -> Vec2 {
-        self.end
-    }
-}
-
-/// Global snap configuration resource.
+/// 스냅 설정
 #[derive(Resource, Debug, Clone)]
 pub struct SnapConfig {
-    /// Global snap enable/disable toggle.
-    pub global_snap_enabled: bool,
-    /// Whether to show distance lines to nearby snap targets.
-    pub show_distance_lines: bool,
-    /// Distance threshold for showing distance lines (meters).
-    pub distance_line_threshold: f32,
-    /// Whether Shift+drag snaps to ruler intervals.
-    pub shift_snap_to_ruler: bool,
-    /// World X axis (Y=0) enabled.
-    pub world_axis_x_enabled: bool,
-    /// World Y axis (X=0) enabled.
-    pub world_axis_y_enabled: bool,
-    /// Ruler interval for world axes (meters).
-    pub world_axis_ruler_interval: f32,
-    /// Snap distance for world axes (meters).
-    pub world_axis_snap_distance: f32,
-
-    // Grid and angle snap settings
-    /// Grid snap enable/disable toggle.
-    pub grid_snap_enabled: bool,
-    /// Grid snap interval (meters).
-    pub grid_snap_interval: f32,
-    /// Angle snap enable/disable toggle.
-    pub angle_snap_enabled: bool,
-    /// Angle snap interval (degrees).
-    pub angle_snap_interval: f32,
+    /// 격자 스냅 간격 (Global/Local 공유)
+    pub grid_interval: f32,
+    /// 각도 스냅 간격 (도 단위)
+    pub angle_interval: f32,
 }
 
 impl Default for SnapConfig {
     fn default() -> Self {
         Self {
-            global_snap_enabled: true,
-            show_distance_lines: true,
-            distance_line_threshold: 2.0,
-            shift_snap_to_ruler: true,
-            world_axis_x_enabled: false,
-            world_axis_y_enabled: false,
-            world_axis_ruler_interval: 1.0,
-            world_axis_snap_distance: 0.15,
-            // Grid and angle snap defaults
-            grid_snap_enabled: true,
-            grid_snap_interval: 0.05,
-            angle_snap_enabled: true,
-            angle_snap_interval: 0.5,
+            grid_interval: 0.05,
+            angle_interval: 0.5,
         }
     }
 }
 
-/// Information about a distance line to render.
+/// 스냅 결과
 #[derive(Debug, Clone)]
-pub struct DistanceLine {
-    /// Start point (object position).
-    pub from: Vec2,
-    /// End point (projected point on target).
-    pub to: Vec2,
-    /// Perpendicular distance.
-    pub distance: f32,
-    /// Index of the snap target.
-    pub target_index: usize,
+pub struct SnapResult {
+    pub position: Vec2,
+    /// Shift+드래그로 guideline에 스냅된 경우 해당 guideline ID
+    pub snapped_guideline_id: Option<String>,
 }
 
-/// Project a point onto a line segment, returning the closest point.
-pub fn project_point_to_line(point: Vec2, line_start: Vec2, line_end: Vec2) -> Vec2 {
-    let line = line_end - line_start;
-    let len_sq = line.length_squared();
+/// SnapManager - 스냅 연산 통합 인터페이스
+///
+/// Query로 GuidelineMarker를 자동으로 가져옵니다.
+#[derive(SystemParam)]
+pub struct SnapManager<'w, 's> {
+    config: Res<'w, SnapConfig>,
+    guidelines: Query<'w, 's, (&'static crate::bevy::MapObjectMarker, &'static crate::bevy::GuidelineMarker)>,
+}
 
-    if len_sq < 0.0001 {
-        return line_start;
+impl<'w, 's> SnapManager<'w, 's> {
+    /// Global 축 기준 스냅
+    ///
+    /// - 항상: 격자 스냅 (grid_interval)
+    /// - Shift: 가장 가까운 guideline에 스냅
+    pub fn snap(&self, pos: Vec2, shift: bool, exclude_id: Option<&String>) -> SnapResult {
+        self.snap_internal(pos, Vec2::ZERO, 0.0, shift, exclude_id)
     }
 
-    // Project point onto infinite line, then clamp to segment
-    let t = ((point - line_start).dot(line) / len_sq).clamp(0.0, 1.0);
-    line_start + t * line
+    /// Local 축 기준 스냅
+    ///
+    /// - 항상: 로컬 좌표계 기준 격자 스냅
+    /// - Shift: 가장 가까운 guideline에 스냅
+    pub fn snap_local(
+        &self,
+        pos: Vec2,
+        origin: Vec2,
+        rotation: f32,
+        shift: bool,
+        exclude_id: Option<&String>,
+    ) -> SnapResult {
+        self.snap_internal(pos, origin, rotation, shift, exclude_id)
+    }
+
+    fn snap_internal(
+        &self,
+        pos: Vec2,
+        origin: Vec2,
+        rotation: f32,
+        shift: bool,
+        exclude_id: Option<&String>,
+    ) -> SnapResult {
+        // 1. 격자 스냅
+        let grid_snapped = self.apply_grid_snap(pos, origin, rotation);
+
+        // 2. Shift 안 누름 → 격자 스냅만
+        if !shift {
+            return SnapResult {
+                position: grid_snapped,
+                snapped_guideline_id: None,
+            };
+        }
+
+        // 3. Shift 누름 → 가장 가까운 guideline에 스냅
+        let mut best_dist = f32::MAX;
+        let mut best_snap: Option<(Vec2, String)> = None;
+
+        for (marker, guideline) in self.guidelines.iter() {
+            // 자기 자신 제외
+            if let Some(exclude) = exclude_id {
+                if marker.object_id.as_ref() == Some(exclude) {
+                    continue;
+                }
+            }
+
+            // 스냅 비활성화된 guideline 제외
+            if !guideline.snap_enabled {
+                continue;
+            }
+
+            let dist = perpendicular_distance(grid_snapped, guideline.start, guideline.end);
+            if dist < best_dist {
+                best_dist = dist;
+                let snapped = snap_to_line_interval(
+                    grid_snapped,
+                    guideline.start,
+                    guideline.end,
+                    guideline.ruler_interval,
+                );
+                best_snap = Some((snapped, marker.object_id.clone().unwrap_or_default()));
+            }
+        }
+
+        match best_snap {
+            Some((snapped_pos, guideline_id)) => SnapResult {
+                position: snapped_pos,
+                snapped_guideline_id: Some(guideline_id),
+            },
+            None => SnapResult {
+                position: grid_snapped,
+                snapped_guideline_id: None,
+            },
+        }
+    }
+
+    fn apply_grid_snap(&self, pos: Vec2, origin: Vec2, rotation: f32) -> Vec2 {
+        let interval = self.config.grid_interval;
+        if interval <= 0.0 {
+            return pos;
+        }
+
+        if rotation.abs() < 0.001 && origin == Vec2::ZERO {
+            // Global: 단순 격자 스냅
+            Vec2::new(
+                (pos.x / interval).round() * interval,
+                (pos.y / interval).round() * interval,
+            )
+        } else {
+            // Local: 로컬 좌표로 변환 → 스냅 → 월드로 복원
+            let rot = Rot2::radians(-rotation);
+            let local = rot * (pos - origin);
+            let snapped_local = Vec2::new(
+                (local.x / interval).round() * interval,
+                (local.y / interval).round() * interval,
+            );
+            let rot_back = Rot2::radians(rotation);
+            origin + rot_back * snapped_local
+        }
+    }
+
+    /// 스칼라 격자 스냅 (크기, 반지름 등)
+    pub fn snap_scalar(&self, value: f32) -> f32 {
+        let interval = self.config.grid_interval;
+        if interval <= 0.0 {
+            return value;
+        }
+        (value / interval).round() * interval
+    }
+
+    /// 각도 스냅 (라디안 입력, 라디안 출력)
+    pub fn snap_angle(&self, angle_rad: f32) -> f32 {
+        let interval = self.config.angle_interval;
+        if interval <= 0.0 {
+            return angle_rad;
+        }
+        let deg = angle_rad.to_degrees();
+        let snapped_deg = (deg / interval).round() * interval;
+        snapped_deg.to_radians()
+    }
+
+    /// 설정 참조
+    pub fn config(&self) -> &SnapConfig {
+        &self.config
+    }
 }
 
-/// Calculate perpendicular distance from a point to a line (infinite line, not segment).
-pub fn perpendicular_distance_to_line(point: Vec2, line_start: Vec2, line_end: Vec2) -> f32 {
+/// 점에서 직선까지의 수직 거리 (무한 직선)
+fn perpendicular_distance(point: Vec2, line_start: Vec2, line_end: Vec2) -> f32 {
     let line = line_end - line_start;
     let len = line.length();
-
     if len < 0.0001 {
         return point.distance(line_start);
     }
-
-    // Cross product gives signed area of parallelogram, divide by base for height
-    let cross = (point.x - line_start.x) * (line_end.y - line_start.y)
-        - (point.y - line_start.y) * (line_end.x - line_start.x);
-
+    let cross = (point.x - line_start.x) * line.y - (point.y - line_start.y) * line.x;
     cross.abs() / len
 }
 
-/// Calculate shortest distance from a point to a line segment.
-/// Returns perpendicular distance if within segment bounds,
-/// otherwise returns distance to nearest endpoint.
-pub fn distance_to_line_segment(point: Vec2, line_start: Vec2, line_end: Vec2) -> f32 {
+/// 직선에 투영 후 interval 단위로 스냅
+fn snap_to_line_interval(point: Vec2, line_start: Vec2, line_end: Vec2, interval: f32) -> Vec2 {
     let line = line_end - line_start;
-    let len_sq = line.length_squared();
-
-    if len_sq < 0.0001 {
-        return point.distance(line_start);
+    let len = line.length();
+    if len < 0.0001 {
+        return line_start;
     }
 
-    // Project point onto line, get parameter t
-    let t = (point - line_start).dot(line) / len_sq;
+    let dir = line / len;
 
-    if t <= 0.0 {
-        // Point is before line_start
-        point.distance(line_start)
-    } else if t >= 1.0 {
-        // Point is after line_end
-        point.distance(line_end)
+    // 직선에 투영
+    let projected_dist = (point - line_start).dot(dir);
+
+    // interval 단위로 스냅
+    let snapped_dist = if interval > 0.0 {
+        (projected_dist / interval).round() * interval
     } else {
-        // Point is within segment bounds - use perpendicular distance
-        let projected = line_start + t * line;
-        point.distance(projected)
-    }
-}
+        projected_dist
+    };
 
-/// Find the best snap point from a list of targets.
-///
-/// Returns (snapped_position, target_index) if a snap target is within range.
-pub fn find_snap_point(point: Vec2, targets: &[&dyn SnapTarget]) -> Option<(Vec2, usize)> {
-    let mut best_dist = f32::MAX;
-    let mut best_snap = None;
-
-    for (idx, target) in targets.iter().enumerate() {
-        if !target.is_enabled() {
-            continue;
-        }
-
-        let dist = target.perpendicular_distance(point);
-        if dist < target.snap_distance() && dist < best_dist {
-            best_dist = dist;
-            best_snap = Some((target.project_point(point), idx));
-        }
-    }
-
-    best_snap
-}
-
-/// Snap a point to the ruler interval of a target.
-///
-/// Projects the point onto the target and rounds to the nearest ruler tick.
-pub fn snap_to_ruler_interval(point: Vec2, target: &dyn SnapTarget) -> Vec2 {
-    let projected = target.project_point(point);
-    let direction = target.direction();
-    let start = target.start();
-    let interval = target.ruler_interval();
-
-    // Calculate distance along the line from start
-    let distance_along = (projected - start).dot(direction);
-
-    // Round to nearest interval
-    let snapped_distance = (distance_along / interval).round() * interval;
-
-    // Calculate final position
-    start + direction * snapped_distance
-}
-
-/// Calculate distance lines from a point to all nearby snap targets.
-///
-/// Only includes targets within the threshold distance.
-pub fn calculate_distance_lines(
-    point: Vec2,
-    targets: &[&dyn SnapTarget],
-    threshold: f32,
-) -> Vec<DistanceLine> {
-    let mut lines = Vec::new();
-
-    for (idx, target) in targets.iter().enumerate() {
-        if !target.is_enabled() {
-            continue;
-        }
-
-        let dist = target.perpendicular_distance(point);
-        if dist <= threshold {
-            let projected = target.project_point(point);
-            lines.push(DistanceLine {
-                from: point,
-                to: projected,
-                distance: dist,
-                target_index: idx,
-            });
-        }
-    }
-
-    lines
-}
-
-/// Find the nearest enabled snap target to a point.
-pub fn find_nearest_target<'a>(
-    point: Vec2,
-    targets: &[&'a dyn SnapTarget],
-) -> Option<&'a dyn SnapTarget> {
-    let mut best_dist = f32::MAX;
-    let mut best_target = None;
-
-    for target in targets.iter() {
-        if !target.is_enabled() {
-            continue;
-        }
-
-        let dist = target.perpendicular_distance(point);
-        if dist < best_dist {
-            best_dist = dist;
-            best_target = Some(*target);
-        }
-    }
-
-    best_target
-}
-
-/// Snap a position to a grid interval.
-///
-/// Rounds each coordinate to the nearest multiple of the interval.
-pub fn snap_to_grid(pos: Vec2, interval: f32) -> Vec2 {
-    if interval <= 0.0 {
-        return pos;
-    }
-    Vec2::new(
-        (pos.x / interval).round() * interval,
-        (pos.y / interval).round() * interval,
-    )
-}
-
-/// Snap an angle (in degrees) to the nearest multiple of the interval.
-pub fn snap_angle(angle_deg: f32, interval: f32) -> f32 {
-    if interval <= 0.0 {
-        return angle_deg;
-    }
-    (angle_deg / interval).round() * interval
+    line_start + dir * snapped_dist
 }
 
 #[cfg(test)]
@@ -372,122 +216,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_project_point_to_line() {
-        let start = Vec2::new(0.0, 0.0);
-        let end = Vec2::new(10.0, 0.0);
-
-        // Point above the line
-        let point = Vec2::new(5.0, 3.0);
-        let projected = project_point_to_line(point, start, end);
-        assert!((projected - Vec2::new(5.0, 0.0)).length() < 0.001);
-
-        // Point at start
-        let point = Vec2::new(-2.0, 1.0);
-        let projected = project_point_to_line(point, start, end);
-        assert!((projected - start).length() < 0.001);
-
-        // Point at end
-        let point = Vec2::new(12.0, 1.0);
-        let projected = project_point_to_line(point, start, end);
-        assert!((projected - end).length() < 0.001);
-    }
-
-    #[test]
     fn test_perpendicular_distance() {
-        let start = Vec2::new(0.0, 0.0);
-        let end = Vec2::new(10.0, 0.0);
-
-        let point = Vec2::new(5.0, 3.0);
-        let dist = perpendicular_distance_to_line(point, start, end);
+        // 수평선 Y=0
+        let dist = perpendicular_distance(Vec2::new(5.0, 3.0), Vec2::ZERO, Vec2::new(10.0, 0.0));
         assert!((dist - 3.0).abs() < 0.001);
+
+        // 수직선 X=3
+        let dist = perpendicular_distance(Vec2::new(5.0, 4.0), Vec2::new(3.0, 0.0), Vec2::new(3.0, 10.0));
+        assert!((dist - 2.0).abs() < 0.001);
     }
 
     #[test]
-    fn test_snap_to_ruler_interval() {
-        let target = LineSnapTarget::horizontal(0.0, 100.0, 0.15, 0.5);
-
-        let point = Vec2::new(1.3, 0.2);
-        let snapped = snap_to_ruler_interval(point, &target);
-        assert!((snapped.x - 1.5).abs() < 0.001);
+    fn test_snap_to_line_interval() {
+        // 수평선 Y=0, interval=1.0
+        let snapped = snap_to_line_interval(Vec2::new(2.3, 0.5), Vec2::ZERO, Vec2::new(10.0, 0.0), 1.0);
+        assert!((snapped.x - 2.0).abs() < 0.001);
         assert!(snapped.y.abs() < 0.001);
-    }
-
-    #[test]
-    fn test_distance_to_line_segment() {
-        let start = Vec2::new(0.0, 0.0);
-        let end = Vec2::new(10.0, 0.0);
-
-        // Point above the line (within segment bounds)
-        let point = Vec2::new(5.0, 3.0);
-        let dist = distance_to_line_segment(point, start, end);
-        assert!((dist - 3.0).abs() < 0.001);
-
-        // Point beyond end (should use endpoint distance)
-        let point = Vec2::new(13.0, 4.0);
-        let dist = distance_to_line_segment(point, start, end);
-        let expected = point.distance(end); // √(9 + 16) = 5
-        assert!((dist - expected).abs() < 0.001);
-
-        // Point before start (should use endpoint distance)
-        let point = Vec2::new(-3.0, 4.0);
-        let dist = distance_to_line_segment(point, start, end);
-        let expected = point.distance(start); // √(9 + 16) = 5
-        assert!((dist - expected).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_line_snap_target_segment_uses_segment_distance() {
-        // Bug scenario: point P(10, 1) with two finite line segments
-        // A: horizontal segment from (0,0) to (5,0)
-        // B: vertical segment from (8,0) to (8,5)
-        // P is beyond A's segment, so B should be closer
-
-        let horizontal = LineSnapTarget::new_segment(
-            Vec2::new(0.0, 0.0),
-            Vec2::new(5.0, 0.0),
-            0.5,
-            1.0,
-        );
-        let vertical = LineSnapTarget::new_segment(
-            Vec2::new(8.0, 0.0),
-            Vec2::new(8.0, 5.0),
-            0.5,
-            1.0,
-        );
-
-        let point = Vec2::new(10.0, 1.0);
-
-        // Distance to horizontal: P is beyond the segment end (5,0)
-        // Closest point on segment is (5,0), distance = √((10-5)² + (1-0)²) = √26 ≈ 5.1
-        let dist_h = horizontal.perpendicular_distance(point);
-        let expected_h = point.distance(Vec2::new(5.0, 0.0));
-        assert!((dist_h - expected_h).abs() < 0.001);
-
-        // Distance to vertical: P is within segment Y range (0 to 5), X distance = |10-8| = 2
-        let dist_v = vertical.perpendicular_distance(point);
-        assert!((dist_v - 2.0).abs() < 0.001);
-
-        // Vertical should be closer than horizontal
-        assert!(dist_v < dist_h, "vertical ({}) should be closer than horizontal ({})", dist_v, dist_h);
-    }
-
-    #[test]
-    fn test_line_snap_target_infinite_uses_perpendicular_distance() {
-        // Guidelines (infinite lines) should use perpendicular distance only
-        // Even when point is beyond segment bounds
-
-        let guideline = LineSnapTarget::new(
-            Vec2::new(0.0, 0.0),
-            Vec2::new(0.0, 10.0),  // Vertical guideline at X=0, from Y=0 to Y=10
-            0.5,
-            1.0,
-        );
-
-        // Point at (0.2, 17.5) - beyond the segment Y range
-        let point = Vec2::new(0.2, 17.5);
-
-        // For infinite line, distance should be perpendicular (X distance = 0.2)
-        let dist = guideline.perpendicular_distance(point);
-        assert!((dist - 0.2).abs() < 0.001, "Expected ~0.2, got {}", dist);
     }
 }

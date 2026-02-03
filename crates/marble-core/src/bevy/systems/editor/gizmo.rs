@@ -5,10 +5,7 @@ use bevy::prelude::*;
 use crate::bevy::{GameCamera, GuidelineMarker, MainCamera, MapConfig, MapObjectMarker};
 use crate::map::{EvaluatedShape, Keyframe, ObjectRole, PivotMode};
 
-use super::{
-    calculate_distance_lines, EditorStateRes, GizmoColors, GizmoHandle, LineSnapTarget,
-    SnapConfig, SnapTarget,
-};
+use super::{EditorStateRes, GizmoColors, GizmoHandle, SnapConfig};
 
 /// System to render selection highlight and gizmos.
 pub fn render_editor_gizmos(
@@ -1055,107 +1052,13 @@ fn draw_guideline_dashed_line(
 // ========== Distance Lines Rendering ==========
 
 /// Render distance lines from selected object to nearby guidelines.
+/// Currently disabled - simplified snap system no longer tracks distance lines.
 pub fn render_distance_lines(
-    mut gizmos: Gizmos,
-    editor_state: Res<EditorStateRes>,
-    snap_config: Option<Res<SnapConfig>>,
-    map_config: Option<Res<MapConfig>>,
-    guidelines: Query<(&MapObjectMarker, &GuidelineMarker)>,
+    _gizmos: Gizmos,
+    _editor_state: Res<EditorStateRes>,
+    _snap_config: Option<Res<SnapConfig>>,
+    _map_config: Option<Res<MapConfig>>,
+    _guidelines: Query<(&MapObjectMarker, &GuidelineMarker)>,
 ) {
-    let Some(snap_config) = snap_config else {
-        return;
-    };
-
-    if !snap_config.show_distance_lines {
-        return;
-    }
-
-    let Some(map_config) = map_config else {
-        return;
-    };
-
-    // Only show distance lines when dragging or hovering object
-    if !editor_state.is_dragging && editor_state.selected_object.is_none() {
-        return;
-    }
-
-    let Some(selected_idx) = editor_state.selected_object else {
-        return;
-    };
-
-    let Some(obj) = map_config.0.objects.get(selected_idx) else {
-        return;
-    };
-
-    // Don't show distance lines for guidelines themselves
-    if obj.role == ObjectRole::Guideline {
-        return;
-    }
-
-    let ctx = crate::dsl::GameContext::new(0.0, 0);
-    let shape = obj.shape.evaluate(&ctx);
-    let object_center = get_shape_center(&shape);
-
-    // Collect snap targets from guidelines
-    let mut snap_targets: Vec<Box<dyn SnapTarget>> = Vec::new();
-
-    for (marker, guideline) in guidelines.iter() {
-        if !guideline.snap_enabled {
-            continue;
-        }
-
-        // Find the corresponding object in config to get shape
-        if let Some(gl_obj) = map_config
-            .0
-            .objects
-            .iter()
-            .find(|o| o.id.as_ref() == marker.object_id.as_ref())
-        {
-            let gl_shape = gl_obj.shape.evaluate(&ctx);
-            if let EvaluatedShape::Line { start, end } = gl_shape {
-                snap_targets.push(Box::new(LineSnapTarget::new(
-                    Vec2::new(start[0], start[1]),
-                    Vec2::new(end[0], end[1]),
-                    guideline.snap_distance,
-                    guideline.ruler_interval,
-                )));
-            }
-        }
-    }
-
-    // Convert to trait objects for calculate_distance_lines
-    let target_refs: Vec<&dyn SnapTarget> = snap_targets.iter().map(|t| t.as_ref()).collect();
-
-    // Calculate and render distance lines
-    let distance_lines =
-        calculate_distance_lines(object_center, &target_refs, snap_config.distance_line_threshold);
-
-    for line in distance_lines {
-        // Draw dashed line from object to guideline
-        draw_distance_line(&mut gizmos, line.from, line.to, GizmoColors::DISTANCE_LINE);
-    }
-}
-
-/// Draw a single distance line (dashed).
-fn draw_distance_line(gizmos: &mut Gizmos, from: Vec2, to: Vec2, color: Color) {
-    let dir = to - from;
-    let length = dir.length();
-
-    if length < 0.001 {
-        return;
-    }
-
-    let dir_normalized = dir / length;
-    let dash_length = 0.05;
-    let gap_length = 0.03;
-    let segment_length = dash_length + gap_length;
-
-    let mut current = 0.0;
-    while current < length {
-        let dash_start = from + dir_normalized * current;
-        let dash_end_dist = (current + dash_length).min(length);
-        let dash_end = from + dir_normalized * dash_end_dist;
-        gizmos.line_2d(dash_start, dash_end, color);
-        current += segment_length;
-    }
+    // Distance lines feature disabled in simplified snap system
 }

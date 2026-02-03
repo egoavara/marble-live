@@ -42,16 +42,18 @@ pub fn handle_load_map(
         let mut trigger_index = 0;
 
         // Spawn map objects
-        for obj in &config.objects {
+        for (obj_index, obj) in config.objects.iter().enumerate() {
             let shape = obj.shape.evaluate(&ctx);
             let is_animated = is_animatable(obj, &keyframe_targets);
 
             match obj.role {
                 ObjectRole::Spawner => {
-                    spawn_spawner(&mut commands, obj);
+                    let entity = spawn_spawner(&mut commands, obj);
+                    object_map.insert_at_index(obj_index, entity);
                 }
                 ObjectRole::Obstacle => {
                     let entity = spawn_obstacle(&mut commands, obj, &shape, &ctx, is_animated);
+                    object_map.insert_at_index(obj_index, entity);
 
                     if let Some(ref id) = obj.id {
                         object_map.map.insert(id.clone(), entity);
@@ -81,6 +83,7 @@ pub fn handle_load_map(
                 }
                 ObjectRole::Trigger => {
                     let entity = spawn_trigger(&mut commands, obj, &shape, trigger_index);
+                    object_map.insert_at_index(obj_index, entity);
 
                     if let Some(ref id) = obj.id {
                         object_map.map.insert(id.clone(), entity);
@@ -99,6 +102,7 @@ pub fn handle_load_map(
                 ObjectRole::Guideline => {
                     // Guidelines are editor-only, spawned without physics colliders
                     let entity = spawn_guideline(&mut commands, obj, &shape);
+                    object_map.insert_at_index(obj_index, entity);
 
                     if let Some(ref id) = obj.id {
                         object_map.map.insert(id.clone(), entity);
@@ -154,7 +158,7 @@ pub fn handle_load_map(
     }
 }
 
-fn spawn_spawner(commands: &mut Commands, obj: &crate::map::MapObject) {
+fn spawn_spawner(commands: &mut Commands, obj: &crate::map::MapObject) -> Entity {
     let spawn_props = obj.properties.spawn.as_ref();
 
     commands.spawn((
@@ -173,7 +177,7 @@ fn spawn_spawner(commands: &mut Commands, obj: &crate::map::MapObject) {
         },
         Transform::default(),
         Visibility::default(),
-    ));
+    )).id()
 }
 
 fn spawn_obstacle(
@@ -365,6 +369,7 @@ pub fn handle_add_object(
 ) {
     for event in events.read() {
         let obj = &event.object;
+        let obj_index = event.index;
         let ctx = GameContext::new(0.0, 0);
 
         // Get keyframe targets from config
@@ -377,11 +382,13 @@ pub fn handle_add_object(
 
         match obj.role {
             ObjectRole::Spawner => {
-                spawn_spawner(&mut commands, obj);
+                let entity = spawn_spawner(&mut commands, obj);
+                object_map.insert_at_index(obj_index, entity);
             }
             ObjectRole::Obstacle => {
                 let shape = obj.shape.evaluate(&ctx);
                 let entity = spawn_obstacle(&mut commands, obj, &shape, &ctx, is_animated);
+                object_map.insert_at_index(obj_index, entity);
 
                 if let Some(ref id) = obj.id {
                     object_map.map.insert(id.clone(), entity);
@@ -414,6 +421,7 @@ pub fn handle_add_object(
                 // Use a placeholder trigger index (this is for editor preview only)
                 let trigger_index = 999;
                 let entity = spawn_trigger(&mut commands, obj, &shape, trigger_index);
+                object_map.insert_at_index(obj_index, entity);
 
                 if let Some(ref id) = obj.id {
                     object_map.map.insert(id.clone(), entity);
@@ -430,6 +438,7 @@ pub fn handle_add_object(
             ObjectRole::Guideline => {
                 let shape = obj.shape.evaluate(&ctx);
                 let entity = spawn_guideline(&mut commands, obj, &shape);
+                object_map.insert_at_index(obj_index, entity);
 
                 if let Some(ref id) = obj.id {
                     object_map.map.insert(id.clone(), entity);
@@ -437,7 +446,7 @@ pub fn handle_add_object(
             }
         }
 
-        tracing::info!("[map_loader] Added object: {:?}", obj.id);
+        tracing::info!("[map_loader] Added object at index {}: {:?}", obj_index, obj.id);
     }
 }
 
@@ -447,41 +456,30 @@ pub fn handle_delete_object(
     mut events: MessageReader<DeleteObjectEvent>,
     map_config: Option<Res<MapConfig>>,
     mut object_map: ResMut<ObjectEntityMap>,
-    existing_objects: Query<(Entity, &MapObjectMarker)>,
 ) {
     for event in events.read() {
         let index = event.index;
         tracing::info!("[map_loader] Deleting object at index: {}", index);
 
-        // Get the object ID from the config
+        // Get the object ID from the config (before it's removed)
         let object_id = map_config
             .as_ref()
             .and_then(|c| c.0.objects.get(index))
             .and_then(|obj| obj.id.clone());
 
-        // Find and despawn the entity
+        // Remove from ID map if it has an ID
         if let Some(id) = &object_id {
-            if let Some(entity) = object_map.map.remove(id) {
-                commands.entity(entity).despawn();
-                tracing::info!("[map_loader] Despawned entity for object: {}", id);
-            }
-        } else {
-            // If no ID, try to find by index (less reliable)
-            // This is a fallback for objects without IDs
-            let mut found = false;
-            for (_entity, marker) in existing_objects.iter() {
-                if marker.object_id.is_none() {
-                    // Can't reliably match by index, just log
-                    tracing::warn!("[map_loader] Object at index {} has no ID, cannot reliably delete", index);
-                    // For now, don't delete to avoid deleting wrong object
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                tracing::warn!("[map_loader] Could not find object at index {} to delete", index);
-            }
+            object_map.map.remove(id);
         }
+
+        // Get entity by index and despawn
+        if let Some(entity) = object_map.get_by_index(index) {
+            commands.entity(entity).despawn();
+            tracing::info!("[map_loader] Despawned entity at index {}", index);
+        }
+
+        // Remove from index map (shifts subsequent indices)
+        object_map.remove_at_index(index);
     }
 }
 

@@ -3,14 +3,13 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::bevy::{GameCamera, GuidelineMarker, MainCamera, MapConfig, MapObjectMarker};
+use crate::bevy::{GameCamera, MainCamera, MapConfig};
 use crate::bevy::events::UpdateKeyframeEvent;
 use crate::map::{EvaluatedShape, Keyframe, ObjectRole, PivotMode};
 
 use super::{
-    find_nearest_target, find_snap_point, snap_to_ruler_interval, snap_to_grid, snap_angle,
-    EditorStateRes, EditorStateStore, GizmoHandle, LineSnapTarget, ObjectTransform,
-    SelectObjectEvent, SnapConfig, SnapTarget, UpdateObjectEvent,
+    EditorStateRes, EditorStateStore, GizmoHandle, ObjectTransform,
+    SelectObjectEvent, SnapManager, UpdateObjectEvent,
 };
 
 /// Gizmo hit test tolerance (in world units).
@@ -157,99 +156,13 @@ pub fn handle_mouse_click(
     }
 }
 
-/// Apply snap to a position based on snap config and guidelines.
-fn apply_snap(
-    mut pos: Vec2,
-    snap_targets: &[LineSnapTarget],
-    snap_config: Option<&SnapConfig>,
-    keyboard: &ButtonInput<KeyCode>,
-    editor_state: &mut EditorStateRes,
-) -> Vec2 {
-    let Some(snap_cfg) = snap_config else {
-        editor_state.snapped_target_index = None;
-        return pos;
-    };
-
-    // Apply grid snap first (if enabled)
-    if snap_cfg.grid_snap_enabled && snap_cfg.grid_snap_interval > 0.0 {
-        pos = snap_to_grid(pos, snap_cfg.grid_snap_interval);
-    }
-
-    // Skip guideline snap if no targets or disabled
-    if !snap_cfg.global_snap_enabled || snap_targets.is_empty() {
-        editor_state.snapped_target_index = None;
-        return pos;
-    }
-
-    let target_refs: Vec<&dyn SnapTarget> = snap_targets.iter().map(|t| t as &dyn SnapTarget).collect();
-    let shift_pressed = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
-
-    if shift_pressed && snap_cfg.shift_snap_to_ruler {
-        // Shift+drag: snap to ruler interval of nearest target
-        if let Some(nearest) = find_nearest_target(pos, &target_refs) {
-            pos = snap_to_ruler_interval(pos, nearest);
-            // Find index of snapped target
-            for (i, t) in target_refs.iter().enumerate() {
-                if t.perpendicular_distance(pos) < 0.01 {
-                    editor_state.snapped_target_index = Some(i);
-                    break;
-                }
-            }
-        }
-    } else {
-        // Normal drag: snap to guideline if within range
-        if let Some((snapped, idx)) = find_snap_point(pos, &target_refs) {
-            pos = snapped;
-            editor_state.snapped_target_index = Some(idx);
-        } else {
-            editor_state.snapped_target_index = None;
-        }
-    }
-
-    pos
-}
-
-/// Apply grid snap only (without guideline snap) to a position.
-/// Use this for handles that need grid alignment but not guideline attraction.
-fn apply_grid_snap_only(pos: Vec2, snap_config: Option<&SnapConfig>) -> Vec2 {
-    if let Some(cfg) = snap_config {
-        if cfg.grid_snap_enabled && cfg.grid_snap_interval > 0.0 {
-            return snap_to_grid(pos, cfg.grid_snap_interval);
-        }
-    }
-    pos
-}
-
-/// Apply grid snap to a scalar value (for radius, width, height, etc.).
-fn snap_scalar_to_grid(value: f32, snap_config: Option<&SnapConfig>) -> f32 {
-    if let Some(cfg) = snap_config {
-        if cfg.grid_snap_enabled && cfg.grid_snap_interval > 0.0 {
-            return (value / cfg.grid_snap_interval).round() * cfg.grid_snap_interval;
-        }
-    }
-    value
-}
-
-/// Apply angle snap to a rotation value (in radians).
-fn apply_rotation_snap(angle_rad: f32, snap_config: Option<&SnapConfig>) -> f32 {
-    if let Some(cfg) = snap_config {
-        if cfg.angle_snap_enabled && cfg.angle_snap_interval > 0.0 {
-            let deg = angle_rad.to_degrees();
-            let snapped = snap_angle(deg, cfg.angle_snap_interval);
-            return snapped.to_radians();
-        }
-    }
-    angle_rad
-}
-
 /// System to handle mouse drag with snap support.
 pub fn handle_mouse_drag(
     mut editor_state: ResMut<EditorStateRes>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut map_config: Option<ResMut<MapConfig>>,
-    snap_config: Option<Res<SnapConfig>>,
-    guidelines: Query<(&MapObjectMarker, &GuidelineMarker)>,
+    snap_manager: SnapManager,
     mut update_events: MessageWriter<UpdateObjectEvent>,
 ) {
     // End drag on mouse release
@@ -286,87 +199,32 @@ pub fn handle_mouse_drag(
     // Calculate delta from drag start
     let delta = mouse_pos - drag_start_mouse;
 
-    // Check if this is a move handle and object is not a guideline
-    let is_move_handle = matches!(
-        handle,
-        GizmoHandle::MoveFree | GizmoHandle::MoveX | GizmoHandle::MoveY
-    );
-    let is_guideline = map_config
-        .0
-        .objects
-        .get(selected)
-        .map(|o| o.role == ObjectRole::Guideline)
-        .unwrap_or(false);
-
     // Get selected object ID for excluding self from snap targets
-    let selected_object_id = map_config.0.objects.get(selected).map(|o| o.id.clone());
-
-    // Collect snap targets for move handles (using GuidelineMarker's start/end directly)
-    // Guidelines can also snap to other guidelines (but not to themselves)
-    let snap_targets: Vec<LineSnapTarget> = if is_move_handle {
-        guidelines
-            .iter()
-            .filter_map(|(marker, guideline)| {
-                // Skip self (don't snap to the guideline being dragged)
-                if let Some(ref selected_id) = selected_object_id {
-                    if &marker.object_id == selected_id {
-                        return None;
-                    }
-                }
-                if !guideline.snap_enabled {
-                    return None;
-                }
-                Some(LineSnapTarget::new(
-                    guideline.start,
-                    guideline.end,
-                    guideline.snap_distance,
-                    guideline.ruler_interval,
-                ))
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let selected_object_id = map_config.0.objects.get(selected).and_then(|o| o.id.clone());
 
     // Now get mutable reference to the object
     let Some(obj) = map_config.0.objects.get_mut(selected) else {
         return;
     };
 
+    let shift_pressed = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+
     // Apply transform based on handle type
     match handle {
         GizmoHandle::MoveFree => {
-            let mut new_center = drag_start_center + delta;
-            new_center = apply_snap(
-                new_center,
-                &snap_targets,
-                snap_config.as_deref(),
-                &keyboard,
-                &mut editor_state,
-            );
-            obj.shape = move_shape_center(&obj.shape, new_center);
+            let new_center = drag_start_center + delta;
+            let result = snap_manager.snap(new_center, shift_pressed, selected_object_id.as_ref());
+            obj.shape = move_shape_center(&obj.shape, result.position);
         }
         GizmoHandle::MoveX => {
-            let mut new_center = Vec2::new(drag_start_center.x + delta.x, drag_start_center.y);
-            new_center = apply_snap(
-                new_center,
-                &snap_targets,
-                snap_config.as_deref(),
-                &keyboard,
-                &mut editor_state,
-            );
-            obj.shape = move_shape_center(&obj.shape, new_center);
+            let new_center = Vec2::new(drag_start_center.x + delta.x, drag_start_center.y);
+            let result = snap_manager.snap(new_center, shift_pressed, selected_object_id.as_ref());
+            obj.shape = move_shape_center(&obj.shape, result.position);
         }
         GizmoHandle::MoveY => {
-            let mut new_center = Vec2::new(drag_start_center.x, drag_start_center.y + delta.y);
-            new_center = apply_snap(
-                new_center,
-                &snap_targets,
-                snap_config.as_deref(),
-                &keyboard,
-                &mut editor_state,
-            );
-            obj.shape = move_shape_center(&obj.shape, new_center);
+            let new_center = Vec2::new(drag_start_center.x, drag_start_center.y + delta.y);
+            let result = snap_manager.snap(new_center, shift_pressed, selected_object_id.as_ref());
+            obj.shape = move_shape_center(&obj.shape, result.position);
         }
         GizmoHandle::LocalMoveX => {
             // Move along object's local X axis
@@ -375,8 +233,9 @@ pub fn handle_mouse_drag(
             // Project delta onto local X axis
             let projected_distance = delta.dot(local_x_axis);
             let new_center = drag_start_center + local_x_axis * projected_distance;
-            let snapped = apply_grid_snap_only(new_center, snap_config.as_deref());
-            obj.shape = move_shape_center(&obj.shape, snapped);
+            // Local move: use snap_local with object's rotation, no shift snapping
+            let result = snap_manager.snap_local(new_center, drag_start_center, rotation, false, selected_object_id.as_ref());
+            obj.shape = move_shape_center(&obj.shape, result.position);
         }
         GizmoHandle::LocalMoveY => {
             // Move along object's local Y axis
@@ -385,43 +244,45 @@ pub fn handle_mouse_drag(
             // Project delta onto local Y axis
             let projected_distance = delta.dot(local_y_axis);
             let new_center = drag_start_center + local_y_axis * projected_distance;
-            let snapped = apply_grid_snap_only(new_center, snap_config.as_deref());
-            obj.shape = move_shape_center(&obj.shape, snapped);
+            // Local move: use snap_local with object's rotation, no shift snapping
+            let result = snap_manager.snap_local(new_center, drag_start_center, rotation, false, selected_object_id.as_ref());
+            obj.shape = move_shape_center(&obj.shape, result.position);
         }
         GizmoHandle::LineStart => {
             if let crate::map::Shape::Line { start, .. } = &mut obj.shape {
-                let snapped = apply_grid_snap_only(mouse_pos, snap_config.as_deref());
-                *start = crate::dsl::Vec2OrExpr::Static([snapped.x, snapped.y]);
+                // Grid snap only (shift=false)
+                let result = snap_manager.snap(mouse_pos, false, selected_object_id.as_ref());
+                *start = crate::dsl::Vec2OrExpr::Static([result.position.x, result.position.y]);
             }
         }
         GizmoHandle::LineEnd => {
             if let crate::map::Shape::Line { end, .. } = &mut obj.shape {
-                let snapped = apply_grid_snap_only(mouse_pos, snap_config.as_deref());
-                *end = crate::dsl::Vec2OrExpr::Static([snapped.x, snapped.y]);
+                let result = snap_manager.snap(mouse_pos, false, selected_object_id.as_ref());
+                *end = crate::dsl::Vec2OrExpr::Static([result.position.x, result.position.y]);
             }
         }
         GizmoHandle::BezierStart => {
             if let crate::map::Shape::Bezier { start, .. } = &mut obj.shape {
-                let snapped = apply_grid_snap_only(mouse_pos, snap_config.as_deref());
-                *start = crate::dsl::Vec2OrExpr::Static([snapped.x, snapped.y]);
+                let result = snap_manager.snap(mouse_pos, false, selected_object_id.as_ref());
+                *start = crate::dsl::Vec2OrExpr::Static([result.position.x, result.position.y]);
             }
         }
         GizmoHandle::BezierEnd => {
             if let crate::map::Shape::Bezier { end, .. } = &mut obj.shape {
-                let snapped = apply_grid_snap_only(mouse_pos, snap_config.as_deref());
-                *end = crate::dsl::Vec2OrExpr::Static([snapped.x, snapped.y]);
+                let result = snap_manager.snap(mouse_pos, false, selected_object_id.as_ref());
+                *end = crate::dsl::Vec2OrExpr::Static([result.position.x, result.position.y]);
             }
         }
         GizmoHandle::BezierControl1 => {
             if let crate::map::Shape::Bezier { control1, .. } = &mut obj.shape {
-                let snapped = apply_grid_snap_only(mouse_pos, snap_config.as_deref());
-                *control1 = crate::dsl::Vec2OrExpr::Static([snapped.x, snapped.y]);
+                let result = snap_manager.snap(mouse_pos, false, selected_object_id.as_ref());
+                *control1 = crate::dsl::Vec2OrExpr::Static([result.position.x, result.position.y]);
             }
         }
         GizmoHandle::BezierControl2 => {
             if let crate::map::Shape::Bezier { control2, .. } = &mut obj.shape {
-                let snapped = apply_grid_snap_only(mouse_pos, snap_config.as_deref());
-                *control2 = crate::dsl::Vec2OrExpr::Static([snapped.x, snapped.y]);
+                let result = snap_manager.snap(mouse_pos, false, selected_object_id.as_ref());
+                *control2 = crate::dsl::Vec2OrExpr::Static([result.position.x, result.position.y]);
             }
         }
         GizmoHandle::Rotate => {
@@ -432,7 +293,7 @@ pub fn handle_mouse_drag(
                 let current_angle = (mouse_pos - drag_start_center).to_angle();
                 let angle_delta = current_angle - start_angle;
                 let new_rotation_rad = start_rotation + angle_delta;
-                let snapped_rotation = apply_rotation_snap(new_rotation_rad, snap_config.as_deref());
+                let snapped_rotation = snap_manager.snap_angle(new_rotation_rad);
 
                 *rotation = crate::dsl::NumberOrExpr::Number(snapped_rotation.to_degrees());
             }
@@ -460,13 +321,11 @@ pub fn handle_mouse_drag(
                 };
 
                 // Scale by 2x delta because we're scaling from center
-                let new_width = snap_scalar_to_grid(
+                let new_width = snap_manager.snap_scalar(
                     (start_size.x + local_delta.x * scale_x_sign * 2.0).max(0.1),
-                    snap_config.as_deref(),
                 );
-                let new_height = snap_scalar_to_grid(
+                let new_height = snap_manager.snap_scalar(
                     (start_size.y + local_delta.y * scale_y_sign * 2.0).max(0.1),
-                    snap_config.as_deref(),
                 );
 
                 *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
@@ -489,9 +348,8 @@ pub fn handle_mouse_drag(
                     -1.0
                 };
 
-                let new_height = snap_scalar_to_grid(
+                let new_height = snap_manager.snap_scalar(
                     (start_size.y + local_delta.y * scale_y_sign * 2.0).max(0.1),
-                    snap_config.as_deref(),
                 );
 
                 *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
@@ -514,9 +372,8 @@ pub fn handle_mouse_drag(
                     -1.0
                 };
 
-                let new_width = snap_scalar_to_grid(
+                let new_width = snap_manager.snap_scalar(
                     (start_size.x + local_delta.x * scale_x_sign * 2.0).max(0.1),
-                    snap_config.as_deref(),
                 );
 
                 *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
@@ -528,7 +385,7 @@ pub fn handle_mouse_drag(
             // Radius handles (vertical) - use Y distance from center
             if let crate::map::Shape::Circle { center, radius } = &mut obj.shape {
                 let raw_radius = (mouse_pos.y - drag_start_center.y).abs().max(0.05);
-                let new_radius = snap_scalar_to_grid(raw_radius, snap_config.as_deref());
+                let new_radius = snap_manager.snap_scalar(raw_radius);
                 *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
                 *radius = crate::dsl::NumberOrExpr::Number(new_radius);
             }
@@ -537,7 +394,7 @@ pub fn handle_mouse_drag(
             // Radius handles (horizontal) - use X distance from center
             if let crate::map::Shape::Circle { center, radius } = &mut obj.shape {
                 let raw_radius = (mouse_pos.x - drag_start_center.x).abs().max(0.05);
-                let new_radius = snap_scalar_to_grid(raw_radius, snap_config.as_deref());
+                let new_radius = snap_manager.snap_scalar(raw_radius);
                 *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
                 *radius = crate::dsl::NumberOrExpr::Number(new_radius);
             }
@@ -1240,7 +1097,7 @@ pub fn handle_keyframe_drag(
     mut editor_state: ResMut<EditorStateRes>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     mut map_config: Option<ResMut<MapConfig>>,
-    snap_config: Option<Res<SnapConfig>>,
+    snap_manager: SnapManager,
     mut update_events: MessageWriter<UpdateKeyframeEvent>,
 ) {
     // End drag on mouse release
@@ -1312,12 +1169,12 @@ pub fn handle_keyframe_drag(
         (GizmoHandle::KeyframePivot, Keyframe::PivotRotate { pivot_mode, angle, duration, easing, .. }) => {
             // Move pivot to mouse position with grid snap
             // For Relative mode, convert world position to relative offset
-            let snapped_world = apply_grid_snap_only(mouse_pos, snap_config.as_deref());
+            let result = snap_manager.snap(mouse_pos, false, None);
             let new_pivot = match pivot_mode {
-                PivotMode::Absolute => [snapped_world.x, snapped_world.y],
+                PivotMode::Absolute => [result.position.x, result.position.y],
                 PivotMode::Relative => {
                     // Convert world position to offset from target center
-                    [snapped_world.x - target_center.x, snapped_world.y - target_center.y]
+                    [result.position.x - target_center.x, result.position.y - target_center.y]
                 }
             };
             Some(Keyframe::PivotRotate {
@@ -1340,7 +1197,7 @@ pub fn handle_keyframe_drag(
             let start_angle_rad = (drag_start_mouse - pivot_pos).to_angle();
             let delta_angle = angle_rad - start_angle_rad;
             let new_angle_rad = (start_angle + delta_angle.to_degrees()).to_radians();
-            let snapped_angle = apply_rotation_snap(new_angle_rad, snap_config.as_deref());
+            let snapped_angle = snap_manager.snap_angle(new_angle_rad);
 
             Some(Keyframe::PivotRotate {
                 pivot,
@@ -1352,7 +1209,7 @@ pub fn handle_keyframe_drag(
         }
         (GizmoHandle::KeyframeTranslateX, Keyframe::Apply { rotation, duration, easing, .. }) => {
             let start_trans = editor_state.drag_start_keyframe_translation.unwrap_or([0.0, 0.0]);
-            let new_x = snap_scalar_to_grid(start_trans[0] + delta.x, snap_config.as_deref());
+            let new_x = snap_manager.snap_scalar(start_trans[0] + delta.x);
             let y = start_trans[1];
             let new_translation = if new_x.abs() < 0.001 && y.abs() < 0.001 {
                 None
@@ -1370,7 +1227,7 @@ pub fn handle_keyframe_drag(
         (GizmoHandle::KeyframeTranslateY, Keyframe::Apply { rotation, duration, easing, .. }) => {
             let start_trans = editor_state.drag_start_keyframe_translation.unwrap_or([0.0, 0.0]);
             let x = start_trans[0];
-            let new_y = snap_scalar_to_grid(start_trans[1] + delta.y, snap_config.as_deref());
+            let new_y = snap_manager.snap_scalar(start_trans[1] + delta.y);
             let new_translation = if x.abs() < 0.001 && new_y.abs() < 0.001 {
                 None
             } else {
@@ -1387,11 +1244,11 @@ pub fn handle_keyframe_drag(
         (GizmoHandle::KeyframeTranslateFree, Keyframe::Apply { rotation, duration, easing, .. }) => {
             let start_trans = editor_state.drag_start_keyframe_translation.unwrap_or([0.0, 0.0]);
             let raw_pos = Vec2::new(start_trans[0] + delta.x, start_trans[1] + delta.y);
-            let snapped = apply_grid_snap_only(raw_pos, snap_config.as_deref());
-            let new_translation = if snapped.x.abs() < 0.001 && snapped.y.abs() < 0.001 {
+            let result = snap_manager.snap(raw_pos, false, None);
+            let new_translation = if result.position.x.abs() < 0.001 && result.position.y.abs() < 0.001 {
                 None
             } else {
-                Some([snapped.x, snapped.y])
+                Some([result.position.x, result.position.y])
             };
 
             Some(Keyframe::Apply {
@@ -1408,7 +1265,7 @@ pub fn handle_keyframe_drag(
             let start_angle_rad = (drag_start_mouse - target_center).to_angle();
             let delta_angle = angle_rad - start_angle_rad;
             let new_rotation_rad = (start_angle + delta_angle.to_degrees()).to_radians();
-            let snapped_rotation = apply_rotation_snap(new_rotation_rad, snap_config.as_deref());
+            let snapped_rotation = snap_manager.snap_angle(new_rotation_rad);
             let new_rotation_deg = snapped_rotation.to_degrees();
             let new_rotation = if new_rotation_deg.abs() < 0.001 { None } else { Some(new_rotation_deg) };
 

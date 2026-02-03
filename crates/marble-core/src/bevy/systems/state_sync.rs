@@ -213,10 +213,11 @@ pub fn sync_snap_config_to_stores(
     };
 
     let summary = SnapConfigSummary {
-        grid_snap_enabled: snap_config.grid_snap_enabled,
-        grid_snap_interval: snap_config.grid_snap_interval,
-        angle_snap_enabled: snap_config.angle_snap_enabled,
-        angle_snap_interval: snap_config.angle_snap_interval,
+        // In simplified snap system, snapping is always enabled when interval > 0
+        grid_snap_enabled: snap_config.grid_interval > 0.0,
+        grid_snap_interval: snap_config.grid_interval,
+        angle_snap_enabled: snap_config.angle_interval > 0.0,
+        angle_snap_interval: snap_config.angle_interval,
     };
 
     state_stores.snap_config.update(summary);

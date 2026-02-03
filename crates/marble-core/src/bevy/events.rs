@@ -115,6 +115,8 @@ pub struct UpdateKeyframeEvent {
 pub struct AddObjectEvent {
     /// The object to add.
     pub object: crate::map::MapObject,
+    /// The index where the object was added.
+    pub index: usize,
 }
 
 /// Message to delete a map object.

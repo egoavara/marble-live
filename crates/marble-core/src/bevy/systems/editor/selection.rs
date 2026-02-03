@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 
 use super::{EditorStateRes, SelectObjectEvent, UpdateObjectEvent};
-use crate::bevy::{GuidelineMarker, MapConfig, MapObjectMarker};
+use crate::bevy::{GuidelineMarker, MapConfig};
 use crate::dsl::GameContext;
 use crate::map::{EvaluatedShape, ObjectRole};
 
@@ -29,7 +29,7 @@ pub fn handle_selection_events(
 pub fn handle_object_updates(
     mut map_config: Option<ResMut<MapConfig>>,
     mut events: MessageReader<UpdateObjectEvent>,
-    object_markers: Query<(Entity, &MapObjectMarker)>,
+    object_map: Res<crate::bevy::ObjectEntityMap>,
     mut transforms: Query<&mut Transform>,
     mut guideline_markers: Query<&mut GuidelineMarker>,
 ) {
@@ -45,58 +45,51 @@ pub fn handle_object_updates(
             *obj = event.object.clone();
         }
 
-        // Find and update the entity transform
-        // Match by object_id if available, otherwise by index in the list
-        let target_id = event.object.id.as_ref();
+        // Find entity by index (most reliable method)
+        let entity = object_map.get_by_index(event.index);
 
-        for (entity, marker) in object_markers.iter() {
-            // Match by ID if both have IDs
-            let matches_by_id = match (&marker.object_id, target_id) {
-                (Some(marker_id), Some(event_id)) => marker_id == event_id,
-                _ => false,
-            };
+        // Fallback: try to find by ID if index lookup fails
+        let entity = entity.or_else(|| {
+            event.object.id.as_ref().and_then(|id| object_map.get(id))
+        });
 
-            // For objects without ID, match by role and check if it's the same index
-            // (This is a fallback for objects that don't have IDs yet)
-            let matches_by_index = marker.object_id.is_none()
-                && target_id.is_none()
-                && marker.role == event.object.role;
+        let Some(entity) = entity else {
+            tracing::warn!(
+                "[selection] Could not find entity for object at index {}: {:?}",
+                event.index,
+                event.object.id
+            );
+            continue;
+        };
 
-            if matches_by_id || matches_by_index {
-                let shape = event.object.shape.evaluate(&ctx);
+        let shape = event.object.shape.evaluate(&ctx);
 
-                // Update transform
-                if let Ok(mut transform) = transforms.get_mut(entity) {
-                    let (pos, rot) = get_shape_transform(&shape);
-                    transform.translation.x = pos.x;
-                    transform.translation.y = pos.y;
-                    transform.rotation = Quat::from_rotation_z(rot);
+        // Update transform
+        if let Ok(mut transform) = transforms.get_mut(entity) {
+            let (pos, rot) = get_shape_transform(&shape);
+            transform.translation.x = pos.x;
+            transform.translation.y = pos.y;
+            transform.rotation = Quat::from_rotation_z(rot);
+        }
+
+        // Update GuidelineMarker if this is a guideline
+        if event.object.role == ObjectRole::Guideline {
+            if let Ok(mut guideline) = guideline_markers.get_mut(entity) {
+                // Update start/end from shape
+                if let EvaluatedShape::Line { start, end } = shape {
+                    guideline.start = Vec2::new(start[0], start[1]);
+                    guideline.end = Vec2::new(end[0], end[1]);
                 }
 
-                // Update GuidelineMarker if this is a guideline
-                if event.object.role == ObjectRole::Guideline {
-                    if let Ok(mut guideline) = guideline_markers.get_mut(entity) {
-                        // Update start/end from shape
-                        if let EvaluatedShape::Line { start, end } = shape {
-                            guideline.start = Vec2::new(start[0], start[1]);
-                            guideline.end = Vec2::new(end[0], end[1]);
-                        }
-
-                        // Update properties from object
-                        if let Some(props) = &event.object.properties.guideline {
-                            guideline.show_ruler = props.show_ruler;
-                            guideline.snap_enabled = props.snap_enabled;
-                            guideline.snap_distance = props.snap_distance;
-                            guideline.ruler_interval = props.ruler_interval;
-                            if let Some(color) = props.color {
-                                guideline.color = Color::srgba(color[0], color[1], color[2], color[3]);
-                            }
-                        }
+                // Update properties from object
+                if let Some(props) = &event.object.properties.guideline {
+                    guideline.show_ruler = props.show_ruler;
+                    guideline.snap_enabled = props.snap_enabled;
+                    guideline.snap_distance = props.snap_distance;
+                    guideline.ruler_interval = props.ruler_interval;
+                    if let Some(color) = props.color {
+                        guideline.color = Color::srgba(color[0], color[1], color[2], color[3]);
                     }
-                }
-
-                if matches_by_id {
-                    break; // Found exact match by ID
                 }
             }
         }

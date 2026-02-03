@@ -132,12 +132,15 @@ pub fn process_editor_commands(
             }
             GameCommand::AddObject { object } => {
                 tracing::info!("[command] AddObject");
-                if let Some(ref mut config) = map_config {
+                let new_index = if let Some(ref mut config) = map_config {
                     config.0.objects.push(object.clone());
-                    let new_index = config.0.objects.len() - 1;
-                    editor_state.selected_object = Some(new_index);
-                }
-                add_object_events.write(AddObjectEvent { object });
+                    let idx = config.0.objects.len() - 1;
+                    editor_state.selected_object = Some(idx);
+                    idx
+                } else {
+                    0
+                };
+                add_object_events.write(AddObjectEvent { object, index: new_index });
             }
             GameCommand::DeleteObject { index } => {
                 tracing::info!("[command] DeleteObject index={}", index);
@@ -190,30 +193,21 @@ pub fn process_editor_commands(
                 preview_events.write(PreviewSequenceEvent { start });
             }
             GameCommand::UpdateSnapConfig {
-                grid_snap_enabled,
                 grid_snap_interval,
-                angle_snap_enabled,
                 angle_snap_interval,
+                ..
             } => {
                 if let Some(ref mut snap_cfg) = snap_config {
-                    if let Some(enabled) = grid_snap_enabled {
-                        snap_cfg.grid_snap_enabled = enabled;
-                    }
                     if let Some(interval) = grid_snap_interval {
-                        snap_cfg.grid_snap_interval = interval;
-                    }
-                    if let Some(enabled) = angle_snap_enabled {
-                        snap_cfg.angle_snap_enabled = enabled;
+                        snap_cfg.grid_interval = interval;
                     }
                     if let Some(interval) = angle_snap_interval {
-                        snap_cfg.angle_snap_interval = interval;
+                        snap_cfg.angle_interval = interval;
                     }
                     tracing::info!(
-                        "[command] UpdateSnapConfig: grid=({}, {}), angle=({}, {})",
-                        snap_cfg.grid_snap_enabled,
-                        snap_cfg.grid_snap_interval,
-                        snap_cfg.angle_snap_enabled,
-                        snap_cfg.angle_snap_interval
+                        "[command] UpdateSnapConfig: grid={}, angle={}",
+                        snap_cfg.grid_interval,
+                        snap_cfg.angle_interval
                     );
                 }
             }
