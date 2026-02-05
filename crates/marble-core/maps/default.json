@@ -100,11 +100,23 @@
     { "role": "obstacle", "shape": { "type": "line", "start": [6.0, 3.0], "end": [3.7, 0.0] } },
 
     {
+      "id": "goal_field",
+      "role": "vector_field",
+      "shape": { "type": "circle", "center": [3.0, 0.5], "radius": 0.6 },
+      "properties": {
+        "vector_field": {
+          "direction": [0.0, -1.0],
+          "magnitude": "min(0.001 + 0.002 * game.time, 0.1)",
+          "enabled": true,
+          "falloff": "distance_based"
+        }
+      }
+    },
+    {
       "id": "goal",
       "role": "trigger",
       "shape": { "type": "circle", "center": [3.0, 0.5], "radius": 0.45 },
       "properties": {
-        "blackhole": { "force": "min(0.001 + 0.002 * game.time, 0.1)" },
         "trigger": { "action": "gamerule" }
       }
     }

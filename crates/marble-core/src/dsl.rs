@@ -71,6 +71,35 @@ pub enum Vec2OrExpr {
     Dynamic([NumberOrExpr; 2]),
 }
 
+/// A boolean or CEL expression that evaluates to a boolean.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum BoolOrExpr {
+    Bool(bool),
+    Expr(String),
+}
+
+impl Default for BoolOrExpr {
+    fn default() -> Self {
+        Self::Bool(true)
+    }
+}
+
+impl BoolOrExpr {
+    /// Evaluates the expression to a bool value.
+    pub fn evaluate(&self, ctx: &GameContext) -> bool {
+        match self {
+            Self::Bool(b) => *b,
+            Self::Expr(expr) => ctx.eval_bool(expr).unwrap_or(false),
+        }
+    }
+
+    /// Returns true if this is a dynamic expression.
+    pub fn is_dynamic(&self) -> bool {
+        matches!(self, Self::Expr(_))
+    }
+}
+
 impl Vec2OrExpr {
     /// Evaluates to [f32; 2].
     pub fn evaluate(&self, ctx: &GameContext) -> [f32; 2] {
@@ -253,6 +282,20 @@ impl GameContext {
             Value::Float(f) => Ok(f),
             Value::Int(i) => Ok(i as f64),
             Value::UInt(u) => Ok(u as f64),
+            other => Err(DslError::TypeMismatch(format!("{other:?}"))),
+        }
+    }
+
+    /// Evaluates a CEL expression expecting a boolean result.
+    pub fn eval_bool(&self, expr: &str) -> Result<bool, DslError> {
+        let program = self.compile_expr(expr)?;
+        let cel_ctx = self.to_cel_context();
+        let value = program
+            .execute(&cel_ctx)
+            .map_err(|e| DslError::Execution(format!("{e:?}")))?;
+
+        match value {
+            Value::Bool(b) => Ok(b),
             other => Err(DslError::TypeMismatch(format!("{other:?}"))),
         }
     }

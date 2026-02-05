@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dsl::GameContext;
 use crate::keyframe::KeyframeExecutor;
-use crate::map::{BlackholeData, EvaluatedShape, LiveRankingConfig, RollDirection, RouletteConfig, SpawnerData};
+use crate::map::{EvaluatedShape, LiveRankingConfig, RollDirection, RouletteConfig, SpawnerData, VectorFieldData, VectorFieldFalloff};
 use crate::marble::{Color, MarbleManager, PlayerId};
 use crate::physics::{PhysicsWorld, PHYSICS_DT};
 
@@ -52,9 +52,9 @@ pub struct GameState {
     /// Spawner data from the map.
     #[serde(skip)]
     pub spawners: Vec<SpawnerData>,
-    /// Blackhole data for force application.
+    /// Vector field data for force application.
     #[serde(skip)]
-    pub blackholes: Vec<BlackholeData>,
+    pub vector_fields: Vec<VectorFieldData>,
     /// Cached game context for CEL expression evaluation.
     #[serde(skip)]
     game_context: GameContext,
@@ -82,7 +82,7 @@ impl GameState {
             trigger_handles: Vec::new(),
             trigger_actions: Vec::new(),
             spawners: Vec::new(),
-            blackholes: Vec::new(),
+            vector_fields: Vec::new(),
             game_context: GameContext::with_cache_and_seed(seed),
             kinematic_bodies: HashMap::new(),
             kinematic_initial_transforms: HashMap::new(),
@@ -100,7 +100,7 @@ impl GameState {
         self.trigger_handles = map_data.trigger_handles;
         self.trigger_actions = map_data.trigger_actions;
         self.spawners = map_data.spawners;
-        self.blackholes = map_data.blackholes;
+        self.vector_fields = map_data.vector_fields;
         self.kinematic_bodies = map_data.kinematic_bodies;
         self.kinematic_initial_transforms = map_data.kinematic_initial_transforms;
 
@@ -177,8 +177,8 @@ impl GameState {
         // Update keyframe animations
         self.update_keyframes();
 
-        // Apply blackhole forces before physics step
-        self.apply_blackhole_forces();
+        // Apply vector field forces before physics step
+        self.apply_vector_field_forces();
 
         // Step physics
         self.physics_world.step();
@@ -306,29 +306,40 @@ impl GameState {
         &self.selected_gamerule
     }
 
-    /// Applies blackhole forces to all active marbles.
-    fn apply_blackhole_forces(&mut self) {
-        if self.blackholes.is_empty() {
+    /// Applies vector field forces to all active marbles within field areas.
+    fn apply_vector_field_forces(&mut self) {
+        if self.vector_fields.is_empty() {
             return;
         }
 
-        for blackhole in &self.blackholes {
-            // Evaluate the force using the current game context (supports CEL expressions)
-            let force = blackhole.force.evaluate(&self.game_context);
-            if force.abs() < f32::EPSILON {
+        for field in &self.vector_fields {
+            // Check if field is enabled
+            if !field.enabled.evaluate(&self.game_context) {
                 continue;
             }
 
-            // Get blackhole center
-            let shape = blackhole.shape.evaluate(&self.game_context);
-            let center = match shape {
-                EvaluatedShape::Circle { center, .. } => center,
-                EvaluatedShape::Rect { center, .. } => center,
-                EvaluatedShape::Line { .. } => continue,
-                EvaluatedShape::Bezier { .. } => continue,
+            // Evaluate direction and magnitude
+            let dir = field.direction.evaluate(&self.game_context);
+            let dir_len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
+            if dir_len < f32::EPSILON {
+                continue;
+            }
+            let dir_norm = [dir[0] / dir_len, dir[1] / dir_len];
+
+            let magnitude = field.magnitude.evaluate(&self.game_context);
+            if magnitude.abs() < f32::EPSILON {
+                continue;
+            }
+
+            // Get field shape for area detection
+            let shape = field.shape.evaluate(&self.game_context);
+            let center = match &shape {
+                EvaluatedShape::Circle { center, .. } => *center,
+                EvaluatedShape::Rect { center, .. } => *center,
+                _ => continue,
             };
 
-            // Apply force to all active marbles
+            // Apply force to marbles inside the field
             for marble in self.marble_manager.marbles() {
                 if marble.eliminated {
                     continue;
@@ -336,14 +347,24 @@ impl GameState {
 
                 if let Some(body) = self.physics_world.get_rigid_body_mut(marble.body_handle) {
                     let pos = body.translation();
-                    let dx = center[0] - pos.x;
-                    let dy = center[1] - pos.y;
-                    let dist_sq = dx * dx + dy * dy;
-                    let dist = dist_sq.sqrt().max(0.01); // Prevent division by zero
 
-                    // Force magnitude inversely proportional to distance
-                    let force_magnitude = force * 10.0 / dist;
-                    let force_vec = Vector::new(dx / dist * force_magnitude, dy / dist * force_magnitude);
+                    // Check if marble is inside field area
+                    if !is_point_in_shape(pos.x, pos.y, &shape) {
+                        continue;
+                    }
+
+                    let force_vec = match field.falloff {
+                        VectorFieldFalloff::Uniform => {
+                            Vector::new(dir_norm[0] * magnitude, dir_norm[1] * magnitude)
+                        }
+                        VectorFieldFalloff::DistanceBased => {
+                            let dx = pos.x - center[0];
+                            let dy = pos.y - center[1];
+                            let dist = (dx * dx + dy * dy).sqrt().max(0.01);
+                            let scaled_mag = magnitude * 10.0 / dist;
+                            Vector::new(dir_norm[0] * scaled_mag, dir_norm[1] * scaled_mag)
+                        }
+                    };
 
                     body.add_force(force_vec, true);
                 }
@@ -497,6 +518,30 @@ impl GameState {
                 Some(((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0))
             }
         }
+    }
+}
+
+/// Checks if a point is inside a shape.
+fn is_point_in_shape(x: f32, y: f32, shape: &EvaluatedShape) -> bool {
+    match shape {
+        EvaluatedShape::Circle { center, radius } => {
+            let dx = x - center[0];
+            let dy = y - center[1];
+            dx * dx + dy * dy <= radius * radius
+        }
+        EvaluatedShape::Rect {
+            center,
+            size,
+            rotation,
+        } => {
+            let local_x = x - center[0];
+            let local_y = y - center[1];
+            let (sin, cos) = rotation.to_radians().sin_cos();
+            let rotated_x = local_x * cos + local_y * sin;
+            let rotated_y = -local_x * sin + local_y * cos;
+            rotated_x.abs() <= size[0] / 2.0 && rotated_y.abs() <= size[1] / 2.0
+        }
+        _ => false, // Line, Bezier are not areas
     }
 }
 

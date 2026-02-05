@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 
-use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
+use marble_core::dsl::{BoolOrExpr, NumberOrExpr, Vec2OrExpr};
 use marble_core::map::{
     BumperProperties, EasingType, GuidelineProperties, Keyframe, KeyframeSequence, MapMeta,
     MapObject, ObjectProperties, ObjectRole, PivotMode, RollDirection, RouletteConfig, Shape, SpawnProperties,
-    TriggerProperties,
+    TriggerProperties, VectorFieldFalloff, VectorFieldProperties,
 };
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -27,6 +27,22 @@ fn get_vec2_static(v: &Vec2OrExpr) -> Option<[f32; 2]> {
     match v {
         Vec2OrExpr::Static(arr) => Some(*arr),
         Vec2OrExpr::Dynamic(_) => None,
+    }
+}
+
+/// Helper to extract static value from BoolOrExpr
+fn get_bool_static(b: &BoolOrExpr) -> Option<bool> {
+    match b {
+        BoolOrExpr::Bool(v) => Some(*v),
+        BoolOrExpr::Expr(_) => None,
+    }
+}
+
+/// Helper to extract expression string from BoolOrExpr
+fn get_bool_expr(b: &BoolOrExpr) -> Option<&str> {
+    match b {
+        BoolOrExpr::Bool(_) => None,
+        BoolOrExpr::Expr(s) => Some(s.as_str()),
     }
 }
 
@@ -822,6 +838,170 @@ fn properties_editor(props: &PropertiesEditorProps) -> Html {
                                 })
                             }}
                         />
+                    </div>
+                </div>
+            }
+        }
+        ObjectRole::VectorField => {
+            let vf = props.properties.vector_field.clone().unwrap_or_else(|| VectorFieldProperties {
+                direction: Vec2OrExpr::Static([0.0, -1.0]),
+                magnitude: NumberOrExpr::Number(5.0),
+                enabled: BoolOrExpr::Bool(true),
+                falloff: VectorFieldFalloff::Uniform,
+            });
+            let direction = get_vec2_static(&vf.direction).unwrap_or([0.0, -1.0]);
+            let magnitude = get_number_static(&vf.magnitude).unwrap_or(5.0);
+            let enabled_bool = get_bool_static(&vf.enabled).unwrap_or(true);
+            let enabled_expr = get_bool_expr(&vf.enabled).unwrap_or("").to_string();
+            let has_expr = !enabled_expr.is_empty();
+
+            html! {
+                <div class="property-section">
+                    <div class="property-section-title">{"Vector Field Properties"}</div>
+                    <div class="property-field-hint">
+                        {"Vector fields apply directional forces to marbles within their area."}
+                    </div>
+
+                    // Enabled: checkbox + CEL expression input
+                    <div class="property-field">
+                        <label>{"Enabled"}</label>
+                        <div class="property-field-row">
+                            <input
+                                type="checkbox"
+                                checked={enabled_bool}
+                                disabled={has_expr}
+                                onchange={{
+                                    let on_update = on_update.clone();
+                                    let object = object.clone();
+                                    let vf = vf.clone();
+                                    Callback::from(move |e: Event| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        let mut new_obj = object.clone();
+                                        new_obj.properties.vector_field = Some(VectorFieldProperties {
+                                            enabled: BoolOrExpr::Bool(input.checked()),
+                                            ..vf.clone()
+                                        });
+                                        on_update.emit((index, new_obj));
+                                    })
+                                }}
+                            />
+                            <input
+                                type="text"
+                                class="expr-input"
+                                value={enabled_expr.clone()}
+                                placeholder="CEL expr (e.g. game.time > 5)"
+                                oninput={{
+                                    let on_update = on_update.clone();
+                                    let object = object.clone();
+                                    let vf = vf.clone();
+                                    let enabled_bool = enabled_bool;
+                                    Callback::from(move |e: InputEvent| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        let expr = input.value();
+                                        let mut new_obj = object.clone();
+                                        let enabled = if expr.trim().is_empty() {
+                                            BoolOrExpr::Bool(enabled_bool)
+                                        } else {
+                                            BoolOrExpr::Expr(expr)
+                                        };
+                                        new_obj.properties.vector_field = Some(VectorFieldProperties {
+                                            enabled,
+                                            ..vf.clone()
+                                        });
+                                        on_update.emit((index, new_obj));
+                                    })
+                                }}
+                            />
+                        </div>
+                    </div>
+
+                    // Direction X
+                    <NumberField
+                        label="Direction X"
+                        value={direction[0]}
+                        on_change={{
+                            let on_update = on_update.clone();
+                            let object = object.clone();
+                            let vf = vf.clone();
+                            let direction = direction;
+                            Callback::from(move |v: f32| {
+                                let mut new_obj = object.clone();
+                                new_obj.properties.vector_field = Some(VectorFieldProperties {
+                                    direction: Vec2OrExpr::Static([v, direction[1]]),
+                                    ..vf.clone()
+                                });
+                                on_update.emit((index, new_obj));
+                            })
+                        }}
+                    />
+
+                    // Direction Y
+                    <NumberField
+                        label="Direction Y"
+                        value={direction[1]}
+                        on_change={{
+                            let on_update = on_update.clone();
+                            let object = object.clone();
+                            let vf = vf.clone();
+                            let direction = direction;
+                            Callback::from(move |v: f32| {
+                                let mut new_obj = object.clone();
+                                new_obj.properties.vector_field = Some(VectorFieldProperties {
+                                    direction: Vec2OrExpr::Static([direction[0], v]),
+                                    ..vf.clone()
+                                });
+                                on_update.emit((index, new_obj));
+                            })
+                        }}
+                    />
+
+                    // Magnitude
+                    <NumberField
+                        label="Magnitude"
+                        value={magnitude}
+                        on_change={{
+                            let on_update = on_update.clone();
+                            let object = object.clone();
+                            let vf = vf.clone();
+                            Callback::from(move |v: f32| {
+                                let mut new_obj = object.clone();
+                                new_obj.properties.vector_field = Some(VectorFieldProperties {
+                                    magnitude: NumberOrExpr::Number(v),
+                                    ..vf.clone()
+                                });
+                                on_update.emit((index, new_obj));
+                            })
+                        }}
+                    />
+
+                    // Falloff select
+                    <div class="property-field">
+                        <label>{"Falloff"}</label>
+                        <select onchange={{
+                            let on_update = on_update.clone();
+                            let object = object.clone();
+                            let vf = vf.clone();
+                            Callback::from(move |e: Event| {
+                                let input: HtmlInputElement = e.target_unchecked_into();
+                                let falloff = match input.value().as_str() {
+                                    "distance_based" => VectorFieldFalloff::DistanceBased,
+                                    _ => VectorFieldFalloff::Uniform,
+                                };
+                                let mut new_obj = object.clone();
+                                new_obj.properties.vector_field = Some(VectorFieldProperties {
+                                    falloff,
+                                    ..vf.clone()
+                                });
+                                on_update.emit((index, new_obj));
+                            })
+                        }}>
+                            <option value="uniform" selected={vf.falloff == VectorFieldFalloff::Uniform}>
+                                {"Uniform"}
+                            </option>
+                            <option value="distance_based" selected={vf.falloff == VectorFieldFalloff::DistanceBased}>
+                                {"Distance Based"}
+                            </option>
+                        </select>
                     </div>
                 </div>
             }

@@ -184,6 +184,53 @@
     }
 }
 
+.property-field-row {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+
+    input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        accent-color: $color-accent;
+
+        &:disabled {
+            opacity: 0.5;
+        }
+    }
+
+    .expr-input {
+        flex: 1;
+        min-width: 0;
+        padding: $spacing-sm $spacing-md;
+        font-size: $font-size-sm;
+        font-family: monospace;
+        color: $color-text-primary;
+        background: rgba(42, 42, 62, 0.8);
+        border: 1px solid rgba(68, 68, 68, 0.6);
+        border-radius: $radius-md;
+        outline: none;
+        transition: all $transition-normal;
+
+        &:focus {
+            border-color: $color-accent;
+            background: rgba(42, 42, 62, 1);
+        }
+
+        &::placeholder {
+            color: $color-text-dim;
+            font-style: italic;
+        }
+
+        // CEL 표현식이 있을 때 강조
+        &:not(:placeholder-shown) {
+            border-color: rgba(102, 126, 234, 0.5);
+            background: rgba(102, 126, 234, 0.1);
+        }
+    }
+}
+
 .property-note {
     font-size: $font-size-sm;
     color: $color-text-disabled;

@@ -1,48 +1,95 @@
 //! Physics-related systems.
 //!
-//! Handles blackhole forces and physics configuration.
+//! Handles vector field forces and physics configuration.
 
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 
-use crate::bevy::{BlackholeZone, GameContextRes, Marble};
-use crate::map::EvaluatedShape;
+use crate::bevy::{GameContextRes, Marble, VectorFieldZone};
+use crate::map::{EvaluatedShape, VectorFieldFalloff};
 use crate::physics::PHYSICS_DT;
 
-/// System to apply blackhole forces to all active marbles.
-pub fn apply_blackhole_forces(
-    blackholes: Query<&BlackholeZone>,
-    mut marbles: Query<(&Marble, &mut ExternalForce, &Transform), Without<BlackholeZone>>,
+/// System to apply vector field forces to all active marbles within field areas.
+pub fn apply_vector_field_forces(
+    vector_fields: Query<&VectorFieldZone>,
+    mut marbles: Query<(&Marble, &mut ExternalForce, &Transform), Without<VectorFieldZone>>,
     game_context: Res<GameContextRes>,
 ) {
-    for blackhole in blackholes.iter() {
-        let force_magnitude = blackhole.force.evaluate(&game_context.context);
-        if force_magnitude.abs() < f32::EPSILON {
+    for field in vector_fields.iter() {
+        // Check if field is enabled
+        if !field.enabled.evaluate(&game_context.context) {
             continue;
         }
 
-        // Get blackhole center
-        let shape = blackhole.shape.evaluate(&game_context.context);
-        let center = match shape {
-            EvaluatedShape::Circle { center, .. } => Vec2::new(center[0], center[1]),
-            EvaluatedShape::Rect { center, .. } => Vec2::new(center[0], center[1]),
-            _ => continue,
-        };
+        // Evaluate direction and magnitude
+        let dir = field.direction.evaluate(&game_context.context);
+        let dir_vec = Vec2::new(dir[0], dir[1]).normalize_or_zero();
+        if dir_vec.length_squared() < f32::EPSILON {
+            continue;
+        }
 
-        // Apply force to all active marbles
+        let magnitude = field.magnitude.evaluate(&game_context.context);
+        if magnitude.abs() < f32::EPSILON {
+            continue;
+        }
+
+        // Get field shape for area detection
+        let shape = field.shape.evaluate(&game_context.context);
+        let center = get_shape_center(&shape);
+
+        // Apply force to marbles inside the field
         for (marble, mut ext_force, transform) in marbles.iter_mut() {
             if marble.eliminated {
                 continue;
             }
 
             let marble_pos = transform.translation.truncate();
-            let direction = center - marble_pos;
-            let dist = direction.length().max(0.01);
+            if !is_point_in_shape(&marble_pos, &shape) {
+                continue;
+            }
 
-            // Force magnitude inversely proportional to distance
-            let calculated_force = direction.normalize() * force_magnitude * 10.0 / dist;
-            ext_force.force += calculated_force;
+            let force = match field.falloff {
+                VectorFieldFalloff::Uniform => dir_vec * magnitude,
+                VectorFieldFalloff::DistanceBased => {
+                    let dist = (marble_pos - center).length().max(0.01);
+                    dir_vec * magnitude * 10.0 / dist
+                }
+            };
+            ext_force.force += force;
         }
+    }
+}
+
+/// Gets the center point of a shape.
+fn get_shape_center(shape: &EvaluatedShape) -> Vec2 {
+    match shape {
+        EvaluatedShape::Circle { center, .. } => Vec2::new(center[0], center[1]),
+        EvaluatedShape::Rect { center, .. } => Vec2::new(center[0], center[1]),
+        _ => Vec2::ZERO,
+    }
+}
+
+/// Checks if a point is inside a shape.
+fn is_point_in_shape(point: &Vec2, shape: &EvaluatedShape) -> bool {
+    match shape {
+        EvaluatedShape::Circle { center, radius } => {
+            let d = Vec2::new(point.x - center[0], point.y - center[1]);
+            d.length_squared() <= radius * radius
+        }
+        EvaluatedShape::Rect {
+            center,
+            size,
+            rotation,
+        } => {
+            let local = Vec2::new(point.x - center[0], point.y - center[1]);
+            let (sin, cos) = rotation.to_radians().sin_cos();
+            let rotated = Vec2::new(
+                local.x * cos + local.y * sin,
+                -local.x * sin + local.y * cos,
+            );
+            rotated.x.abs() <= size[0] / 2.0 && rotated.y.abs() <= size[1] / 2.0
+        }
+        _ => false, // Line, Bezier are not supported as areas
     }
 }
 

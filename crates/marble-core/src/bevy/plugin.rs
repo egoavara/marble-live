@@ -82,7 +82,7 @@ impl Plugin for MarbleCorePlugin {
                 // Pre-physics
                 systems::clear_external_forces,
                 systems::update_game_context,
-                systems::apply_blackhole_forces,
+                systems::apply_vector_field_forces,
                 systems::update_keyframe_animations,
                 systems::apply_keyframe_updates,
             )

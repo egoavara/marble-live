@@ -4,9 +4,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
+use marble_core::dsl::BoolOrExpr;
 use marble_core::map::{
     Keyframe, KeyframeSequence, MapMeta, MapObject, ObjectProperties, ObjectRole, RouletteConfig,
-    Shape,
+    Shape, VectorFieldFalloff, VectorFieldProperties,
 };
 use yew::prelude::*;
 
@@ -1265,6 +1266,27 @@ pub fn create_default_guideline() -> MapObject {
         },
         properties: ObjectProperties {
             guideline: Some(GuidelineProperties::default()),
+            ..Default::default()
+        },
+    }
+}
+
+/// Creates a default vector field object (circular area with downward force).
+pub fn create_default_vector_field() -> MapObject {
+    MapObject {
+        id: None,
+        role: ObjectRole::VectorField,
+        shape: Shape::Circle {
+            center: Vec2OrExpr::Static([3.0, 5.0]),
+            radius: NumberOrExpr::Number(1.0),
+        },
+        properties: ObjectProperties {
+            vector_field: Some(VectorFieldProperties {
+                direction: Vec2OrExpr::Static([0.0, -1.0]),
+                magnitude: NumberOrExpr::Number(5.0),
+                enabled: BoolOrExpr::Bool(true),
+                falloff: VectorFieldFalloff::Uniform,
+            }),
             ..Default::default()
         },
     }

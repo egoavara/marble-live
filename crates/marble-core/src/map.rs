@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use rapier2d::prelude::{ColliderBuilder, ColliderHandle, RigidBodyHandle, Vector};
 use serde::{Deserialize, Serialize};
 
-use crate::dsl::{GameContext, NumberOrExpr, Vec2OrExpr};
+use crate::dsl::{BoolOrExpr, GameContext, NumberOrExpr, Vec2OrExpr};
 use crate::physics::PhysicsWorld;
 
 /// Default number of segments for bezier curve approximation.
@@ -203,6 +203,8 @@ pub enum ObjectRole {
     /// Editor-only guideline for alignment assistance.
     /// Not spawned in game mode.
     Guideline,
+    /// Vector field that applies directional force within its shape.
+    VectorField,
 }
 
 /// Spawn properties for spawner objects.
@@ -228,10 +230,32 @@ pub struct BumperProperties {
     pub force: NumberOrExpr,
 }
 
-/// Blackhole properties for attractive forces.
+/// Vector field falloff mode.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorFieldFalloff {
+    /// Uniform force throughout the field.
+    #[default]
+    Uniform,
+    /// Force diminishes with distance from center.
+    DistanceBased,
+}
+
+/// Vector field properties - VectorField role exclusive.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct BlackholeProperties {
-    pub force: NumberOrExpr,
+pub struct VectorFieldProperties {
+    /// Force direction (normalized). Supports CEL expressions.
+    /// Example: [1.0, 0.0] or ["cos(game.time)", "sin(game.time)"]
+    pub direction: Vec2OrExpr,
+    /// Force magnitude. Supports CEL expressions.
+    pub magnitude: NumberOrExpr,
+    /// Whether the field is enabled. Supports CEL expressions for dynamic toggling.
+    /// Example: true, false, "game.time > 5.0"
+    #[serde(default)]
+    pub enabled: BoolOrExpr,
+    /// Falloff mode.
+    #[serde(default)]
+    pub falloff: VectorFieldFalloff,
 }
 
 /// Trigger properties for game rule triggers.
@@ -434,13 +458,13 @@ pub struct ObjectProperties {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bumper: Option<BumperProperties>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub blackhole: Option<BlackholeProperties>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub trigger: Option<TriggerProperties>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roll: Option<RollProperties>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guideline: Option<GuidelineProperties>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_field: Option<VectorFieldProperties>,
 }
 
 /// A map object with role, shape, and properties.
@@ -499,8 +523,8 @@ pub struct MapWorldData {
     pub spawners: Vec<SpawnerData>,
     /// Object ID to collider handle mapping.
     pub object_handles: HashMap<String, ColliderHandle>,
-    /// Objects with blackhole properties for force application.
-    pub blackholes: Vec<BlackholeData>,
+    /// Vector field data for force application.
+    pub vector_fields: Vec<VectorFieldData>,
     /// Kinematic body handles for animated objects (object_id -> body_handle).
     pub kinematic_bodies: HashMap<String, RigidBodyHandle>,
     /// Initial positions and rotations of kinematic bodies for keyframe animations.
@@ -514,11 +538,14 @@ pub struct SpawnerData {
     pub properties: Option<SpawnProperties>,
 }
 
-/// Blackhole data for force application.
+/// Vector field runtime data.
 #[derive(Debug, Clone)]
-pub struct BlackholeData {
+pub struct VectorFieldData {
     pub shape: Shape,
-    pub force: NumberOrExpr,
+    pub direction: Vec2OrExpr,
+    pub magnitude: NumberOrExpr,
+    pub enabled: BoolOrExpr,
+    pub falloff: VectorFieldFalloff,
 }
 
 impl RouletteConfig {
@@ -653,7 +680,7 @@ impl RouletteConfig {
         let mut trigger_actions = Vec::new();
         let mut spawners = Vec::new();
         let mut object_handles = HashMap::new();
-        let mut blackholes = Vec::new();
+        let mut vector_fields = Vec::new();
         let mut kinematic_bodies = HashMap::new();
         let mut kinematic_initial_transforms = HashMap::new();
 
@@ -691,13 +718,6 @@ impl RouletteConfig {
                     if let Some(id) = &obj.id {
                         object_handles.insert(id.clone(), handle);
                     }
-                    // Collect blackhole if present
-                    if let Some(bh) = &obj.properties.blackhole {
-                        blackholes.push(BlackholeData {
-                            shape: obj.shape.clone(),
-                            force: bh.force.clone(),
-                        });
-                    }
                 }
                 ObjectRole::Spawner => {
                     spawners.push(SpawnerData {
@@ -708,15 +728,17 @@ impl RouletteConfig {
                 ObjectRole::Guideline => {
                     // Guidelines are editor-only, not applied to physics world
                 }
-            }
-
-            // Obstacles can also have blackhole property
-            if obj.role == ObjectRole::Obstacle {
-                if let Some(bh) = &obj.properties.blackhole {
-                    blackholes.push(BlackholeData {
-                        shape: obj.shape.clone(),
-                        force: bh.force.clone(),
-                    });
+                ObjectRole::VectorField => {
+                    // Collect vector field data
+                    if let Some(vf) = &obj.properties.vector_field {
+                        vector_fields.push(VectorFieldData {
+                            shape: obj.shape.clone(),
+                            direction: vf.direction.clone(),
+                            magnitude: vf.magnitude.clone(),
+                            enabled: vf.enabled.clone(),
+                            falloff: vf.falloff,
+                        });
+                    }
                 }
             }
         }
@@ -726,7 +748,7 @@ impl RouletteConfig {
             trigger_actions,
             spawners,
             object_handles,
-            blackholes,
+            vector_fields,
             kinematic_bodies,
             kinematic_initial_transforms,
         }
@@ -957,14 +979,18 @@ impl RouletteConfig {
             .collect()
     }
 
-    /// Gets all blackhole data from the map.
-    pub fn get_blackholes(&self) -> Vec<BlackholeData> {
+    /// Gets all vector field data from the map.
+    pub fn get_vector_fields(&self) -> Vec<VectorFieldData> {
         self.objects
             .iter()
+            .filter(|obj| obj.role == ObjectRole::VectorField)
             .filter_map(|obj| {
-                obj.properties.blackhole.as_ref().map(|bh| BlackholeData {
+                obj.properties.vector_field.as_ref().map(|vf| VectorFieldData {
                     shape: obj.shape.clone(),
-                    force: bh.force.clone(),
+                    direction: vf.direction.clone(),
+                    magnitude: vf.magnitude.clone(),
+                    enabled: vf.enabled.clone(),
+                    falloff: vf.falloff,
                 })
             })
             .collect()
@@ -1084,8 +1110,8 @@ mod tests {
         assert_eq!(map_data.trigger_handles.len(), 1);
         // Should have one spawner
         assert_eq!(map_data.spawners.len(), 1);
-        // Should have one blackhole
-        assert_eq!(map_data.blackholes.len(), 1);
+        // Should have one vector field (replacing old blackhole)
+        assert_eq!(map_data.vector_fields.len(), 1);
 
         // Verify colliders were created
         // 20 obstacles + 1 trigger = 21 colliders
@@ -1119,7 +1145,6 @@ mod tests {
                     "role": "trigger",
                     "shape": { "type": "circle", "center": [3.0, 9.5], "radius": 0.45 },
                     "properties": {
-                        "blackhole": { "force": 0.2 },
                         "trigger": { "action": "gamerule" }
                     }
                 }
@@ -1135,17 +1160,21 @@ mod tests {
     }
 
     #[test]
-    fn test_cel_expression_parsing() {
+    fn test_vector_field_parsing() {
         let json = r#"{
-            "meta": { "name": "CEL Test", "gamerule": [] },
+            "meta": { "name": "VectorField Test", "gamerule": [] },
             "objects": [
                 {
-                    "id": "goal",
-                    "role": "trigger",
-                    "shape": { "type": "circle", "center": [3.0, 9.5], "radius": 0.45 },
+                    "id": "wind",
+                    "role": "vector_field",
+                    "shape": { "type": "circle", "center": [3.0, 5.0], "radius": 1.5 },
                     "properties": {
-                        "blackhole": { "force": "0.2 + 0.1 * game.time" },
-                        "trigger": { "action": "gamerule" }
+                        "vector_field": {
+                            "direction": [1.0, 0.0],
+                            "magnitude": "0.2 + 0.1 * game.time",
+                            "enabled": true,
+                            "falloff": "uniform"
+                        }
                     }
                 }
             ],
@@ -1154,19 +1183,21 @@ mod tests {
 
         let config = RouletteConfig::from_json(json).expect("Failed to parse JSON");
 
-        // Verify CEL expression was parsed
-        let trigger = &config.objects[0];
-        let blackhole = trigger.properties.blackhole.as_ref().unwrap();
-        assert!(blackhole.force.is_dynamic());
+        // Verify vector field was parsed
+        let vf_obj = &config.objects[0];
+        assert_eq!(vf_obj.role, ObjectRole::VectorField);
+        let vf = vf_obj.properties.vector_field.as_ref().unwrap();
+        assert!(vf.magnitude.is_dynamic());
+        assert_eq!(vf.falloff, VectorFieldFalloff::Uniform);
 
         // Evaluate at different times
         let ctx0 = GameContext::new(0.0, 0);
         let ctx10 = GameContext::new(10.0, 600);
 
-        let force0 = blackhole.force.evaluate(&ctx0);
-        let force10 = blackhole.force.evaluate(&ctx10);
+        let mag0 = vf.magnitude.evaluate(&ctx0);
+        let mag10 = vf.magnitude.evaluate(&ctx10);
 
-        assert!((force0 - 0.2).abs() < 0.001);
-        assert!((force10 - 1.2).abs() < 0.001);
+        assert!((mag0 - 0.2).abs() < 0.001);
+        assert!((mag10 - 1.2).abs() < 0.001);
     }
 }

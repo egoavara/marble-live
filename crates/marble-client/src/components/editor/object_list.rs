@@ -4,7 +4,7 @@ use marble_core::map::{KeyframeSequence, MapObject, ObjectRole, Shape};
 use yew::prelude::*;
 
 use super::sequence_list::SequenceList;
-use crate::hooks::{create_default_guideline, create_default_obstacle, create_default_spawner, create_default_trigger};
+use crate::hooks::{create_default_guideline, create_default_obstacle, create_default_spawner, create_default_trigger, create_default_vector_field};
 
 /// Tab selection for the object list panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -99,6 +99,15 @@ pub fn object_list(props: &ObjectListProps) -> Html {
         })
     };
 
+    let add_vector_field = {
+        let on_add = props.on_add.clone();
+        let show_add_menu = show_add_menu.clone();
+        Callback::from(move |_: MouseEvent| {
+            on_add.emit(create_default_vector_field());
+            show_add_menu.set(false);
+        })
+    };
+
     html! {
         <div class="object-list">
             // Tab header
@@ -150,6 +159,7 @@ pub fn object_list(props: &ObjectListProps) -> Html {
                         ObjectRole::Obstacle => "role-obstacle",
                         ObjectRole::Trigger => "role-trigger",
                         ObjectRole::Guideline => "role-guideline",
+                        ObjectRole::VectorField => "role-vector-field",
                     };
 
                     let role_label = match obj.role {
@@ -157,6 +167,7 @@ pub fn object_list(props: &ObjectListProps) -> Html {
                         ObjectRole::Obstacle => "O",
                         ObjectRole::Trigger => "T",
                         ObjectRole::Guideline => "G",
+                        ObjectRole::VectorField => "V",
                     };
 
                     let shape_label = match &obj.shape {
@@ -213,6 +224,10 @@ pub fn object_list(props: &ObjectListProps) -> Html {
                             <button class="add-menu-item" onclick={add_guideline}>
                                 <span class="object-role-badge role-guideline">{"G"}</span>
                                 {"Guideline"}
+                            </button>
+                            <button class="add-menu-item" onclick={add_vector_field}>
+                                <span class="object-role-badge role-vector-field">{"V"}</span>
+                                {"Vector Field"}
                             </button>
                         </div>
                     }

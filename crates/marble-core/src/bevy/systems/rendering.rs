@@ -547,6 +547,10 @@ pub fn render_map_objects(
                     .map(|c| Color::srgba(c[0], c[1], c[2], c[3]))
                     .unwrap_or(gizmo_config.guideline_color)
             }
+            ObjectRole::VectorField => {
+                // Vector fields rendered with a distinct purple color
+                Color::srgba(0.7, 0.3, 0.9, 0.5)
+            }
         };
 
         // Check if this object has an animated transform

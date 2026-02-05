@@ -8,9 +8,9 @@ use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 
 use crate::bevy::{
-    AddObjectEvent, AnimatedObject, BlackholeZone, DeleteObjectEvent, GuidelineMarker,
+    AddObjectEvent, AnimatedObject, DeleteObjectEvent, GuidelineMarker,
     InitialTransforms, KeyframeExecutors, KeyframeTarget, LoadMapEvent, MapConfig,
-    MapLoadedEvent, MapObjectMarker, ObjectEntityMap, SpawnerZone, TriggerZone,
+    MapLoadedEvent, MapObjectMarker, ObjectEntityMap, SpawnerZone, TriggerZone, VectorFieldZone,
 };
 use crate::dsl::GameContext;
 use crate::keyframe::KeyframeExecutor;
@@ -64,14 +64,6 @@ pub fn handle_load_map(
                         }
                     }
 
-                    // Add blackhole if present
-                    if let Some(bh) = &obj.properties.blackhole {
-                        commands.entity(entity).insert(BlackholeZone {
-                            shape: obj.shape.clone(),
-                            force: bh.force.clone(),
-                        });
-                    }
-
                     // Add keyframe target if applicable (including roll objects)
                     if let Some(ref id) = obj.id {
                         if keyframe_targets.contains(id.as_str()) || obj.properties.roll.is_some() {
@@ -89,15 +81,16 @@ pub fn handle_load_map(
                         object_map.map.insert(id.clone(), entity);
                     }
 
-                    // Add blackhole if present
-                    if let Some(bh) = &obj.properties.blackhole {
-                        commands.entity(entity).insert(BlackholeZone {
-                            shape: obj.shape.clone(),
-                            force: bh.force.clone(),
-                        });
-                    }
-
                     trigger_index += 1;
+                }
+                ObjectRole::VectorField => {
+                    // VectorField: no physics collider, just a zone for force application
+                    let entity = spawn_vector_field(&mut commands, obj, &shape);
+                    object_map.insert_at_index(obj_index, entity);
+
+                    if let Some(ref id) = obj.id {
+                        object_map.map.insert(id.clone(), entity);
+                    }
                 }
                 ObjectRole::Guideline => {
                     // Guidelines are editor-only, spawned without physics colliders
@@ -399,14 +392,6 @@ pub fn handle_add_object(
                     }
                 }
 
-                // Add blackhole if present
-                if let Some(bh) = &obj.properties.blackhole {
-                    commands.entity(entity).insert(BlackholeZone {
-                        shape: obj.shape.clone(),
-                        force: bh.force.clone(),
-                    });
-                }
-
                 // Add keyframe target if applicable
                 if let Some(ref id) = obj.id {
                     if keyframe_targets.contains(id.as_str()) || obj.properties.roll.is_some() {
@@ -426,18 +411,19 @@ pub fn handle_add_object(
                 if let Some(ref id) = obj.id {
                     object_map.map.insert(id.clone(), entity);
                 }
-
-                // Add blackhole if present
-                if let Some(bh) = &obj.properties.blackhole {
-                    commands.entity(entity).insert(BlackholeZone {
-                        shape: obj.shape.clone(),
-                        force: bh.force.clone(),
-                    });
-                }
             }
             ObjectRole::Guideline => {
                 let shape = obj.shape.evaluate(&ctx);
                 let entity = spawn_guideline(&mut commands, obj, &shape);
+                object_map.insert_at_index(obj_index, entity);
+
+                if let Some(ref id) = obj.id {
+                    object_map.map.insert(id.clone(), entity);
+                }
+            }
+            ObjectRole::VectorField => {
+                let shape = obj.shape.evaluate(&ctx);
+                let entity = spawn_vector_field(&mut commands, obj, &shape);
                 object_map.insert_at_index(obj_index, entity);
 
                 if let Some(ref id) = obj.id {
@@ -556,6 +542,58 @@ fn spawn_guideline(
                 ruler_interval,
                 start: line_start,
                 end: line_end,
+            },
+            Transform::from_translation(position.extend(0.0))
+                .with_rotation(Quat::from_rotation_z(rotation)),
+            Visibility::default(),
+        ))
+        .id()
+}
+
+/// Spawn a vector field entity (no physics collider, applies forces within area).
+fn spawn_vector_field(
+    commands: &mut Commands,
+    obj: &crate::map::MapObject,
+    shape: &EvaluatedShape,
+) -> Entity {
+    use crate::dsl::BoolOrExpr;
+
+    let (position, rotation) = match shape {
+        EvaluatedShape::Circle { center, .. } => (Vec2::new(center[0], center[1]), 0.0),
+        EvaluatedShape::Rect {
+            center, rotation, ..
+        } => (Vec2::new(center[0], center[1]), rotation.to_radians()),
+        _ => (Vec2::ZERO, 0.0),
+    };
+
+    // Get vector field properties or use defaults
+    let vf_props = obj.properties.vector_field.as_ref();
+
+    let direction = vf_props
+        .map(|p| p.direction.clone())
+        .unwrap_or_else(|| crate::dsl::Vec2OrExpr::Static([0.0, -1.0]));
+    let magnitude = vf_props
+        .map(|p| p.magnitude.clone())
+        .unwrap_or_else(|| crate::dsl::NumberOrExpr::Number(1.0));
+    let enabled = vf_props
+        .map(|p| p.enabled.clone())
+        .unwrap_or_else(|| BoolOrExpr::Bool(true));
+    let falloff = vf_props
+        .map(|p| p.falloff)
+        .unwrap_or_default();
+
+    commands
+        .spawn((
+            MapObjectMarker {
+                object_id: obj.id.clone(),
+                role: ObjectRole::VectorField,
+            },
+            VectorFieldZone {
+                shape: obj.shape.clone(),
+                direction,
+                magnitude,
+                enabled,
+                falloff,
             },
             Transform::from_translation(position.extend(0.0))
                 .with_rotation(Quat::from_rotation_z(rotation)),

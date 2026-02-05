@@ -29,13 +29,13 @@ pub mod util;
 // Bevy integration
 pub mod bevy;
 
-pub use dsl::{DslError, GameContext, NumberOrExpr, Vec2OrExpr};
+pub use dsl::{BoolOrExpr, DslError, GameContext, NumberOrExpr, Vec2OrExpr};
 pub use game::{GameState, Player};
 pub use keyframe::KeyframeExecutor;
 pub use map::{
-    BlackholeData, EasingType, EvaluatedShape, Keyframe, KeyframeSequence, MapMeta, MapObject,
+    EasingType, EvaluatedShape, Keyframe, KeyframeSequence, MapMeta, MapObject,
     MapWorldData, ObjectProperties, ObjectRole, PivotMode, RollDirection, RollProperties,
-    RouletteConfig, Shape, SpawnerData,
+    RouletteConfig, Shape, SpawnerData, VectorFieldData, VectorFieldFalloff, VectorFieldProperties,
 };
 pub use marble::{Color, DEFAULT_MARBLE_RADIUS, Marble, MarbleId, MarbleManager, PlayerId};
 pub use physics::{PHYSICS_DT, PhysicsWorld, default_gravity};

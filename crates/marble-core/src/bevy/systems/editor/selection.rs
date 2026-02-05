@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 
 use super::{EditorStateRes, SelectObjectEvent, UpdateObjectEvent};
-use crate::bevy::{GuidelineMarker, MapConfig};
+use crate::bevy::{GuidelineMarker, MapConfig, VectorFieldZone};
 use crate::dsl::GameContext;
 use crate::map::{EvaluatedShape, ObjectRole};
 
@@ -32,6 +32,7 @@ pub fn handle_object_updates(
     object_map: Res<crate::bevy::ObjectEntityMap>,
     mut transforms: Query<&mut Transform>,
     mut guideline_markers: Query<&mut GuidelineMarker>,
+    mut vector_field_zones: Query<&mut VectorFieldZone>,
 ) {
     let Some(ref mut config) = map_config else {
         return;
@@ -90,6 +91,22 @@ pub fn handle_object_updates(
                     if let Some(color) = props.color {
                         guideline.color = Color::srgba(color[0], color[1], color[2], color[3]);
                     }
+                }
+            }
+        }
+
+        // Update VectorFieldZone if this is a vector field
+        if event.object.role == ObjectRole::VectorField {
+            if let Ok(mut zone) = vector_field_zones.get_mut(entity) {
+                // Update shape
+                zone.shape = event.object.shape.clone();
+
+                // Update properties from object
+                if let Some(props) = &event.object.properties.vector_field {
+                    zone.direction = props.direction.clone();
+                    zone.magnitude = props.magnitude.clone();
+                    zone.enabled = props.enabled.clone();
+                    zone.falloff = props.falloff;
                 }
             }
         }

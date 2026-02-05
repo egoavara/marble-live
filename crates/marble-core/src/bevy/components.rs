@@ -5,8 +5,8 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::dsl::NumberOrExpr;
-use crate::map::{ObjectRole, Shape};
+use crate::dsl::{BoolOrExpr, NumberOrExpr, Vec2OrExpr};
+use crate::map::{ObjectRole, Shape, VectorFieldFalloff};
 use crate::marble::{Color as MarbleColor, PlayerId};
 
 /// Camera mode for different viewing behaviors.
@@ -71,13 +71,19 @@ pub struct SpawnerZone {
     pub initial_force: String,
 }
 
-/// Blackhole zone component for attractive forces.
+/// Vector field zone component for directional forces.
 #[derive(Component, Debug, Clone)]
-pub struct BlackholeZone {
-    /// The shape of this blackhole (for center calculation).
+pub struct VectorFieldZone {
+    /// The shape of this vector field (for area detection).
     pub shape: Shape,
+    /// Force direction (can use CEL expressions).
+    pub direction: Vec2OrExpr,
     /// Force magnitude (can be a CEL expression).
-    pub force: NumberOrExpr,
+    pub magnitude: NumberOrExpr,
+    /// Whether the field is enabled (can be a CEL expression).
+    pub enabled: BoolOrExpr,
+    /// Falloff mode.
+    pub falloff: VectorFieldFalloff,
 }
 
 /// Marker for objects that can be animated (keyframes).
