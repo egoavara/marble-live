@@ -63,8 +63,6 @@ pub struct TriggerZone {
 /// Spawner zone component for marble spawn areas.
 #[derive(Component, Debug, Clone)]
 pub struct SpawnerZone {
-    /// The shape definition for this spawner.
-    pub shape: Shape,
     /// Spawn mode (e.g., "random").
     pub mode: String,
     /// Initial force mode (e.g., "random").

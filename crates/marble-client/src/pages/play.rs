@@ -1,9 +1,8 @@
 //! Play page with Bevy-based marble game.
 
-use marble_core::RouletteConfig;
 use yew::prelude::*;
 
-use crate::components::{Layout, MarbleGame};
+use crate::components::{GameView, Layout};
 use crate::hooks::{use_join_room, JoinRoomState, PlayerInfo};
 
 /// Props for the PlayPage component.
@@ -18,11 +17,11 @@ pub fn play_page(props: &PlayPageProps) -> Html {
     let room_id = props.room_id.clone();
     let join_state = use_join_room(&room_id);
 
-    // Game end callback
+    // Game end callback (for winner modal)
     let game_ended = use_state(|| false);
     let winners = use_state(Vec::<PlayerInfo>::new);
 
-    let on_game_end = {
+    let _on_game_end = {
         let game_ended = game_ended.clone();
         let winners = winners.clone();
         Callback::from(move |players: Vec<PlayerInfo>| {
@@ -30,10 +29,6 @@ pub fn play_page(props: &PlayPageProps) -> Html {
             game_ended.set(true);
         })
     };
-
-    // Get default map config
-    let config_json = serde_json::to_string(&RouletteConfig::default_classic())
-        .unwrap_or_else(|_| "{}".to_string());
 
     let content = match &*join_state {
         JoinRoomState::Idle | JoinRoomState::Joining => {
@@ -53,12 +48,13 @@ pub fn play_page(props: &PlayPageProps) -> Html {
                 </div>
             }
         }
-        JoinRoomState::Joined { .. } => {
+        JoinRoomState::Joined { signaling_url, is_host } => {
             html! {
                 <>
-                    <MarbleGame
-                        config_json={config_json}
-                        on_game_end={on_game_end}
+                    <GameView
+                        room_id={room_id.clone()}
+                        signaling_url={signaling_url.clone()}
+                        is_host={*is_host}
                     />
 
                     // Winner modal

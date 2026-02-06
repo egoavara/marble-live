@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel_interpreter::{Context, Program, Value};
+use cel::{Context, Program, Value};
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use rand::SeedableRng;
@@ -67,6 +67,9 @@ impl NumberOrExpr {
 pub enum Vec2OrExpr {
     /// Static [x, y] values.
     Static([f32; 2]),
+    /// Single CEL expression that evaluates to [x, y].
+    /// Example: "[cos(game.time), sin(game.time)]"
+    Expr(String),
     /// Dynamic values where each component can be a number or expression.
     Dynamic([NumberOrExpr; 2]),
 }
@@ -105,13 +108,18 @@ impl Vec2OrExpr {
     pub fn evaluate(&self, ctx: &GameContext) -> [f32; 2] {
         match self {
             Self::Static(v) => *v,
+            Self::Expr(expr) => ctx.eval_vec2(expr).unwrap_or([0.0, 0.0]),
             Self::Dynamic(v) => [v[0].evaluate(ctx), v[1].evaluate(ctx)],
         }
     }
 
     /// Returns true if any component is dynamic.
     pub fn is_dynamic(&self) -> bool {
-        matches!(self, Self::Dynamic(v) if v[0].is_dynamic() || v[1].is_dynamic())
+        match self {
+            Self::Static(_) => false,
+            Self::Expr(_) => true,
+            Self::Dynamic(v) => v[0].is_dynamic() || v[1].is_dynamic(),
+        }
     }
 }
 
@@ -299,6 +307,40 @@ impl GameContext {
             other => Err(DslError::TypeMismatch(format!("{other:?}"))),
         }
     }
+
+    /// Evaluates a CEL expression expecting a 2D vector result.
+    pub fn eval_vec2(&self, expr: &str) -> Result<[f32; 2], DslError> {
+        let program = self.compile_expr(expr)?;
+        let cel_ctx = self.to_cel_context();
+        let value = program
+            .execute(&cel_ctx)
+            .map_err(|e| DslError::Execution(format!("{e:?}")))?;
+
+        match value {
+            Value::List(list) => {
+                if list.len() != 2 {
+                    return Err(DslError::TypeMismatch(format!(
+                        "Expected list of 2 elements, got {}",
+                        list.len()
+                    )));
+                }
+                let x = Self::value_to_f32(&list[0])?;
+                let y = Self::value_to_f32(&list[1])?;
+                Ok([x, y])
+            }
+            other => Err(DslError::TypeMismatch(format!("{other:?}"))),
+        }
+    }
+
+    /// Converts a CEL Value to f32.
+    fn value_to_f32(value: &Value) -> Result<f32, DslError> {
+        match value {
+            Value::Float(f) => Ok(*f as f32),
+            Value::Int(i) => Ok(*i as f32),
+            Value::UInt(u) => Ok(*u as f32),
+            other => Err(DslError::TypeMismatch(format!("{other:?}"))),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -407,5 +449,60 @@ mod tests {
         // random() can be part of a larger expression
         let result = ctx.eval_f32_with_random("random(1.0, 2.0) + 10.0").unwrap();
         assert!(result >= 11.0 && result < 12.0);
+    }
+
+    #[test]
+    fn test_vec2_or_expr_single_expression() {
+        let ctx = GameContext::new(0.0, 0);
+        let vec = Vec2OrExpr::Expr("[1.0, 2.0]".to_string());
+        let result = vec.evaluate(&ctx);
+        assert!((result[0] - 1.0).abs() < f32::EPSILON);
+        assert!((result[1] - 2.0).abs() < f32::EPSILON);
+        assert!(vec.is_dynamic());
+    }
+
+    #[test]
+    fn test_vec2_or_expr_with_game_time() {
+        use std::f64::consts::PI;
+        let ctx = GameContext::new((PI / 2.0) as f32, 0);
+        // cos(π/2) ≈ 0, sin(π/2) ≈ 1
+        let vec = Vec2OrExpr::Expr("[math.cos(game.time), math.sin(game.time)]".to_string());
+        let result = vec.evaluate(&ctx);
+        assert!(result[0].abs() < 0.01);
+        assert!((result[1] - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_vec2_or_expr_serde_backward_compatibility() {
+        // Static 파싱
+        let json = r#"[1.0, 2.0]"#;
+        let vec: Vec2OrExpr = serde_json::from_str(json).unwrap();
+        assert!(matches!(vec, Vec2OrExpr::Static(_)));
+
+        // Expr 파싱
+        let json = r#""[math.cos(game.time), math.sin(game.time)]""#;
+        let vec: Vec2OrExpr = serde_json::from_str(json).unwrap();
+        assert!(matches!(vec, Vec2OrExpr::Expr(_)));
+
+        // Dynamic 파싱
+        let json = r#"["math.cos(game.time)", "math.sin(game.time)"]"#;
+        let vec: Vec2OrExpr = serde_json::from_str(json).unwrap();
+        assert!(matches!(vec, Vec2OrExpr::Dynamic(_)));
+    }
+
+    #[test]
+    fn test_eval_vec2_direct() {
+        let ctx = GameContext::new(0.0, 0);
+        let result = ctx.eval_vec2("[3.0, 4.0]").unwrap();
+        assert!((result[0] - 3.0).abs() < f32::EPSILON);
+        assert!((result[1] - 4.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_eval_vec2_with_expressions() {
+        let ctx = GameContext::new(5.0, 100);
+        let result = ctx.eval_vec2("[game.time * 2.0, game.frame / 10.0]").unwrap();
+        assert!((result[0] - 10.0).abs() < f32::EPSILON);
+        assert!((result[1] - 10.0).abs() < f32::EPSILON);
     }
 }

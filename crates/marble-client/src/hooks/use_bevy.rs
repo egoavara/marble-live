@@ -29,6 +29,7 @@ pub use marble_core::bevy::{
     get_editor_keyframes, get_editor_keyframes_version,
     get_snap_config, get_snap_config_version,
     reset_bevy_state, is_bevy_ready, request_bevy_exit,
+    is_bevy_app_running, prepare_new_room,
 };
 
 // ============================================================================
@@ -262,10 +263,11 @@ pub fn bevy_provider(props: &BevyProviderProps) -> Html {
                     beforeunload_closure.as_ref().unchecked_ref(),
                 );
 
-                // Request Bevy app to exit and reset state on unmount
-                tracing::info!("BevyProvider unmounting: requesting Bevy exit and cleaning up state");
-                request_bevy_exit();
-                reset_bevy_state();
+                // NOTE: We do NOT call request_bevy_exit() or reset_bevy_state() here.
+                // The Bevy App must stay alive to avoid RecreationAttempt errors
+                // when transitioning between rooms. The App will only be cleaned up
+                // on actual page unload (handled by beforeunload listener).
+                tracing::info!("BevyProvider unmounting: keeping Bevy app alive for room transition");
 
                 // Drop timeout to prevent it from firing after unmount
                 drop(timeout);
@@ -277,8 +279,17 @@ pub fn bevy_provider(props: &BevyProviderProps) -> Html {
         initialized: *initialized,
     };
 
+    // Canvas style: fixed position, full screen, behind other content
+    let canvas_style = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;";
+
     html! {
         <ContextProvider<BevyContext> context={context}>
+            // Canvas for Bevy rendering (fixed position, full screen)
+            <canvas
+                id={props.canvas_id.clone()}
+                class="bevy-canvas"
+                style={canvas_style}
+            />
             { props.children.clone() }
         </ContextProvider<BevyContext>>
     }
@@ -497,6 +508,10 @@ pub fn use_bevy_editor_state() -> EditorStateSummary {
 }
 
 /// Hook to get editor objects (map objects) from Bevy.
+///
+/// Race condition prevention is handled at the state store level:
+/// `get_editor_state_version()` returns 0 until the map is loaded,
+/// so this hook won't fetch data until Bevy is ready.
 #[hook]
 pub fn use_bevy_editor_objects() -> Vec<marble_core::map::MapObject> {
     let objects = use_state(Vec::new);
@@ -525,6 +540,10 @@ pub fn use_bevy_editor_objects() -> Vec<marble_core::map::MapObject> {
 }
 
 /// Hook to get editor keyframes (keyframe sequences) from Bevy.
+///
+/// Race condition prevention is handled at the state store level:
+/// `get_editor_keyframes_version()` returns 0 until the map is loaded,
+/// so this hook won't fetch data until Bevy is ready.
 #[hook]
 pub fn use_bevy_editor_keyframes() -> Vec<marble_core::map::KeyframeSequence> {
     let keyframes = use_state(Vec::new);

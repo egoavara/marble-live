@@ -9,6 +9,13 @@
     width: 100%;
     height: 100%;
     min-height: 100vh;
+    background: transparent;
+    pointer-events: none;
+
+    // Re-enable pointer events for interactive children
+    > * {
+        pointer-events: auto;
+    }
 
     &.fullscreen {
         position: fixed;
@@ -17,8 +24,16 @@
         width: 100vw;
         height: 100vh;
         overflow: hidden;
-        background: $color-bg-tertiary;
+        background: transparent; // Canvas is rendered globally, no background needed
+        pointer-events: none;
+        z-index: 1; // Above the global canvas (z-index: 0)
 
+        > * {
+            pointer-events: auto;
+        }
+
+        // Game canvas is now managed globally by App.rs
+        // This style is kept for reference but won't be applied
         .game-canvas {
             position: absolute;
             top: 50%;
@@ -233,4 +248,200 @@
     width: 18px;
     height: 18px;
     flex-shrink: 0;
+}
+
+// ===== Lobby Overlay =====
+
+.lobby-overlay {
+    @include absolute-fill;
+    @include flex-center;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(3px);
+    z-index: $z-overlay;
+}
+
+.lobby-panel {
+    background: $color-bg-panel;
+    border: 1px solid $color-border-primary;
+    border-radius: $radius-xl;
+    padding: $spacing-2xl;
+    min-width: 360px;
+    max-width: 480px;
+    box-shadow: $shadow-xl;
+}
+
+.lobby-title {
+    font-size: $font-size-xl;
+    font-weight: $font-weight-bold;
+    color: $color-text-primary;
+    text-align: center;
+    margin: 0 0 $spacing-xl 0;
+}
+
+.lobby-room-info {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: $spacing-md;
+    margin-bottom: $spacing-xl;
+    padding: $spacing-md;
+    background: $color-bg-secondary;
+    border-radius: $radius-md;
+}
+
+.lobby-room-id {
+    font-family: $font-family-mono;
+    font-size: $font-size-base;
+    color: $color-text-muted;
+    letter-spacing: 0.05em;
+}
+
+.lobby-share-btn {
+    padding: $spacing-xs $spacing-md;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+    background: $color-accent;
+    border: none;
+    border-radius: $radius-sm;
+    cursor: pointer;
+    transition: all $transition-normal;
+
+    &:hover {
+        background: $color-accent-light;
+    }
+
+    &.copied {
+        background: $color-success;
+    }
+}
+
+.lobby-players {
+    margin-bottom: $spacing-xl;
+}
+
+.lobby-players-header {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: $color-text-muted;
+    margin-bottom: $spacing-md;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.lobby-player-list {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-sm;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.lobby-player-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    padding: $spacing-sm $spacing-md;
+    background: $color-bg-secondary;
+    border-radius: $radius-md;
+    border: 1px solid $color-border-subtle;
+
+    &.host {
+        border-color: $color-accent;
+        background: rgba(102, 126, 234, 0.1);
+    }
+}
+
+.lobby-player-name {
+    flex: 1;
+    font-size: $font-size-base;
+    color: $color-text-primary;
+    font-weight: $font-weight-normal;
+}
+
+.lobby-host-badge {
+    font-size: $font-size-xs;
+    font-weight: $font-weight-bold;
+    color: $color-accent;
+    background: rgba(102, 126, 234, 0.2);
+    padding: 2px $spacing-sm;
+    border-radius: $radius-sm;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.lobby-me-badge {
+    font-size: $font-size-xs;
+    font-weight: $font-weight-bold;
+    color: $color-success;
+    background: rgba(76, 175, 80, 0.2);
+    padding: 2px $spacing-sm;
+    border-radius: $radius-sm;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.lobby-actions {
+    text-align: center;
+}
+
+.lobby-start-btn {
+    width: 100%;
+    padding: $spacing-md $spacing-xl;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-bold;
+    color: $color-text-primary;
+    background: $gradient-success;
+    border: none;
+    border-radius: $radius-lg;
+    cursor: pointer;
+    transition: all $transition-slow;
+    box-shadow: 0 4px 20px rgba(76, 175, 80, 0.4);
+
+    &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 25px rgba(76, 175, 80, 0.5);
+    }
+
+    &:active {
+        transform: translateY(0);
+    }
+}
+
+.lobby-waiting {
+    font-size: $font-size-base;
+    color: $color-text-muted;
+    animation: pulse 2s infinite;
+    margin: 0;
+}
+
+.lobby-connecting {
+    font-size: $font-size-base;
+    color: $color-text-disabled;
+    margin: 0;
+}
+
+// ===== Game Loading =====
+
+.game-loading {
+    @include absolute-fill;
+    @include flex-center;
+    flex-direction: column;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: $z-overlay;
+
+    p {
+        margin-top: $spacing-lg;
+        font-size: $font-size-base;
+        color: $color-text-muted;
+    }
+}
+
+.game-loading__spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid $color-border-primary;
+    border-top-color: $color-accent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
 }

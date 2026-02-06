@@ -24,12 +24,25 @@
     position: relative;
     min-height: 100vh;
     width: 100%;
+    background: transparent;
+    pointer-events: none; // Allow clicks to pass through to canvas
+
+    // Re-enable pointer events for interactive children
+    > * {
+        pointer-events: auto;
+    }
 }
 
 .app-main {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    background: transparent;
+    pointer-events: none;
+
+    > * {
+        pointer-events: auto;
+    }
 }
 
 .app-container {

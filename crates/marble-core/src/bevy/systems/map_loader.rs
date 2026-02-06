@@ -135,10 +135,17 @@ pub fn handle_load_map(
         }
 
         // Initialize keyframe executors (including synthetic roll sequences)
+        let mut has_autoplay = false;
         for seq in &modified_config.keyframes {
             if seq.autoplay {
                 keyframe_executors.add(KeyframeExecutor::new(seq.name.clone()));
+                has_autoplay = true;
             }
+        }
+
+        // Auto-activate keyframes if there are autoplay sequences
+        if has_autoplay {
+            keyframe_executors.activate_all();
         }
 
         // Insert map config as resource (with synthetic sequences added)
@@ -160,7 +167,6 @@ fn spawn_spawner(commands: &mut Commands, obj: &crate::map::MapObject) -> Entity
             role: ObjectRole::Spawner,
         },
         SpawnerZone {
-            shape: obj.shape.clone(),
             mode: spawn_props
                 .map(|p| p.mode.clone())
                 .unwrap_or_else(|| "random".to_string()),
@@ -268,7 +274,8 @@ fn spawn_trigger(
         .id()
 }
 
-fn create_obstacle_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider) {
+/// Creates an obstacle collider from an evaluated shape.
+pub fn create_obstacle_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider) {
     match shape {
         EvaluatedShape::Line { start, end } => {
             let mid = Vec2::new((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0);
@@ -312,6 +319,25 @@ fn create_obstacle_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider) {
                 (Vec2::ZERO, 0.0, Collider::ball(0.1))
             }
         }
+    }
+}
+
+/// Creates a trigger collider from an evaluated shape.
+pub fn create_trigger_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider) {
+    match shape {
+        EvaluatedShape::Circle { center, radius } => {
+            (Vec2::new(center[0], center[1]), 0.0, Collider::ball(*radius))
+        }
+        EvaluatedShape::Rect {
+            center,
+            size,
+            rotation,
+        } => (
+            Vec2::new(center[0], center[1]),
+            rotation.to_radians(),
+            Collider::cuboid(size[0] / 2.0, size[1] / 2.0),
+        ),
+        _ => (Vec2::ZERO, 0.0, Collider::ball(0.1)),
     }
 }
 

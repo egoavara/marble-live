@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use cel_interpreter::{ExecutionError, Value, objects::ValueType};
+use cel::{ExecutionError, Value, objects::ValueType};
 
 pub fn convert_vec_f32(value: Value) -> Result<Vec<f32>, ExecutionError> {
     Ok(convert_vec_f64(value)?
@@ -61,7 +61,7 @@ pub fn object_ref<'a, 'b>(
     }
     match value {
         Value::Map(map) => {
-            let key = cel_interpreter::objects::Key::from(refs[0]);
+            let key = cel::objects::Key::from(refs[0]);
             let next_value = map
                 .get(&key)
                 .ok_or_else(|| ExecutionError::NoSuchKey(Arc::new(refs[0].to_string())))?;
@@ -80,7 +80,7 @@ pub fn object_ref_or<'a, 'b>(
     }
     match value {
         Value::Map(map) => {
-            let key = cel_interpreter::objects::Key::from(refs[0]);
+            let key = cel::objects::Key::from(refs[0]);
             let Some(next_value) = map.get(&key) else {
                 return Ok(None);
             };

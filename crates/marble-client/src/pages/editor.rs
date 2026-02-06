@@ -33,17 +33,26 @@ pub fn editor_page() -> Html {
         .and_then(|seq| bevy_editor_state.executing_keyframes.get(&seq.name))
         .copied();
 
-    // Toggle simulation
+    // Toggle simulation (start/stop)
     let on_toggle_simulation = {
         let is_simulating = is_simulating.clone();
         let currently_simulating = *is_simulating;
         Callback::from(move |_| {
             if currently_simulating {
+                // 중지
                 if let Err(e) = send_command(r#"{"type":"stop_simulation"}"#) {
                     tracing::error!("Failed to stop simulation: {:?}", e);
                 }
                 is_simulating.set(false);
             } else {
+                // 시작 전 초기화
+                if let Err(e) = send_command(r#"{"type":"reset_simulation"}"#) {
+                    tracing::error!("Failed to reset simulation: {:?}", e);
+                }
+                if let Err(e) = send_command(r#"{"type":"clear_marbles"}"#) {
+                    tracing::error!("Failed to clear marbles: {:?}", e);
+                }
+                // 시작
                 if let Err(e) = send_command(r#"{"type":"start_simulation"}"#) {
                     tracing::error!("Failed to start simulation: {:?}", e);
                 }
@@ -94,20 +103,6 @@ pub fn editor_page() -> Html {
             if let Err(e) = send_command(r#"{"type":"spawn_marbles"}"#) {
                 tracing::error!("Failed to spawn marbles: {:?}", e);
             }
-        })
-    };
-
-    // Reset simulation
-    let on_reset = {
-        let is_simulating = is_simulating.clone();
-        Callback::from(move |_| {
-            if let Err(e) = send_command(r#"{"type":"reset_simulation"}"#) {
-                tracing::error!("Failed to reset simulation: {:?}", e);
-            }
-            if let Err(e) = send_command(r#"{"type":"clear_marbles"}"#) {
-                tracing::error!("Failed to clear marbles: {:?}", e);
-            }
-            is_simulating.set(false);
         })
     };
 
@@ -212,7 +207,6 @@ pub fn editor_page() -> Html {
                     spawn_count={*spawn_count}
                     on_spawn_count_change={on_spawn_count_change}
                     on_spawn={on_spawn}
-                    on_reset={on_reset}
                     snap_config={snap_config}
                 />
 

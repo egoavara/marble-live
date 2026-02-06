@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use cel_interpreter::{Context, Value};
+use cel::{Context, Value};
 
 pub struct ContextKeyframe {
     pub name: String,

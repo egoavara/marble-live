@@ -1,19 +1,35 @@
 //! GameView component - main game view with P2P integration.
+//!
+//! Uses the global BevyProvider (from App.rs) for game rendering and
+//! send_command() for game control.
 
 use gloo::events::EventListener;
 use marble_proto::play::p2p_message::Payload;
 use wasm_bindgen::JsCast;
+use web_sys::MouseEvent;
 use yew::prelude::*;
 
 use super::peer_list::ArrivalInfo;
 use super::reaction_panel::{get_reaction_emoji, REACTION_COOLDOWN_MS};
-use super::{CameraControls, ChatPanel, PeerList, ReactionDisplay};
-use crate::camera::CameraMode;
-use crate::ranking::LiveRankingTracker;
+use super::{ChatPanel, PeerList, ReactionDisplay};
 use crate::hooks::{
-    use_config_secret, use_config_username, use_game_loop, use_localstorage,
+    send_command, use_bevy, use_bevy_game, use_bevy_players,
+    use_config_secret, use_config_username,
     use_p2p_room_with_credentials, P2pRoomConfig,
+    PlayerInfo,
 };
+
+/// Canvas ID for the game view.
+pub const GAME_VIEW_CANVAS_ID: &str = "game-view-canvas";
+
+/// Game phase - tracks whether we're in lobby or playing
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum GamePhase {
+    /// Waiting in lobby (map preview visible, no marbles spawned)
+    InLobby,
+    /// Game is playing (marbles spawned and running)
+    Playing,
+}
 
 /// Props for the GameView component.
 #[derive(Properties, PartialEq)]
@@ -33,10 +49,53 @@ pub struct GameViewProps {
 /// - PeerList (left side, vertically centered)
 /// - ReactionDisplay (floating emojis)
 /// - ChatPanel with integrated reactions (bottom-right corner)
-/// - Game canvas with physics rendering
-/// - Host controls (start button)
+/// - Lobby overlay with host controls
+///
+/// NOTE: The game canvas is managed globally by App.rs to persist across
+/// route changes and avoid Bevy's RecreationAttempt error in WASM.
 #[function_component(GameView)]
 pub fn game_view(props: &GameViewProps) -> Html {
+    // GameView now uses the global BevyProvider/Canvas from App.rs
+    // No local BevyProvider needed
+    html! {
+        <GameViewInner
+            room_id={props.room_id.clone()}
+            signaling_url={props.signaling_url.clone()}
+            is_host={props.is_host}
+        />
+    }
+}
+
+/// Props for GameViewInner.
+#[derive(Properties, PartialEq)]
+struct GameViewInnerProps {
+    pub room_id: String,
+    pub signaling_url: String,
+    #[prop_or(false)]
+    pub is_host: bool,
+}
+
+/// Predefined colors for players.
+const PLAYER_COLORS: [[u8; 4]; 8] = [
+    [255, 0, 0, 255],     // Red
+    [0, 0, 255, 255],     // Blue
+    [0, 255, 0, 255],     // Green
+    [255, 128, 0, 255],   // Orange
+    [128, 0, 255, 255],   // Purple
+    [255, 0, 128, 255],   // Pink
+    [0, 255, 255, 255],   // Cyan
+    [255, 255, 0, 255],   // Yellow
+];
+
+/// Inner component that uses Bevy context and P2P hooks.
+#[function_component(GameViewInner)]
+fn game_view_inner(props: &GameViewInnerProps) -> Html {
+    // Bevy state
+    let bevy = use_bevy();
+    let bevy_game_state = use_bevy_game();
+    let (bevy_players, bevy_arrival_order) = use_bevy_players();
+
+    // User config
     let config_username = use_config_username();
     let config_secret = use_config_secret();
 
@@ -46,6 +105,7 @@ pub fn game_view(props: &GameViewProps) -> Html {
         .unwrap_or_default();
     let player_secret = config_secret.to_string();
 
+    // P2P connection
     let config = P2pRoomConfig {
         signaling_url: Some(props.signaling_url.clone()),
         auto_connect: true,
@@ -60,90 +120,32 @@ pub fn game_view(props: &GameViewProps) -> Html {
     let is_connected =
         matches!(connection_state, crate::services::p2p::P2pConnectionState::Connected);
 
-    // Canvas reference
-    let canvas_ref = use_node_ref();
+    // Game phase state - start in lobby
+    let game_phase = use_state(|| GamePhase::InLobby);
 
-    // Camera mode from localStorage
-    let camera_mode_storage = use_localstorage("marble-live-camera-mode", || CameraMode::Overview);
+    // Share button copied state
+    let share_copied = use_state(|| false);
 
-    // Game loop hook with initial camera mode
-    let game_seed = use_state(|| js_sys::Date::now() as u64);
-    let game_loop = use_game_loop(&p2p, canvas_ref.clone(), props.is_host, *game_seed, *camera_mode_storage);
-
-    // Current camera mode for UI (trigger re-render)
-    let current_camera_mode = use_state(|| *camera_mode_storage);
-
-    // Callback for camera mode change
-    let on_camera_mode_change = {
-        let camera_mode_storage = camera_mode_storage.clone();
-        let current_camera_mode = current_camera_mode.clone();
-        Callback::from(move |mode: CameraMode| {
-            camera_mode_storage.set(mode);
-            current_camera_mode.set(mode);
-        })
-    };
-
-    // Track last processed session version (instead of boolean flag)
+    // Track last processed session version for non-host
     let last_processed_session = use_mut_ref(|| 0u64);
-    // Track if host has started initial game
-    let host_started = use_mut_ref(|| false);
-    // Track previous peer count for detecting new peer joins
-    let prev_peer_count = use_mut_ref(|| 0usize);
 
-    // Live ranking tracker with hysteresis (300ms cooldown + 30px margin)
-    let live_ranking_tracker = use_mut_ref(LiveRankingTracker::new);
+    // Cooldown state for reactions
+    let last_reaction_time = use_mut_ref(|| 0.0f64);
+    let cooldown_active = use_state(|| false);
 
-    // Auto-start game when host connects
-    {
-        let game_loop = game_loop.clone();
-        let is_host = props.is_host;
-        let host_started = host_started.clone();
-        use_effect_with(is_connected, move |is_connected| {
-            if is_host && *is_connected && !*host_started.borrow() {
-                *host_started.borrow_mut() = true;
-                game_loop.start_game();
-            }
-        });
-    }
-
-    // Host: resend GameStart when new peers join (so they can start simulation)
-    {
-        let game_loop = game_loop.clone();
-        let is_host = props.is_host;
-        let p2p = p2p.clone();
-        let prev_peer_count = prev_peer_count.clone();
-        let peers_count = peers.len();
-        use_effect_with(peers_count, move |&current_count| {
-            if !is_host {
-                return;
-            }
-
-            let prev = *prev_peer_count.borrow();
-            *prev_peer_count.borrow_mut() = current_count;
-
-            // If new peers joined and game is running, resend current state
-            if current_count > prev && game_loop.is_running() {
-                let game_state = game_loop.game_state.borrow();
-                let gamerule = game_state.gamerule().to_string();
-                let snapshot = game_state.create_snapshot();
-                if let Ok(state_bytes) = snapshot.to_bytes() {
-                    drop(game_state);
-                    p2p.send_game_start(snapshot.rng_seed, state_bytes, gamerule);
-                    tracing::info!("Resent GameStart to new peers (peer count: {} -> {})", prev, current_count);
-                }
-            }
-        });
-    }
+    // Last keyboard emoji state (for syncing with ChatPanel's ReactionPanel)
+    let last_keyboard_emoji = use_state(|| None::<String>);
 
     // Process GameStart messages for non-host
-    // Uses session_version to detect new game starts (including respawns)
     {
-        let game_loop = game_loop.clone();
         let is_host = props.is_host;
         let last_processed_session = last_processed_session.clone();
         let messages_for_game_start = messages.clone();
-        use_effect_with(messages.len(), move |_| {
-            if is_host {
+        let game_phase = game_phase.clone();
+        let bevy_initialized = bevy.initialized;
+
+        use_effect_with((messages.len(), bevy_initialized), move |(_, initialized)| {
+            if is_host || !*initialized {
                 return;
             }
 
@@ -153,20 +155,27 @@ pub fn game_view(props: &GameViewProps) -> Html {
                     // Only process if session version is newer
                     if game_start.session_version > *last_processed_session.borrow() {
                         *last_processed_session.borrow_mut() = game_start.session_version;
-                        game_loop.init_from_game_start(game_start.seed, &game_start.initial_state, &game_start.gamerule);
+
+                        // Send restore command to Bevy with the game state
+                        let cmd = serde_json::json!({
+                            "type": "restore_game_state",
+                            "seed": game_start.seed,
+                            "state": game_start.initial_state,
+                            "gamerule": game_start.gamerule
+                        });
+                        if let Err(e) = send_command(&cmd.to_string()) {
+                            tracing::error!("Failed to restore game state: {:?}", e);
+                        }
+
+                        // Transition to playing phase
+                        game_phase.set(GamePhase::Playing);
+                        tracing::info!("Non-host: Game started from host (session {})", game_start.session_version);
                     }
                     break;
                 }
             }
         });
     }
-
-    // Cooldown state - last reaction timestamp
-    let last_reaction_time = use_mut_ref(|| 0.0f64);
-    let cooldown_active = use_state(|| false);
-
-    // Last keyboard emoji state (for syncing with ChatPanel's ReactionPanel)
-    let last_keyboard_emoji = use_state(|| None::<String>);
 
     // Helper: send reaction with cooldown check
     let send_reaction = {
@@ -185,7 +194,7 @@ pub fn game_view(props: &GameViewProps) -> Html {
             *last_reaction_time.borrow_mut() = now;
             cooldown_active.set(true);
 
-            // Send reaction (save_last_emoji is handled by ChatPanel)
+            // Send reaction
             p2p.send_reaction(emoji);
 
             // Schedule cooldown end
@@ -205,18 +214,15 @@ pub fn game_view(props: &GameViewProps) -> Html {
         })
     };
 
-    // Keyboard event handler for reaction shortcuts (1-5) and camera controls (Q/W/E)
+    // Keyboard event handler for reaction shortcuts (1-5)
     {
         let send_reaction = send_reaction.clone();
         let last_keyboard_emoji = last_keyboard_emoji.clone();
         let is_connected = is_connected;
-        let camera_state = game_loop.camera();
-        let on_camera_mode_change = on_camera_mode_change.clone();
+
         use_effect_with(is_connected, move |_| {
             let listener = web_sys::window().map(|window| {
                 let last_keyboard_emoji = last_keyboard_emoji.clone();
-                let camera_state = camera_state.clone();
-                let on_camera_mode_change = on_camera_mode_change.clone();
                 EventListener::new(&window, "keydown", move |event| {
                     let keyboard_event = match event.dyn_ref::<web_sys::KeyboardEvent>() {
                         Some(e) => e,
@@ -235,30 +241,9 @@ pub fn game_view(props: &GameViewProps) -> Html {
 
                     let key = keyboard_event.key().to_lowercase();
 
-                    // Camera controls (Q/W/E)
-                    match key.as_str() {
-                        "q" => {
-                            camera_state.borrow_mut().set_mode(CameraMode::FollowMe);
-                            on_camera_mode_change.emit(CameraMode::FollowMe);
-                            return;
-                        }
-                        "w" => {
-                            camera_state.borrow_mut().set_mode(CameraMode::FollowLeader);
-                            on_camera_mode_change.emit(CameraMode::FollowLeader);
-                            return;
-                        }
-                        "e" => {
-                            camera_state.borrow_mut().set_mode(CameraMode::Overview);
-                            on_camera_mode_change.emit(CameraMode::Overview);
-                            return;
-                        }
-                        _ => {}
-                    }
-
                     // Reaction shortcuts (only when connected)
                     if is_connected {
                         if let Some(emoji) = get_reaction_emoji(&key) {
-                            // Update last_keyboard_emoji for ChatPanel sync
                             last_keyboard_emoji.set(Some(emoji.to_string()));
                             send_reaction(emoji);
                         }
@@ -266,122 +251,262 @@ pub fn game_view(props: &GameViewProps) -> Html {
                 })
             });
 
-            // Keep listener alive until cleanup
             move || drop(listener)
         });
     }
 
-    // Calculate if reactions are on cooldown
+    // Start game callback (host only)
+    let on_start_game = {
+        let game_phase = game_phase.clone();
+        let p2p = p2p.clone();
+        let peers = peers.clone();
+        let player_id = player_id.clone();
+        let bevy_initialized = bevy.initialized;
+
+        Callback::from(move |_: MouseEvent| {
+            if !bevy_initialized {
+                tracing::warn!("Bevy not initialized yet");
+                return;
+            }
+
+            // 1. Clear existing players
+            if let Err(e) = send_command(r#"{"type":"clear_players"}"#) {
+                tracing::error!("Failed to clear players: {:?}", e);
+            }
+
+            // 2. Add self as first player
+            let self_color = PLAYER_COLORS[0];
+            let cmd = serde_json::json!({
+                "type": "add_player",
+                "name": player_id,
+                "color": self_color
+            });
+            if let Err(e) = send_command(&cmd.to_string()) {
+                tracing::error!("Failed to add self as player: {:?}", e);
+            }
+
+            // 3. Add peers as players
+            for (i, peer) in peers.iter().enumerate() {
+                if let Some(peer_player_id) = &peer.player_id {
+                    let color = PLAYER_COLORS[(i + 1) % PLAYER_COLORS.len()];
+                    let cmd = serde_json::json!({
+                        "type": "add_player",
+                        "name": peer_player_id,
+                        "color": color
+                    });
+                    if let Err(e) = send_command(&cmd.to_string()) {
+                        tracing::error!("Failed to add peer as player: {:?}", e);
+                    }
+                }
+            }
+
+            // 4. Spawn marbles
+            if let Err(e) = send_command(r#"{"type":"spawn_marbles"}"#) {
+                tracing::error!("Failed to spawn marbles: {:?}", e);
+            }
+
+            // 5. Get game state and broadcast to peers
+            // TODO: Need to get snapshot from Bevy and send via P2P
+            // For now, we'll send a simplified message
+            let seed = js_sys::Date::now() as u64;
+            let player_names: Vec<String> = std::iter::once(player_id.clone())
+                .chain(peers.iter().filter_map(|p| p.player_id.clone()))
+                .collect();
+
+            // Send GameStart with player list (peers will reconstruct)
+            let state_json = serde_json::json!({
+                "players": player_names,
+                "colors": PLAYER_COLORS[..player_names.len().min(8)].to_vec()
+            });
+            if let Ok(state_bytes) = serde_json::to_vec(&state_json) {
+                p2p.send_game_start(seed, state_bytes, String::new());
+            }
+
+            // 6. Transition to playing phase
+            game_phase.set(GamePhase::Playing);
+            tracing::info!("Host: Game started with {} players", peers.len() + 1);
+        })
+    };
+
+    // Share room URL callback
+    let on_share = {
+        let room_id = props.room_id.clone();
+        let share_copied = share_copied.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(window) = web_sys::window() {
+                let origin = window.location().origin().unwrap_or_default();
+                let url = format!("{}/play/{}", origin, room_id);
+                let clipboard = window.navigator().clipboard();
+                let _ = clipboard.write_text(&url);
+                share_copied.set(true);
+                // Reset copied state after 2 seconds
+                let share_copied = share_copied.clone();
+                gloo::timers::callback::Timeout::new(2000, move || {
+                    share_copied.set(false);
+                })
+                .forget();
+            }
+        })
+    };
+
+    // Calculate reaction cooldown
     let reaction_disabled = *cooldown_active;
 
-    // Calculate arrival info from game state (before html! macro)
-    let (arrival_info, gamerule) = {
-        let game_state = game_loop.game_state.borrow();
-        let mut tracker = live_ranking_tracker.borrow_mut();
-
-        // 1. 쿨타임 틱
-        tracker.tick();
-
-        let leaderboard = game_state.leaderboard();
-        let gamerule = game_state.gamerule().to_string();
-        let arrival_order_list = game_state.arrival_order();
-
-        // 2. 미도착 플레이어 위치 수집
-        let non_arrived_positions: Vec<(marble_core::marble::PlayerId, f32)> = game_state.players.iter()
-            .filter(|p| !arrival_order_list.contains(&p.id))
-            .filter_map(|p| {
-                game_state.marble_manager.get_marble_by_owner(p.id).and_then(|marble| {
-                    if marble.eliminated {
-                        None
-                    } else {
-                        game_state.physics_world.get_rigid_body(marble.body_handle).map(|body| {
-                            let pos = body.translation();
-                            let score = game_state.calculate_ranking_score((pos.x, pos.y));
-                            (p.id, score)
-                        })
-                    }
-                })
-            })
-            .collect();
-
-        // 3. 히스테리시스 적용된 순위 획득
-        let live_rankings = tracker.update(&non_arrived_positions);
-
-        // 4. live_rank map 생성
-        let live_rank_map: std::collections::HashMap<marble_core::marble::PlayerId, u32> = live_rankings
+    // Build arrival info from Bevy state
+    let arrival_info: Vec<ArrivalInfo> = bevy_players.iter().map(|player: &PlayerInfo| {
+        let arrival_order = bevy_arrival_order
             .iter()
-            .copied()
-            .collect();
+            .position(|&id| id == player.id)
+            .map(|pos| (pos + 1) as u32);
+        ArrivalInfo {
+            player_id: player.name.clone(),
+            rank: player.rank,
+            arrival_order,
+            live_rank: player.live_rank,
+        }
+    }).collect();
 
-        // Build arrival info: map player_id (u32) to name and rank
-        let arrival_info: Vec<ArrivalInfo> = game_state.players.iter().map(|player| {
-            let rank = leaderboard.iter()
-                .position(|&pid| pid == player.id)
-                .map(|pos| (pos + 1) as u32);
-            let arrival_order = arrival_order_list
-                .iter()
-                .position(|&pid| pid == player.id)
-                .map(|pos| (pos + 1) as u32);
-            let live_rank = live_rank_map.get(&player.id).copied();
-            ArrivalInfo {
-                player_id: player.name.clone(),
-                rank,
-                arrival_order,
-                live_rank,
+    let gamerule = bevy_game_state.gamerule.clone();
+
+    // Determine if in lobby phase
+    let in_lobby = matches!(*game_phase, GamePhase::InLobby);
+
+    // Build sorted player list for lobby (host → me → others alphabetically)
+    let lobby_player_items = {
+        let host_peer_id = p2p.host_peer_id();
+        let mut sorted_peers: Vec<_> = peers.iter().collect();
+        sorted_peers.sort_by(|a, b| {
+            let a_name = a.player_id.as_deref().unwrap_or("???");
+            let b_name = b.player_id.as_deref().unwrap_or("???");
+            a_name.cmp(b_name)
+        });
+
+        let mut items = Vec::new();
+
+        // 1. Host first (if I'm host, show myself)
+        if props.is_host {
+            items.push(html! {
+                <div class="lobby-player-item host me">
+                    <span class="lobby-player-name">{&player_id}</span>
+                    <span class="lobby-host-badge">{"호스트"}</span>
+                    <span class="lobby-me-badge">{"나"}</span>
+                </div>
+            });
+        } else {
+            // Find and show host peer first
+            if let Some(host_peer) = host_peer_id.and_then(|hid| sorted_peers.iter().find(|p| p.peer_id == hid)) {
+                let host_name = host_peer.player_id.as_deref().unwrap_or("???");
+                items.push(html! {
+                    <div class="lobby-player-item host">
+                        <span class="lobby-player-name">{host_name}</span>
+                        <span class="lobby-host-badge">{"호스트"}</span>
+                    </div>
+                });
             }
-        }).collect();
+            // 2. Show myself second (when not host)
+            items.push(html! {
+                <div class="lobby-player-item me">
+                    <span class="lobby-player-name">{&player_id}</span>
+                    <span class="lobby-me-badge">{"나"}</span>
+                </div>
+            });
+        }
 
-        (arrival_info, gamerule)
+        // 3. Show remaining peers (alphabetically sorted, excluding host)
+        for peer in sorted_peers.iter() {
+            // Skip if this is the host peer (already shown)
+            if let Some(hid) = host_peer_id {
+                if peer.peer_id == hid {
+                    continue;
+                }
+            }
+            let peer_name = peer.player_id.as_deref().unwrap_or("???");
+            items.push(html! {
+                <div class="lobby-player-item">
+                    <span class="lobby-player-name">{peer_name}</span>
+                </div>
+            });
+        }
+
+        items.into_iter().collect::<Html>()
     };
 
     html! {
         <div class="game-view fullscreen">
-            // Game canvas
-            <canvas
-                ref={canvas_ref}
-                class="game-canvas"
-                width="800"
-                height="600"
-            />
+            // NOTE: Game canvas is now managed globally by App.rs
+            // Canvas element is rendered by BevyProvider in the global container
 
-            // Camera controls (top-center)
-            <CameraControls
-                camera_state={game_loop.camera()}
-                current_mode={*current_camera_mode}
-                on_mode_change={on_camera_mode_change.clone()}
-            />
-
-            // Spawn button (host only, disabled after first spawn)
-            if props.is_host && is_connected {
-                <div class="spawn-controls">
-                    if game_loop.is_spawned() {
-                        <button class="spawn-btn spawned" disabled={true}>
-                            { "게임 진행 중" }
-                        </button>
-                    } else {
-                        <button
-                            class="spawn-btn"
-                            onclick={
-                                let game_loop = game_loop.clone();
-                                Callback::from(move |_: MouseEvent| {
-                                    game_loop.spawn_marbles();
-                                })
-                            }
-                        >
-                            { format!("스폰 ({}명)", peers.len() + 1) }
-                        </button>
-                    }
+            // Loading indicator
+            if !bevy.initialized {
+                <div class="game-loading">
+                    <div class="game-loading__spinner"></div>
+                    <p>{"게임 로딩 중..."}</p>
                 </div>
             }
 
-            // Left side: Peer list (vertically centered)
-            <PeerList
-                peers={peers.clone()}
-                my_player_id={player_id.clone()}
-                connection_state={connection_state.clone()}
-                arrival_info={arrival_info}
-                gamerule={gamerule}
-            />
+            // Lobby overlay (when in lobby phase)
+            if in_lobby && bevy.initialized {
+                <div class="lobby-overlay">
+                    <div class="lobby-panel">
+                        <h2 class="lobby-title">{"대기실"}</h2>
+
+                        // Room info with share button
+                        <div class="lobby-room-info">
+                            <span class="lobby-room-id">{&props.room_id}</span>
+                            <button
+                                class={classes!("lobby-share-btn", share_copied.then_some("copied"))}
+                                onclick={on_share.clone()}
+                                title="URL 복사"
+                            >
+                                if *share_copied {
+                                    {"복사됨!"}
+                                } else {
+                                    {"공유"}
+                                }
+                            </button>
+                        </div>
+
+                        // Player list in lobby (sorted: host → me → others alphabetically)
+                        <div class="lobby-players">
+                            <div class="lobby-players-header">
+                                {format!("접속된 플레이어 ({}명)", peers.len() + 1)}
+                            </div>
+                            <div class="lobby-player-list">
+                                {lobby_player_items.clone()}
+                            </div>
+                        </div>
+
+                        // Start button (host) or waiting message (non-host)
+                        <div class="lobby-actions">
+                            if props.is_host {
+                                if is_connected {
+                                    <button
+                                        class="lobby-start-btn"
+                                        onclick={on_start_game}
+                                    >
+                                        {format!("게임 시작 ({}명)", peers.len() + 1)}
+                                    </button>
+                                } else {
+                                    <p class="lobby-connecting">{"서버에 연결 중..."}</p>
+                                }
+                            } else {
+                                <p class="lobby-waiting">{"호스트가 게임을 시작할 때까지 대기 중..."}</p>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            // Left side: Peer list (only when playing)
+            if !in_lobby {
+                <PeerList
+                    peers={peers.clone()}
+                    my_player_id={player_id.clone()}
+                    connection_state={connection_state.clone()}
+                    arrival_info={arrival_info}
+                    gamerule={gamerule}
+                />
+            }
 
             // Floating emoji reactions
             <ReactionDisplay messages={messages.clone()} />

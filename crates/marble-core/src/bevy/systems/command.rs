@@ -44,6 +44,8 @@ pub fn process_commands(
             GameCommand::ClearPlayers => {
                 tracing::info!("[command] ClearPlayers (had {} players)", game_state.players.len());
                 game_state.players.clear();
+                game_state.arrival_order.clear();
+                game_state.frame = 0;
             }
             GameCommand::AddPlayer { name, color } => {
                 let id = game_state.players.len() as u32;

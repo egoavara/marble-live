@@ -90,7 +90,7 @@ pub fn get_shape_center(shape: &Shape) -> [f32; 2] {
 fn get_vec2_static_internal(v: &Vec2OrExpr) -> Option<[f32; 2]> {
     match v {
         Vec2OrExpr::Static(arr) => Some(*arr),
-        Vec2OrExpr::Dynamic(_) => None,
+        Vec2OrExpr::Expr(_) | Vec2OrExpr::Dynamic(_) => None,
     }
 }
 
@@ -841,10 +841,18 @@ pub fn use_editor_state() -> EditorStateHandle {
     }
 
     // Poll Bevy for object updates (Bevy -> Yew sync)
+    // Get version to check if Bevy has loaded (version > 0)
     let bevy_objects = crate::hooks::use_bevy_editor_objects();
+    let bevy_objects_version = crate::hooks::get_editor_state_version();
     {
         let state = state.clone();
-        use_effect_with(bevy_objects.clone(), move |bevy_objs| {
+        use_effect_with((bevy_objects.clone(), bevy_objects_version), move |(bevy_objs, version)| {
+            // Skip sync if Bevy hasn't loaded yet (version 0)
+            // This prevents race condition where Yew overwrites localStorage data
+            // with empty array before Bevy finishes loading
+            if *version == 0 {
+                return;
+            }
             // Dispatch to reducer - duplicate check is done inside reducer
             // to avoid closure capturing stale state
             state.dispatch(EditorAction::SyncObjectsFromBevy(bevy_objs.clone()));
@@ -862,10 +870,16 @@ pub fn use_editor_state() -> EditorStateHandle {
     }
 
     // Poll Bevy for keyframes updates (Bevy -> Yew sync)
+    // Get version to check if Bevy has loaded (version > 0)
     let bevy_keyframes = crate::hooks::use_bevy_editor_keyframes();
+    let bevy_keyframes_version = crate::hooks::get_editor_keyframes_version();
     {
         let state = state.clone();
-        use_effect_with(bevy_keyframes.clone(), move |bevy_kfs| {
+        use_effect_with((bevy_keyframes.clone(), bevy_keyframes_version), move |(bevy_kfs, version)| {
+            // Skip sync if Bevy hasn't loaded yet (version 0)
+            if *version == 0 {
+                return;
+            }
             // Dispatch to reducer - duplicate check is done inside reducer
             state.dispatch(EditorAction::SyncKeyframesFromBevy(bevy_kfs.clone()));
         });

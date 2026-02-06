@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
-use cel_interpreter::{Context, Program};
+use cel::{Context, Program};
 
 #[allow(unused_imports)]
 use rapier2d::prelude::*;
@@ -32,10 +32,10 @@ pub enum ExprError {
     UnpreparedExpression(String),
 
     #[error(transparent)]
-    CelExecutionError(#[from] cel_interpreter::ExecutionError),
+    CelExecutionError(#[from] cel::ExecutionError),
 
     #[error(transparent)]
-    CelSyntaxError(#[from] cel_interpreter::ParseErrors),
+    CelSyntaxError(#[from] cel::ParseErrors),
 }
 
 impl ExecutorCache {

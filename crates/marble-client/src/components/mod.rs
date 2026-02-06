@@ -11,7 +11,7 @@ mod marble_game;
 // mod debug_log;
 // mod debug_panel;
 pub mod editor;
-mod game_view;
+pub mod game_view;
 mod layout;
 // mod leaderboard;
 // mod lobby_panel;

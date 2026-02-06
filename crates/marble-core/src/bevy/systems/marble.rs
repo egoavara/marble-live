@@ -9,10 +9,10 @@ use rand::Rng;
 
 use crate::bevy::{
     ClearMarblesEvent, DeterministicRng, GameContextRes, MapConfig, Marble, MarbleGameState,
-    MarbleVisual, SpawnMarblesEvent, SpawnerZone,
+    MarbleVisual, SpawnMarblesEvent,
 };
 use crate::bevy::plugin::EditorState;
-use crate::map::EvaluatedShape;
+use crate::map::{EvaluatedShape, ObjectRole};
 use crate::marble::DEFAULT_MARBLE_RADIUS;
 
 /// System to handle marble spawning requests.
@@ -24,7 +24,7 @@ pub fn handle_spawn_marbles(
     mut commands: Commands,
     mut events: MessageReader<SpawnMarblesEvent>,
     game_state: Res<MarbleGameState>,
-    spawners: Query<&SpawnerZone>,
+    map_config: Option<Res<MapConfig>>,
     mut rng: ResMut<DeterministicRng>,
     game_context: Res<GameContextRes>,
     editor_state: Option<Res<State<EditorState>>>,
@@ -45,15 +45,20 @@ pub fn handle_spawn_marbles(
 
         tracing::info!("Spawning marbles for {} players", game_state.players.len());
 
-        // Get the first spawner
-        let Some(spawner) = spawners.iter().next() else {
-            warn!("No spawner found in map");
+        // Get spawner from MapConfig (single source of truth for shape)
+        let Some(config) = &map_config else {
+            warn!("No map config found");
+            continue;
+        };
+
+        let Some(spawner_obj) = config.0.objects.iter().find(|o| o.role == ObjectRole::Spawner) else {
+            warn!("No spawner found in map config");
             continue;
         };
 
         // Spawn a marble for each player
         for player in &game_state.players {
-            let shape = spawner.shape.evaluate(&game_context.context);
+            let shape = spawner_obj.shape.evaluate(&game_context.context);
             let (x, y) = random_position_in_shape(&shape, &mut rng.rng);
 
             tracing::info!(

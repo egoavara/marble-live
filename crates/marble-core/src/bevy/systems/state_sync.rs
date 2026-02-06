@@ -5,8 +5,8 @@
 use bevy::prelude::*;
 
 use crate::bevy::{
-    EditorStateSummary, GameStateSummary, KeyframeExecutors, MapConfig, Marble, MarbleGameState,
-    PlayerInfo, SnapConfigSummary, StateStores,
+    EditorStateSummary, GameStateSummary, KeyframeExecutors, MapConfig, MapLoadedEvent, Marble,
+    MarbleGameState, PlayerInfo, SnapConfigSummary, StateStores,
 };
 use crate::bevy::systems::editor::{EditorStateRes, SnapConfig};
 
@@ -221,4 +221,17 @@ pub fn sync_snap_config_to_stores(
     };
 
     state_stores.snap_config.update(summary);
+}
+
+/// System to mark map as loaded when MapLoadedEvent is received.
+///
+/// This prevents the Yew-Bevy race condition where Yew starts polling
+/// before Bevy has finished loading the map, causing objects to be lost.
+pub fn mark_map_loaded_on_event(
+    mut events: MessageReader<MapLoadedEvent>,
+    state_stores: Res<StateStores>,
+) {
+    for _event in events.read() {
+        state_stores.editor.set_map_loaded(true);
+    }
 }

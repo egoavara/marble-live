@@ -23,6 +23,11 @@ use crate::marble::Color;
 /// Using AtomicBool for lock-free access from Bevy systems.
 static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 
+/// Atomic flag indicating whether the Bevy App has been started.
+/// In WASM, the EventLoop can only be created once, so we track this to prevent
+/// RecreationAttempt errors on room transitions.
+static BEVY_APP_STARTED: AtomicBool = AtomicBool::new(false);
+
 /// Global state that can be reset on page reload.
 struct GlobalState {
     command_queue: CommandQueue,
@@ -106,11 +111,21 @@ pub fn check_exit_system(mut exit: MessageWriter<bevy::app::AppExit>) {
 // ============================================================================
 
 /// Starts the marble game with the given canvas ID and configuration.
+///
+/// If the Bevy App is already running, this will reuse it by calling
+/// `prepare_new_room()` instead of creating a new App instance.
+/// This avoids the RecreationAttempt error in WASM.
 #[wasm_bindgen]
 pub fn start_marble_game(canvas_id: &str, config_json: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
 
     tracing::info!("[marble] start_marble_game called");
+
+    // If the app is already running, reuse it instead of creating a new one
+    if BEVY_APP_STARTED.load(Ordering::SeqCst) {
+        tracing::info!("[marble] App already running, preparing new room instead");
+        return prepare_new_room(config_json);
+    }
 
     let config: RouletteConfig = serde_json::from_str(config_json)
         .map_err(|e| JsValue::from_str(&format!("Failed to parse config: {}", e)))?;
@@ -153,6 +168,9 @@ pub fn start_marble_game(canvas_id: &str, config_json: &str) -> Result<(), JsVal
     // Add game plugin with shared handles
     app.add_plugins(MarbleGamePlugin::new(command_queue, state_stores));
 
+    // Mark app as started before running
+    BEVY_APP_STARTED.store(true, Ordering::SeqCst);
+
     tracing::info!("[marble] calling app.run()");
 
     // Run the app (in WASM, this uses requestAnimationFrame internally)
@@ -165,11 +183,21 @@ pub fn start_marble_game(canvas_id: &str, config_json: &str) -> Result<(), JsVal
 }
 
 /// Starts the marble editor with the given canvas ID and configuration.
+///
+/// If the Bevy App is already running, this will reuse it by calling
+/// `prepare_new_room()` instead of creating a new App instance.
+/// This avoids the RecreationAttempt error in WASM.
 #[wasm_bindgen]
 pub fn start_marble_editor(canvas_id: &str, config_json: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
 
     tracing::info!("[marble] start_marble_editor called");
+
+    // If the app is already running, reuse it instead of creating a new one
+    if BEVY_APP_STARTED.load(Ordering::SeqCst) {
+        tracing::info!("[marble] App already running, preparing new room instead");
+        return prepare_new_room(config_json);
+    }
 
     let config: RouletteConfig = serde_json::from_str(config_json)
         .map_err(|e| JsValue::from_str(&format!("Failed to parse config: {}", e)))?;
@@ -212,6 +240,9 @@ pub fn start_marble_editor(canvas_id: &str, config_json: &str) -> Result<(), JsV
     // Add editor plugin with shared handles
     app.add_plugins(MarbleEditorPlugin::new(command_queue, state_stores));
 
+    // Mark app as started before running
+    BEVY_APP_STARTED.store(true, Ordering::SeqCst);
+
     tracing::info!("[marble] calling app.run()");
 
     // Run the app
@@ -231,6 +262,45 @@ pub fn start_marble_editor(canvas_id: &str, config_json: &str) -> Result<(), JsV
 pub fn is_bevy_ready() -> bool {
     let guard = GLOBAL_STATE.lock().unwrap();
     guard.is_some() && !SHOULD_EXIT.load(Ordering::SeqCst)
+}
+
+/// Check if Bevy app is currently running.
+///
+/// Returns true if the app has been started and is not shutting down.
+/// Used to determine whether to reuse the existing app or create a new one.
+#[wasm_bindgen]
+pub fn is_bevy_app_running() -> bool {
+    BEVY_APP_STARTED.load(Ordering::SeqCst) && !SHOULD_EXIT.load(Ordering::SeqCst)
+}
+
+/// Prepare for a new room by resetting state and loading a new map.
+///
+/// This reuses the existing Bevy App instance instead of creating a new one,
+/// avoiding the RecreationAttempt error in WASM where EventLoop can only be
+/// created once.
+#[wasm_bindgen]
+pub fn prepare_new_room(config_json: &str) -> Result<(), JsValue> {
+    if is_shutdown_requested() {
+        return Err(JsValue::from_str("Bevy app is shutting down"));
+    }
+
+    let config: RouletteConfig = serde_json::from_str(config_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse config: {}", e)))?;
+
+    let queue = get_command_queue();
+    let stores = get_state_stores();
+
+    tracing::info!("[marble] prepare_new_room: resetting state and loading new map");
+
+    // 1. Reset all StateStores for the new room
+    stores.reset_for_new_room();
+
+    // 2. Queue commands to reset game state using existing command system
+    queue.push(GameCommand::ClearMarbles);
+    queue.push(GameCommand::ClearPlayers);
+    queue.push(GameCommand::LoadMap { config });
+
+    Ok(())
 }
 
 /// Sends a command to the running game/editor.
@@ -569,4 +639,16 @@ pub fn get_snap_config() -> JsValue {
 #[wasm_bindgen]
 pub fn get_snap_config_version() -> u64 {
     get_state_stores().snap_config.get_version()
+}
+
+/// Check if the editor map has been loaded.
+///
+/// Used to prevent the Yew-Bevy race condition where Yew starts polling
+/// before Bevy has finished loading the map.
+#[wasm_bindgen]
+pub fn get_editor_map_loaded() -> bool {
+    if is_shutdown_requested() {
+        return false;
+    }
+    get_state_stores().editor.is_map_loaded()
 }

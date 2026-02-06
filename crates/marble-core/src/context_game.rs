@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use cel_interpreter::{Context, ExecutionError, Value, extractors::This};
+use cel::{Context, ExecutionError, Value, extractors::This};
 use rand::{Rng, SeedableRng};
 
 use crate::util::{convert_str, convert_u64, object_ref, object_ref_or};

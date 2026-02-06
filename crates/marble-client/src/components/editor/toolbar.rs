@@ -23,7 +23,6 @@ pub struct EditorToolbarProps {
     pub spawn_count: u32,
     pub on_spawn_count_change: Callback<u32>,
     pub on_spawn: Callback<()>,
-    pub on_reset: Callback<()>,
     // Snap configuration
     pub snap_config: SnapConfigSummary,
 }
@@ -269,13 +268,6 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
         })
     };
 
-    let on_reset_click = {
-        let on_reset = props.on_reset.clone();
-        Callback::from(move |_: MouseEvent| {
-            on_reset.emit(());
-        })
-    };
-
     let on_spawn_count_input = {
         let on_change = props.on_spawn_count_change.clone();
         Callback::from(move |e: InputEvent| {
@@ -506,13 +498,6 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
                         </div>
                     }
                 </div>
-                <button
-                    class="editor-meatball-btn"
-                    onclick={on_reset_click}
-                    title="Reset Simulation"
-                >
-                    <Icon data={IconData::LUCIDE_ROTATE_CCW} width="18px" height="18px" />
-                </button>
             </div>
 
             <input

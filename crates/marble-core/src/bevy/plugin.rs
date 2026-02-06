@@ -383,13 +383,16 @@ impl Plugin for MarbleEditorPlugin {
         );
 
         // Sync editor state to stores (for Yew UI)
+        // mark_map_loaded_on_event must run before sync systems to set the flag
         app.add_systems(
             PostUpdate,
             (
+                systems::mark_map_loaded_on_event,
                 systems::sync_editor_state_to_store,
                 systems::sync_editor_to_stores,
                 systems::sync_snap_config_to_stores,
-            ),
+            )
+                .chain(),
         );
 
         // Simulation control systems

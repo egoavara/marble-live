@@ -134,6 +134,11 @@ fn resolve_peer_ids_from_server(
                     }
                 }
 
+                // Mark peers as dirty so the message loop triggers UI update
+                if resolved_count > 0 {
+                    state_mut.peers_dirty = true;
+                }
+
                 tracing::debug!(
                     resolved = resolved_count,
                     requested = peer_id_strings.len(),

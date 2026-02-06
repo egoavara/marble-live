@@ -329,6 +329,11 @@ impl ReactionStore {
 
         *self.version.write() += 1;
     }
+
+    pub fn clear(&self) {
+        self.reactions.write().clear();
+        *self.version.write() += 1;
+    }
 }
 
 /// Store for game state summary.
@@ -409,6 +414,8 @@ pub struct EditorStore {
     keyframes: RwLock<Vec<KeyframeSequence>>,
     version: RwLock<u64>,
     keyframes_version: RwLock<u64>,
+    /// Whether the map has been loaded (for Yew-Bevy sync race condition prevention).
+    map_loaded: RwLock<bool>,
 }
 
 impl EditorStore {
@@ -428,11 +435,21 @@ impl EditorStore {
         self.keyframes.read().clone()
     }
 
+    /// Get the version number for objects.
+    /// Returns 0 if map is not loaded yet, preventing Yew from polling empty data.
     pub fn get_version(&self) -> u64 {
+        if !*self.map_loaded.read() {
+            return 0;
+        }
         *self.version.read()
     }
 
+    /// Get the version number for keyframes.
+    /// Returns 0 if map is not loaded yet, preventing Yew from polling empty data.
     pub fn get_keyframes_version(&self) -> u64 {
+        if !*self.map_loaded.read() {
+            return 0;
+        }
         *self.keyframes_version.read()
     }
 
@@ -463,6 +480,16 @@ impl EditorStore {
         *self.keyframes.write() = keyframes;
         *self.version.write() += 1;
         *self.keyframes_version.write() += 1;
+    }
+
+    /// Check if the map has been loaded.
+    pub fn is_map_loaded(&self) -> bool {
+        *self.map_loaded.read()
+    }
+
+    /// Set the map loaded flag.
+    pub fn set_map_loaded(&self, loaded: bool) {
+        *self.map_loaded.write() = loaded;
     }
 }
 
@@ -521,6 +548,29 @@ impl StateStores {
             editor: Arc::new(EditorStore::new()),
             snap_config: Arc::new(SnapConfigStore::new()),
         }
+    }
+
+    /// Reset all stores for entering a new room.
+    ///
+    /// This clears player/peer lists, chat history, reactions, and game state
+    /// without destroying the Bevy App instance.
+    pub fn reset_for_new_room(&self) {
+        // Reset connection state (but keep it, as we're transitioning)
+        self.connection.set_state(ConnectionState::Disconnected);
+        self.connection.set_my_player_id(String::new());
+        self.connection.set_room_id(String::new());
+
+        // Clear peer and player lists
+        self.peers.set_peers(Vec::new());
+        self.players.set_players(Vec::new());
+        self.players.set_arrival_order(Vec::new());
+
+        // Clear chat and reactions
+        self.chat.clear();
+        self.reactions.clear();
+
+        // Reset game state
+        self.game.update(GameStateSummary::default());
     }
 }
 

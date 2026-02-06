@@ -26,7 +26,7 @@ fn get_number_static(n: &NumberOrExpr) -> Option<f32> {
 fn get_vec2_static(v: &Vec2OrExpr) -> Option<[f32; 2]> {
     match v {
         Vec2OrExpr::Static(arr) => Some(*arr),
-        Vec2OrExpr::Dynamic(_) => None,
+        Vec2OrExpr::Expr(_) | Vec2OrExpr::Dynamic(_) => None,
     }
 }
 
