@@ -163,8 +163,9 @@ fn use_p2p_room_internal(
         use_effect_with((), move |_| {
             let inner = inner.clone();
             move || {
-                // Stop the message loop on unmount
+                // Stop polling and disconnect Bevy P2P socket
                 inner.borrow_mut().is_running = false;
+                marble_core::bevy::wasm_entry::disconnect_p2p();
             }
         });
     }

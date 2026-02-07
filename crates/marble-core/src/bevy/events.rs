@@ -24,6 +24,12 @@ pub struct MarbleArrivedEvent {
 #[derive(Message, Debug, Clone, Default)]
 pub struct SpawnMarblesEvent;
 
+/// Message to request spawning marbles at specific positions (peer: host-provided coordinates).
+#[derive(Message, Debug, Clone)]
+pub struct SpawnMarblesAtEvent {
+    pub positions: Vec<[f32; 2]>,
+}
+
 /// Message fired when a map has been loaded.
 #[derive(Message, Debug, Clone)]
 pub struct MapLoadedEvent {
@@ -124,4 +130,19 @@ pub struct AddObjectEvent {
 pub struct DeleteObjectEvent {
     /// The index of the object to delete.
     pub index: usize,
+}
+
+// ========== P2P Sync Events ==========
+
+/// Message fired when the host should broadcast a GameStart to all peers.
+#[derive(Message, Debug, Clone, Default)]
+pub struct BroadcastGameStartEvent;
+
+/// Message fired when a peer requests a sync snapshot from the host.
+#[derive(Message, Debug, Clone)]
+pub struct SyncSnapshotRequestEvent {
+    /// The requesting peer's ID as bytes (PeerId is !Send, so stored as bytes).
+    pub peer_id_bytes: Vec<u8>,
+    /// The frame from which the peer wants to resync.
+    pub from_frame: u64,
 }

@@ -4,7 +4,6 @@
 //! send_command() for game control.
 
 use gloo::events::EventListener;
-use marble_proto::play::p2p_message::Payload;
 use wasm_bindgen::JsCast;
 use web_sys::MouseEvent;
 use yew::prelude::*;
@@ -126,9 +125,6 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
     // Share button copied state
     let share_copied = use_state(|| false);
 
-    // Track last processed session version for non-host
-    let last_processed_session = use_mut_ref(|| 0u64);
-
     // Cooldown state for reactions
     let last_reaction_time = use_mut_ref(|| 0.0f64);
     let cooldown_active = use_state(|| false);
@@ -136,45 +132,23 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
     // Last keyboard emoji state (for syncing with ChatPanel's ReactionPanel)
     let last_keyboard_emoji = use_state(|| None::<String>);
 
-    // Process GameStart messages for non-host
+    // Non-host: Monitor Bevy game state to detect when GameStart was processed by Bevy P2P sync.
+    // The Bevy poll_p2p_socket system handles GameStart directly now.
     {
-        let is_host = props.is_host;
-        let last_processed_session = last_processed_session.clone();
-        let messages_for_game_start = messages.clone();
         let game_phase = game_phase.clone();
         let bevy_initialized = bevy.initialized;
+        let is_host = props.is_host;
 
-        use_effect_with((messages.len(), bevy_initialized), move |(_, initialized)| {
-            if is_host || !*initialized {
-                return;
-            }
-
-            // Look for the latest GameStart message with higher session version
-            for msg in messages_for_game_start.iter().rev() {
-                if let Payload::GameStart(game_start) = &msg.payload {
-                    // Only process if session version is newer
-                    if game_start.session_version > *last_processed_session.borrow() {
-                        *last_processed_session.borrow_mut() = game_start.session_version;
-
-                        // Send restore command to Bevy with the game state
-                        let cmd = serde_json::json!({
-                            "type": "restore_game_state",
-                            "seed": game_start.seed,
-                            "state": game_start.initial_state,
-                            "gamerule": game_start.gamerule
-                        });
-                        if let Err(e) = send_command(&cmd.to_string()) {
-                            tracing::error!("Failed to restore game state: {:?}", e);
-                        }
-
-                        // Transition to playing phase
-                        game_phase.set(GamePhase::Playing);
-                        tracing::info!("Non-host: Game started from host (session {})", game_start.session_version);
-                    }
-                    break;
+        use_effect_with(
+            (bevy_players.len(), bevy_initialized),
+            move |(player_count, initialized)| {
+                // When players appear in Bevy state and we're not the host,
+                // it means GameStart was processed by Bevy's P2P system
+                if !is_host && *initialized && *player_count > 0 {
+                    game_phase.set(GamePhase::Playing);
                 }
-            }
-        });
+            },
+        );
     }
 
     // Helper: send reaction with cooldown check
@@ -258,7 +232,6 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
     // Start game callback (host only)
     let on_start_game = {
         let game_phase = game_phase.clone();
-        let p2p = p2p.clone();
         let peers = peers.clone();
         let player_id = player_id.clone();
         let bevy_initialized = bevy.initialized;
@@ -269,12 +242,27 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
                 return;
             }
 
-            // 1. Clear existing players
+            // Generate deterministic seed
+            let seed = js_sys::Date::now() as u64;
+
+            // 1. Set sync host status
+            let cmd = serde_json::json!({"type": "set_sync_host", "is_host": true});
+            if let Err(e) = send_command(&cmd.to_string()) {
+                tracing::error!("Failed to set sync host: {:?}", e);
+            }
+
+            // 2. Set seed
+            let cmd = serde_json::json!({"type": "set_seed", "seed": seed});
+            if let Err(e) = send_command(&cmd.to_string()) {
+                tracing::error!("Failed to set seed: {:?}", e);
+            }
+
+            // 3. Clear existing players
             if let Err(e) = send_command(r#"{"type":"clear_players"}"#) {
                 tracing::error!("Failed to clear players: {:?}", e);
             }
 
-            // 2. Add self as first player
+            // 4. Add self as first player
             let self_color = PLAYER_COLORS[0];
             let cmd = serde_json::json!({
                 "type": "add_player",
@@ -285,7 +273,7 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
                 tracing::error!("Failed to add self as player: {:?}", e);
             }
 
-            // 3. Add peers as players
+            // 5. Add peers as players
             for (i, peer) in peers.iter().enumerate() {
                 if let Some(peer_player_id) = &peer.player_id {
                     let color = PLAYER_COLORS[(i + 1) % PLAYER_COLORS.len()];
@@ -300,29 +288,17 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
                 }
             }
 
-            // 4. Spawn marbles
+            // 6. Spawn marbles
             if let Err(e) = send_command(r#"{"type":"spawn_marbles"}"#) {
                 tracing::error!("Failed to spawn marbles: {:?}", e);
             }
 
-            // 5. Get game state and broadcast to peers
-            // TODO: Need to get snapshot from Bevy and send via P2P
-            // For now, we'll send a simplified message
-            let seed = js_sys::Date::now() as u64;
-            let player_names: Vec<String> = std::iter::once(player_id.clone())
-                .chain(peers.iter().filter_map(|p| p.player_id.clone()))
-                .collect();
-
-            // Send GameStart with player list (peers will reconstruct)
-            let state_json = serde_json::json!({
-                "players": player_names,
-                "colors": PLAYER_COLORS[..player_names.len().min(8)].to_vec()
-            });
-            if let Ok(state_bytes) = serde_json::to_vec(&state_json) {
-                p2p.send_game_start(seed, state_bytes, String::new());
+            // 7. Broadcast game start to peers via Bevy P2P
+            if let Err(e) = send_command(r#"{"type":"broadcast_game_start"}"#) {
+                tracing::error!("Failed to broadcast game start: {:?}", e);
             }
 
-            // 6. Transition to playing phase
+            // 8. Transition to playing phase
             game_phase.set(GamePhase::Playing);
             tracing::info!("Host: Game started with {} players", peers.len() + 1);
         })

@@ -180,6 +180,16 @@ impl GameContext {
         self.frame = frame;
     }
 
+    /// Captures the current RNG state (for snapshot serialization).
+    pub fn capture_rng(&self) -> Option<ChaCha8Rng> {
+        self.rng.clone()
+    }
+
+    /// Restores the RNG state from a snapshot.
+    pub fn restore_rng(&mut self, rng: ChaCha8Rng) {
+        self.rng = Some(rng);
+    }
+
     /// Preprocesses an expression to replace random(min, max) with actual random values.
     /// Returns the processed expression string.
     pub fn preprocess_random(&mut self, expr: &str) -> String {

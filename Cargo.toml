@@ -54,7 +54,7 @@ matchbox_signaling = "0.13"
 
 # RNG (deterministic)
 rand = "0.9"
-rand_chacha = "0.9"
+rand_chacha = { version = "0.9", features = ["serde"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 # Logging

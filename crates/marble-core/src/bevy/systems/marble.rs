@@ -9,7 +9,7 @@ use rand::Rng;
 
 use crate::bevy::{
     ClearMarblesEvent, DeterministicRng, GameContextRes, MapConfig, Marble, MarbleGameState,
-    MarbleVisual, SpawnMarblesEvent,
+    MarbleVisual, SpawnMarblesAtEvent, SpawnMarblesEvent,
 };
 use crate::bevy::plugin::EditorState;
 use crate::map::{EvaluatedShape, ObjectRole};
@@ -95,6 +95,43 @@ pub fn handle_clear_marbles(
     }
 }
 
+/// System to handle marble spawning at specific positions (peer: host-provided coordinates).
+pub fn handle_spawn_marbles_at(
+    mut commands: Commands,
+    mut events: MessageReader<SpawnMarblesAtEvent>,
+    game_state: Res<MarbleGameState>,
+) {
+    for event in events.read() {
+        if game_state.players.is_empty() {
+            warn!("No players registered, cannot spawn marbles at positions.");
+            continue;
+        }
+
+        tracing::info!(
+            "SpawnMarblesAt: {} positions for {} players",
+            event.positions.len(),
+            game_state.players.len()
+        );
+
+        for (i, player) in game_state.players.iter().enumerate() {
+            let pos = event.positions.get(i).copied().unwrap_or([0.0, 0.0]);
+            spawn_marble_at(
+                &mut commands,
+                player.id,
+                player.color,
+                Vec2::new(pos[0], pos[1]),
+                DEFAULT_MARBLE_RADIUS,
+            );
+            tracing::info!(
+                "Spawned marble for player {} at ({:.2}, {:.2}) from host",
+                player.id,
+                pos[0],
+                pos[1]
+            );
+        }
+    }
+}
+
 /// Spawns a marble at the given position.
 fn spawn_marble_at(
     commands: &mut Commands,
@@ -116,6 +153,7 @@ fn spawn_marble_at(
                 linear_damping: 0.5,
                 angular_damping: 0.5,
             },
+            Velocity::default(),
             ExternalForce::default(),
             Ccd::enabled(),
             ActiveEvents::COLLISION_EVENTS,

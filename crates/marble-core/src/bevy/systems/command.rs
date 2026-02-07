@@ -5,10 +5,11 @@
 use bevy::prelude::*;
 
 use crate::bevy::{
-    AddObjectEvent, AddPlayerEvent, ClearMarblesEvent, CommandQueue, DeleteObjectEvent,
-    GameCamera, GameCommand, LoadMapEvent, LocalPlayerId, MainCamera, MapConfig,
-    MarbleGameState, PreviewSequenceEvent, RemovePlayerEvent, ResetSimulationEvent,
-    SpawnMarblesEvent, StartSimulationEvent, StopSimulationEvent,
+    AddObjectEvent, AddPlayerEvent, BroadcastGameStartEvent, ClearMarblesEvent, CommandQueue,
+    DeleteObjectEvent, DeterministicRng, GameCamera, GameCommand, GameContextRes, LoadMapEvent,
+    LocalPlayerId, MainCamera, MapConfig, MarbleGameState, PreviewSequenceEvent, RemovePlayerEvent,
+    ResetSimulationEvent, SpawnMarblesAtEvent, SpawnMarblesEvent, StartSimulationEvent,
+    StopSimulationEvent, SyncState,
 };
 use crate::bevy::plugin::AppMode;
 use crate::bevy::systems::editor::{EditorStateRes, SelectObjectEvent, SnapConfig, UpdateObjectEvent};
@@ -25,11 +26,16 @@ pub fn process_commands(
     mut cameras: Query<&mut GameCamera, With<MainCamera>>,
     mut local_player: Option<ResMut<LocalPlayerId>>,
     mut spawn_events: MessageWriter<SpawnMarblesEvent>,
+    mut spawn_at_events: MessageWriter<SpawnMarblesAtEvent>,
     mut clear_events: MessageWriter<ClearMarblesEvent>,
     mut add_player_events: MessageWriter<AddPlayerEvent>,
     mut remove_player_events: MessageWriter<RemovePlayerEvent>,
     mut load_map_events: MessageWriter<LoadMapEvent>,
     mut next_app_mode: ResMut<NextState<AppMode>>,
+    mut rng: ResMut<DeterministicRng>,
+    mut game_context: ResMut<GameContextRes>,
+    mut sync_state: ResMut<SyncState>,
+    mut broadcast_events: MessageWriter<BroadcastGameStartEvent>,
 ) {
     // Use drain_until_yield() to process game commands until Yield or empty.
     // This allows frame-separated command processing.
@@ -38,6 +44,10 @@ pub fn process_commands(
             GameCommand::SpawnMarbles => {
                 tracing::info!("[command] SpawnMarbles");
                 spawn_events.write(SpawnMarblesEvent);
+            }
+            GameCommand::SpawnMarblesAt { positions } => {
+                tracing::info!("[command] SpawnMarblesAt ({} marbles)", positions.len());
+                spawn_at_events.write(SpawnMarblesAtEvent { positions });
             }
             GameCommand::ClearMarbles => {
                 tracing::info!("[command] ClearMarbles");
@@ -88,6 +98,26 @@ pub fn process_commands(
             GameCommand::ClearMode => {
                 tracing::info!("[command] ClearMode -> AppMode::Idle");
                 next_app_mode.set(AppMode::Idle);
+            }
+            // P2P sync commands
+            GameCommand::SetSeed { seed } => {
+                tracing::info!("[command] SetSeed: {}", seed);
+                *rng = DeterministicRng::new(seed);
+                *game_context = GameContextRes::new(seed);
+                game_state.rng_seed = seed;
+                game_state.frame = 0;
+            }
+            GameCommand::SetSyncHost { is_host } => {
+                tracing::info!("[command] SetSyncHost: {}", is_host);
+                sync_state.is_host = is_host;
+            }
+            GameCommand::SetGamerule { gamerule } => {
+                tracing::info!("[command] SetGamerule: {}", gamerule);
+                game_state.selected_gamerule = gamerule;
+            }
+            GameCommand::BroadcastGameStart => {
+                tracing::info!("[command] BroadcastGameStart");
+                broadcast_events.write(BroadcastGameStartEvent);
             }
             // Yield is consumed by drain_until_yield(), should not reach here
             GameCommand::Yield => {}

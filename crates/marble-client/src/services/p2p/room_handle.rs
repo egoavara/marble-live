@@ -1,28 +1,29 @@
 //! P2P room handle - public API for P2P communication.
+//!
+//! After refactor: P2P socket lives in Bevy (marble-core).
+//! Chat/reaction/ping are sent via `send_command()` → Bevy P2P system.
+//! Game sync (FrameHash, SyncRequest, SyncState, GameStart) is handled entirely in Bevy.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use marble_core::GameState;
-use marble_proto::play::p2p_message::Payload;
-use marble_proto::play::{ChatMessage, FrameHash, GameStart, Ping, Reaction, SyncRequest, SyncState};
 use marble_proto::room::room_service_client::RoomServiceClient;
-use marble_proto::room::{PeerTopology, PlayerAuth, RegisterPeerIdRequest};
-use matchbox_socket::{PeerId, WebRtcSocket};
-use prost::Message;
+use marble_proto::room::{PeerTopology, PlayerAuth, RegisterPeerIdRequest, ResolvePeerIdsRequest};
+use matchbox_socket::PeerId;
 use tonic_web_wasm_client::Client;
 use wasm_bindgen_futures::spawn_local;
 use yew::UseStateHandle;
 
-use super::message_loop::{run_message_loop, MessageLoopCallbacks};
 use super::room_state::P2pRoomState;
-use super::types::{P2pConnectionState, P2pPeerInfo, P2pRoomConfig, ReceivedMessage};
-use super::GossipHandler;
+use super::types::{P2pConnectionState, P2pPeerInfo, ReceivedMessage};
 
 /// Handle for P2P room connection
 ///
 /// Provides methods for connection control, message sending, and state queries.
 /// State changes automatically trigger component re-renders.
+///
+/// After refactor: The WebRTC socket is managed by Bevy (marble-core).
+/// This handle delegates P2P messaging to Bevy via `send_command()`.
 #[derive(Clone)]
 pub struct P2pRoomHandle {
     pub(crate) inner: Rc<RefCell<P2pRoomState>>,
@@ -36,6 +37,13 @@ pub struct P2pRoomHandle {
 impl PartialEq for P2pRoomHandle {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+/// Send a command to Bevy via the global WASM function.
+fn bevy_send_command(json: &str) {
+    if let Err(e) = marble_core::bevy::wasm_entry::send_command(json) {
+        tracing::error!("Failed to send command to Bevy: {:?}", e);
     }
 }
 
@@ -114,129 +122,36 @@ impl P2pRoomHandle {
             inner.reset_connection();
         }
 
+        // Tell Bevy to disconnect P2P socket
+        marble_core::bevy::wasm_entry::disconnect_p2p();
+
         self.state_handle.set(P2pConnectionState::Disconnected);
         self.peers_version.set(*self.peers_version + 1);
     }
 
-    // === Message Sending ===
+    // === Message Sending (via Bevy send_command) ===
 
-    /// Send raw payload (gossip relay)
-    pub fn send(&self, payload: Payload) {
-        let inner = self.inner.borrow();
-        if let (Some(socket), Some(gossip)) = (&inner.socket, &inner.gossip) {
-            let msg = {
-                let mut gossip = gossip.borrow_mut();
-                gossip.create_message(&inner.player_id, inner.config.gossip_ttl, payload)
-            };
-
-            let data = msg.encode_to_vec();
-            let peers_to_send = gossip.borrow().get_all_peers();
-
-            let mut socket = socket.borrow_mut();
-            for peer in peers_to_send {
-                socket
-                    .channel_mut(0)
-                    .send(data.clone().into_boxed_slice(), peer);
-            }
-        }
-    }
-
-    /// Send chat message (convenience method)
+    /// Send chat message (via Bevy P2P system)
     pub fn send_chat(&self, content: &str) {
-        let player_id = self.inner.borrow().player_id.clone();
-        let timestamp_ms = js_sys::Date::now() as u64;
-
-        self.send(Payload::ChatMessage(ChatMessage {
-            player_id: player_id.clone(),
-            content: content.to_string(),
-            timestamp_ms,
-        }));
-
-        // Add to local messages
-        let msg = ReceivedMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            from_player: player_id,
-            from_peer: None, // Local message
-            payload: Payload::ChatMessage(ChatMessage {
-                player_id: self.inner.borrow().player_id.clone(),
-                content: content.to_string(),
-                timestamp_ms,
-            }),
-            timestamp: js_sys::Date::now(),
-        };
-
-        self.inner.borrow_mut().add_message(msg);
-        self.messages_version.set(*self.messages_version + 1);
+        let cmd = serde_json::json!({
+            "type": "send_chat",
+            "content": content
+        });
+        bevy_send_command(&cmd.to_string());
     }
 
-    /// Send reaction emoji (convenience method)
+    /// Send reaction emoji (via Bevy P2P system)
     pub fn send_reaction(&self, emoji: &str) {
-        let player_id = self.inner.borrow().player_id.clone();
-        let timestamp_ms = js_sys::Date::now() as u64;
-
-        self.send(Payload::Reaction(Reaction {
-            player_id: player_id.clone(),
-            emoji: emoji.to_string(),
-            timestamp_ms,
-        }));
-
-        // Add to local messages for display
-        let msg = ReceivedMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            from_player: player_id,
-            from_peer: None, // Local message
-            payload: Payload::Reaction(Reaction {
-                player_id: self.inner.borrow().player_id.clone(),
-                emoji: emoji.to_string(),
-                timestamp_ms,
-            }),
-            timestamp: js_sys::Date::now(),
-        };
-
-        self.inner.borrow_mut().add_message(msg);
-        self.messages_version.set(*self.messages_version + 1);
+        let cmd = serde_json::json!({
+            "type": "send_reaction",
+            "emoji": emoji
+        });
+        bevy_send_command(&cmd.to_string());
     }
 
-    /// Send to specific peer (direct)
-    pub fn send_to(&self, peer_id: PeerId, payload: Payload) {
-        let inner = self.inner.borrow();
-        if let (Some(socket), Some(gossip)) = (&inner.socket, &inner.gossip) {
-            let msg = {
-                let mut gossip = gossip.borrow_mut();
-                gossip.create_message(&inner.player_id, 1, payload) // TTL 1 for direct
-            };
-
-            let data = msg.encode_to_vec();
-            let mut socket = socket.borrow_mut();
-            socket.channel_mut(0).send(data.into_boxed_slice(), peer_id);
-        }
-    }
-
-    /// Send ping to all peers (RTT measurement)
+    /// Send ping to all peers (via Bevy P2P system)
     pub fn send_ping(&self) {
-        let inner = self.inner.borrow();
-        if let (Some(socket), Some(gossip)) = (&inner.socket, &inner.gossip) {
-            let msg = {
-                let mut gossip = gossip.borrow_mut();
-                gossip.create_message(
-                    &inner.player_id,
-                    1, // TTL 1 for ping
-                    Payload::Ping(Ping {
-                        timestamp: js_sys::Date::now(),
-                    }),
-                )
-            };
-
-            let data = msg.encode_to_vec();
-            let peers_to_send = gossip.borrow().get_all_peers();
-
-            let mut socket = socket.borrow_mut();
-            for peer in peers_to_send {
-                socket
-                    .channel_mut(0)
-                    .send(data.clone().into_boxed_slice(), peer);
-            }
-        }
+        bevy_send_command(r#"{"type":"send_ping"}"#);
     }
 
     // === Message Queries ===
@@ -256,7 +171,7 @@ impl P2pRoomHandle {
     /// Filter messages by type
     pub fn messages_of_type<F>(&self, filter: F) -> Vec<ReceivedMessage>
     where
-        F: Fn(&Payload) -> bool,
+        F: Fn(&marble_proto::play::p2p_message::Payload) -> bool,
     {
         let _ = *self.messages_version;
         self.inner
@@ -270,12 +185,16 @@ impl P2pRoomHandle {
 
     /// Get chat messages only
     pub fn chat_messages(&self) -> Vec<ReceivedMessage> {
-        self.messages_of_type(|p| matches!(p, Payload::ChatMessage(_)))
+        self.messages_of_type(|p| {
+            matches!(p, marble_proto::play::p2p_message::Payload::ChatMessage(_))
+        })
     }
 
     /// Get reaction messages only
     pub fn reaction_messages(&self) -> Vec<ReceivedMessage> {
-        self.messages_of_type(|p| matches!(p, Payload::Reaction(_)))
+        self.messages_of_type(|p| {
+            matches!(p, marble_proto::play::p2p_message::Payload::Reaction(_))
+        })
     }
 
     /// Clear message history
@@ -288,11 +207,11 @@ impl P2pRoomHandle {
         self.messages_version.set(*self.messages_version + 1);
     }
 
-    // === Game Synchronization API ===
+    // === Game Synchronization API (simplified - Bevy handles the heavy lifting) ===
 
     /// Set host status
     pub fn set_host_status(&self, is_host: bool) {
-        self.inner.borrow_mut().set_host_status(is_host);
+        self.inner.borrow_mut().is_host = is_host;
     }
 
     /// Check if this client is the host
@@ -302,102 +221,12 @@ impl P2pRoomHandle {
 
     /// Set host peer ID
     pub fn set_host_peer_id(&self, peer_id: Option<PeerId>) {
-        self.inner.borrow_mut().set_host_peer_id(peer_id);
+        self.inner.borrow_mut().host_peer_id = peer_id;
     }
 
     /// Get host peer ID
     pub fn host_peer_id(&self) -> Option<PeerId> {
         self.inner.borrow().host_peer_id
-    }
-
-    /// Set game state reference
-    pub fn set_game_state(&self, state: Rc<RefCell<GameState>>) {
-        self.inner.borrow_mut().set_game_state(state);
-    }
-
-    /// Get game state reference
-    pub fn game_state(&self) -> Option<Rc<RefCell<GameState>>> {
-        self.inner.borrow().game_state.clone()
-    }
-
-    /// Broadcast frame hash to all peers (host only)
-    pub fn send_frame_hash(&self, frame: u64, hash: u64) {
-        self.send(Payload::FrameHash(FrameHash { frame, hash }));
-        self.inner.borrow_mut().last_hash_frame = frame;
-    }
-
-    /// Send sync request to host
-    pub fn send_sync_request(&self, from_frame: u64) {
-        if let Some(host_peer_id) = self.inner.borrow().host_peer_id {
-            self.send_to(host_peer_id, Payload::SyncRequest(SyncRequest { from_frame }));
-        }
-    }
-
-    /// Send sync state to a specific peer (host only)
-    pub fn send_sync_state_to(&self, peer_id: PeerId, frame: u64, state: Vec<u8>) {
-        self.send_to(peer_id, Payload::SyncState(SyncState { frame, state }));
-    }
-
-    /// Broadcast game start to all peers (host only)
-    pub fn send_game_start(&self, seed: u64, initial_state: Vec<u8>, gamerule: String) {
-        // Increment session version
-        let session_version = {
-            let mut inner = self.inner.borrow_mut();
-            inner.current_session_version += 1;
-            inner.current_session_version
-        };
-
-        self.send(Payload::GameStart(GameStart {
-            seed,
-            initial_state,
-            gamerule,
-            session_version,
-        }));
-    }
-
-    /// Get current session version
-    pub fn current_session_version(&self) -> u64 {
-        self.inner.borrow().current_session_version
-    }
-
-    /// Get last hash frame
-    pub fn last_hash_frame(&self) -> u64 {
-        self.inner.borrow().last_hash_frame
-    }
-
-    /// Get desync count
-    pub fn desync_count(&self) -> u32 {
-        self.inner.borrow().desync_count
-    }
-
-    /// Increment desync count
-    pub fn increment_desync_count(&self) {
-        self.inner.borrow_mut().desync_count += 1;
-    }
-
-    /// Reset desync count
-    pub fn reset_desync_count(&self) {
-        self.inner.borrow_mut().desync_count = 0;
-    }
-
-    /// Set last sync frame
-    pub fn set_last_sync_frame(&self, frame: u64) {
-        self.inner.borrow_mut().last_sync_frame = frame;
-    }
-
-    /// Get last sync frame
-    pub fn last_sync_frame(&self) -> u64 {
-        self.inner.borrow().last_sync_frame
-    }
-
-    /// Set last host hash
-    pub fn set_last_host_hash(&self, frame: u64, hash: u64) {
-        self.inner.borrow_mut().last_host_hash = Some((frame, hash));
-    }
-
-    /// Get last host hash
-    pub fn last_host_hash(&self) -> Option<(u64, u64)> {
-        self.inner.borrow().last_host_hash
     }
 
     // === Internal Methods ===
@@ -406,7 +235,7 @@ impl P2pRoomHandle {
         inner: Rc<RefCell<P2pRoomState>>,
         state_handle: UseStateHandle<P2pConnectionState>,
         peers_version: UseStateHandle<u32>,
-        messages_version: UseStateHandle<u32>,
+        _messages_version: UseStateHandle<u32>,
     ) {
         let room_id = inner.borrow().room_id.clone();
         if room_id.is_empty() {
@@ -424,11 +253,7 @@ impl P2pRoomHandle {
 
         state_handle.set(P2pConnectionState::Connecting);
 
-        // Create WebRTC socket
-        let (socket, loop_fut) = WebRtcSocket::new_reliable(&signaling_url);
-        let socket = Rc::new(RefCell::new(socket));
-
-        // Initialize gossip handler
+        // Get topology info
         let topology = inner.borrow().topology.clone();
         let topo = topology.unwrap_or(PeerTopology {
             mesh_group: 0,
@@ -437,121 +262,228 @@ impl P2pRoomHandle {
             bridge_peers: vec![],
         });
 
-        let gossip = Rc::new(RefCell::new(GossipHandler::new(
+        let player_id = inner.borrow().player_id.clone();
+        let is_host = inner.borrow().is_host;
+
+        // Initialize P2P socket in Bevy instead of creating it here
+        marble_core::bevy::wasm_entry::init_p2p_socket(
+            &signaling_url,
             topo.mesh_group,
             topo.is_bridge,
-        )));
+            &player_id,
+            is_host,
+        );
 
-        // Store references
+        // Mark as running and connected
         {
             let mut inner_mut = inner.borrow_mut();
-            inner_mut.socket = Some(socket.clone());
-            inner_mut.gossip = Some(gossip.clone());
             inner_mut.is_running = true;
         }
 
         state_handle.set(P2pConnectionState::Connected);
 
-        // Register peer_id with server if credentials are available
+        // Register peer_id with server after Bevy socket gets its ID from signaling.
         {
             let inner_ref = inner.borrow();
             if let Some(player_secret) = &inner_ref.config.player_secret {
                 let room_id = inner_ref.room_id.clone();
                 let player_id = inner_ref.player_id.clone();
                 let player_secret = player_secret.clone();
-                let socket_for_id = socket.clone();
 
-                // Spawn task to register peer_id after getting it from socket
                 spawn_local(async move {
-                    // Wait for socket to get its ID (poll until available)
-                    let mut attempts = 0;
-                    let peer_id = loop {
-                        if let Some(id) = socket_for_id.borrow_mut().id() {
-                            break id.to_string();
+                    // Poll until Bevy exposes this socket's peer_id
+                    let my_peer_id = loop {
+                        let id = marble_core::bevy::wasm_entry::get_my_peer_id();
+                        if !id.is_empty() {
+                            break id;
                         }
-                        attempts += 1;
-                        if attempts > 100 {
-                            tracing::warn!("Failed to get peer_id from socket after 100 attempts");
-                            return;
-                        }
-                        gloo::timers::future::TimeoutFuture::new(50).await;
+                        gloo::timers::future::TimeoutFuture::new(100).await;
                     };
 
-                    // Create gRPC client and register peer_id
-                    let Some(window) = web_sys::window() else {
-                        tracing::warn!("No window object available for RegisterPeerId");
-                        return;
-                    };
-                    let Ok(origin) = window.location().origin() else {
-                        tracing::warn!("Failed to get origin for RegisterPeerId");
-                        return;
-                    };
+                    tracing::info!(peer_id = %my_peer_id, "Registering peer_id with server");
+
+                    // Call RegisterPeerId gRPC
+                    let Some(window) = web_sys::window() else { return; };
+                    let Ok(origin) = window.location().origin() else { return; };
                     let client = Client::new(format!("{}/grpc", origin));
                     let mut grpc = RoomServiceClient::new(client);
 
                     let req = RegisterPeerIdRequest {
-                        room_id,
+                        room_id: room_id.clone(),
                         player: Some(PlayerAuth {
                             id: player_id.clone(),
                             secret: player_secret,
                         }),
-                        peer_id: peer_id.clone(),
+                        peer_id: my_peer_id.clone(),
                     };
 
                     match grpc.register_peer_id(req).await {
-                        Ok(resp) => {
-                            let resp = resp.into_inner();
-                            if resp.success {
-                                tracing::info!(
-                                    player_id = %player_id,
-                                    peer_id = %peer_id,
-                                    "Successfully registered peer_id with server"
-                                );
-                            } else {
-                                tracing::warn!(
-                                    player_id = %player_id,
-                                    peer_id = %peer_id,
-                                    "Server rejected peer_id registration"
-                                );
-                            }
+                        Ok(_) => {
+                            tracing::info!(
+                                peer_id = %my_peer_id,
+                                player_id = %player_id,
+                                "Successfully registered peer_id with server"
+                            );
                         }
                         Err(e) => {
-                            tracing::warn!(
-                                player_id = %player_id,
-                                peer_id = %peer_id,
-                                error = %e,
-                                "Failed to register peer_id with server"
-                            );
+                            tracing::warn!(error = %e, "Failed to register peer_id with server");
                         }
                     }
                 });
             }
         }
 
-        // Spawn signaling loop
-        let state_handle_for_signaling = state_handle.clone();
+        // Start polling loop for peer updates from Bevy StateStore
+        let peers_version_clone = peers_version.clone();
+        let inner_for_poll = inner.clone();
         spawn_local(async move {
-            if let Err(e) = loop_fut.await {
-                state_handle_for_signaling
-                    .set(P2pConnectionState::Error(format!("Signaling error: {:?}", e)));
+            let mut last_version: u64 = 0;
+            let mut resolve_retry_tick: u32 = 0;
+
+            loop {
+                // Check if we should stop
+                if !inner_for_poll.borrow().is_running {
+                    break;
+                }
+
+                // Poll Bevy's peer store for updates
+                let current_version = marble_core::bevy::wasm_entry::get_peers_version();
+                let version_changed = current_version != last_version;
+
+                // Retry unresolved peers every ~2 seconds (20 ticks × 100ms)
+                resolve_retry_tick += 1;
+                let should_retry_resolve = resolve_retry_tick >= 20;
+                if should_retry_resolve {
+                    resolve_retry_tick = 0;
+                }
+
+                if version_changed || should_retry_resolve {
+                    if version_changed {
+                        last_version = current_version;
+                    }
+
+                    // Get peers from Bevy store and update local state
+                    let peers_js = marble_core::bevy::wasm_entry::get_peers();
+                    if let Ok(bevy_peers) = serde_wasm_bindgen::from_value::<
+                        Vec<marble_core::bevy::state_store::PeerInfo>,
+                    >(peers_js)
+                    {
+                        // Collect peer_ids that need player_id resolution
+                        let unresolved_peer_ids: Vec<String> = bevy_peers
+                            .iter()
+                            .filter(|bp| bp.player_id.is_none())
+                            .map(|bp| bp.peer_id.clone())
+                            .collect();
+
+                        let mut inner_mut = inner_for_poll.borrow_mut();
+                        inner_mut.peers = bevy_peers
+                            .iter()
+                            .map(|bp| {
+                                let peer_id = uuid::Uuid::parse_str(&bp.peer_id)
+                                    .map(PeerId::from)
+                                    .unwrap_or_else(|_| PeerId::from(uuid::Uuid::nil()));
+                                P2pPeerInfo {
+                                    peer_id,
+                                    player_id: bp.player_id.clone(),
+                                    connected: true,
+                                    rtt_ms: None,
+                                }
+                            })
+                            .collect();
+
+                        // Resolve unresolved peers via gRPC
+                        if !unresolved_peer_ids.is_empty() {
+                            if let Some(player_secret) = &inner_mut.config.player_secret {
+                                let room_id = inner_mut.room_id.clone();
+                                let player_id = inner_mut.player_id.clone();
+                                let player_secret = player_secret.clone();
+                                let peer_ids = unresolved_peer_ids;
+
+                                drop(inner_mut);
+
+                                resolve_peer_ids(
+                                    room_id,
+                                    player_id,
+                                    player_secret,
+                                    peer_ids,
+                                );
+                            } else {
+                                drop(inner_mut);
+                            }
+                        } else {
+                            drop(inner_mut);
+                            // All peers resolved, stop retry timer
+                            resolve_retry_tick = 0;
+                        }
+
+                        if version_changed {
+                            peers_version_clone.set(*peers_version_clone + 1);
+                        }
+                    }
+                }
+
+                // Yield to other tasks
+                gloo::timers::future::TimeoutFuture::new(100).await;
             }
         });
+    }
+}
 
-        // Spawn message handling loop
-        let peers_version_clone = peers_version.clone();
-        let messages_version_clone = messages_version.clone();
+/// Resolve peer_ids to player_ids via server gRPC and forward results to Bevy.
+fn resolve_peer_ids(
+    room_id: String,
+    player_id: String,
+    player_secret: String,
+    peer_id_strings: Vec<String>,
+) {
+    if peer_id_strings.is_empty() {
+        return;
+    }
 
-        let callbacks = MessageLoopCallbacks {
-            on_peers_changed: Box::new(move || {
-                peers_version_clone.set(*peers_version_clone + 1);
-            }),
-            on_messages_changed: Box::new(move || {
-                messages_version_clone.set(*messages_version_clone + 1);
-            }),
+    spawn_local(async move {
+        let Some(window) = web_sys::window() else {
+            tracing::warn!("No window object available for ResolvePeerIds");
+            return;
+        };
+        let Ok(origin) = window.location().origin() else {
+            tracing::warn!("Failed to get origin for ResolvePeerIds");
+            return;
         };
 
-        spawn_local(async move {
-            run_message_loop(inner, gossip, callbacks).await;
-        });
-    }
+        let client = Client::new(format!("{}/grpc", origin));
+        let mut grpc = RoomServiceClient::new(client);
+
+        let req = ResolvePeerIdsRequest {
+            room_id,
+            player: Some(PlayerAuth {
+                id: player_id,
+                secret: player_secret,
+            }),
+            peer_ids: peer_id_strings.clone(),
+        };
+
+        match grpc.resolve_peer_ids(req).await {
+            Ok(resp) => {
+                let resp = resp.into_inner();
+                let resolved_count = resp.peer_to_player.len();
+
+                for (peer_id_str, player_id) in resp.peer_to_player {
+                    // Forward to Bevy so P2pSocketRes gets updated
+                    marble_core::bevy::wasm_entry::update_peer_player_id(
+                        &peer_id_str,
+                        &player_id,
+                    );
+                }
+
+                tracing::debug!(
+                    resolved = resolved_count,
+                    requested = peer_id_strings.len(),
+                    "Resolved peer_ids from server"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to resolve peer_ids from server");
+            }
+        }
+    });
 }

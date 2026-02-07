@@ -1,15 +1,15 @@
 //! P2P room internal state management.
+//!
+//! After refactor: Socket and gossip are managed by Bevy (marble-core).
+//! Game synchronization (hash, desync, snapshot) is also in Bevy.
+//! This state only tracks UI-relevant data: peers, messages, connection flags.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
-use marble_core::GameState;
 use marble_proto::room::PeerTopology;
-use matchbox_socket::{PeerId, WebRtcSocket};
+use matchbox_socket::PeerId;
 
 use super::types::{P2pPeerInfo, P2pRoomConfig, ReceivedMessage};
-use super::GossipHandler;
 
 /// Internal state for P2P room connection
 pub struct P2pRoomState {
@@ -19,10 +19,6 @@ pub struct P2pRoomState {
     pub player_id: String,
     /// Configuration
     pub config: P2pRoomConfig,
-    /// WebRTC socket
-    pub socket: Option<Rc<RefCell<WebRtcSocket>>>,
-    /// Gossip handler
-    pub gossip: Option<Rc<RefCell<GossipHandler>>>,
     /// Topology info
     pub topology: Option<PeerTopology>,
     /// Connected peers
@@ -37,26 +33,12 @@ pub struct P2pRoomState {
     pub new_messages_queue: Vec<ReceivedMessage>,
     /// Connection running flag
     pub is_running: bool,
-    /// Flag to signal peers data changed (for async updates)
-    pub peers_dirty: bool,
 
-    // === Game synchronization fields ===
+    // === Minimal game state flags ===
     /// Is this client the host?
     pub is_host: bool,
     /// Host's peer ID
     pub host_peer_id: Option<PeerId>,
-    /// Shared game state reference
-    pub game_state: Option<Rc<RefCell<GameState>>>,
-    /// Last frame number when hash was broadcast
-    pub last_hash_frame: u64,
-    /// Consecutive desync count
-    pub desync_count: u32,
-    /// Last frame number when sync was performed
-    pub last_sync_frame: u64,
-    /// Last received host hash (frame, hash)
-    pub last_host_hash: Option<(u64, u64)>,
-    /// Current session version (incremented on each game start)
-    pub current_session_version: u64,
 }
 
 impl P2pRoomState {
@@ -66,8 +48,6 @@ impl P2pRoomState {
             room_id,
             player_id,
             config,
-            socket: None,
-            gossip: None,
             topology: None,
             peers: Vec::new(),
             messages: Vec::new(),
@@ -75,16 +55,9 @@ impl P2pRoomState {
             peer_player_map: HashMap::new(),
             new_messages_queue: Vec::new(),
             is_running: false,
-            peers_dirty: false,
-            // Game synchronization
+            // Game flags
             is_host: false,
             host_peer_id: None,
-            game_state: None,
-            last_hash_frame: 0,
-            desync_count: 0,
-            last_sync_frame: 0,
-            last_host_hash: None,
-            current_session_version: 0,
         }
     }
 
@@ -115,7 +88,6 @@ impl P2pRoomState {
         self.peer_player_map.insert(peer_id, player_id.clone());
         if let Some(peer) = self.peers.iter_mut().find(|p| p.peer_id == peer_id) {
             peer.player_id = Some(player_id);
-            self.peers_dirty = true;
         }
     }
 
@@ -132,7 +104,7 @@ impl P2pRoomState {
         }
     }
 
-    /// Get peer IDs for gossip handler
+    /// Get peer IDs
     pub fn get_peer_ids(&self) -> Vec<PeerId> {
         self.peers.iter().map(|p| p.peer_id).collect()
     }
@@ -140,30 +112,6 @@ impl P2pRoomState {
     /// Reset connection state
     pub fn reset_connection(&mut self) {
         self.is_running = false;
-        self.socket = None;
-        self.gossip = None;
         self.peers.clear();
-        // Reset game sync state
-        self.game_state = None;
-        self.last_hash_frame = 0;
-        self.desync_count = 0;
-        self.last_sync_frame = 0;
-        self.last_host_hash = None;
-        self.current_session_version = 0;
-    }
-
-    /// Set host status
-    pub fn set_host_status(&mut self, is_host: bool) {
-        self.is_host = is_host;
-    }
-
-    /// Set host peer ID
-    pub fn set_host_peer_id(&mut self, peer_id: Option<PeerId>) {
-        self.host_peer_id = peer_id;
-    }
-
-    /// Set game state reference
-    pub fn set_game_state(&mut self, state: Rc<RefCell<GameState>>) {
-        self.game_state = Some(state);
     }
 }

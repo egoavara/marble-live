@@ -6,11 +6,15 @@
 
 pub mod components;
 pub mod events;
+pub mod gossip;
 pub mod plugin;
 pub mod resources;
 pub mod state_store;
+pub mod sync_snapshot;
 pub mod systems;
 
+#[cfg(target_arch = "wasm32")]
+pub mod p2p_socket;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_entry;
 

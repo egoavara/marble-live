@@ -15,7 +15,7 @@ use yew::prelude::*;
 
 use crate::camera::{CameraMode, CameraState};
 // use crate::renderer::WgpuRenderer; // Removed - Bevy handles rendering
-use crate::services::p2p::{should_broadcast_hash, P2pRoomHandle};
+use crate::services::p2p::P2pRoomHandle;
 
 /// Fixed timestep for physics simulation (60 FPS)
 const PHYSICS_DT_MS: f64 = 1000.0 / 60.0;
@@ -103,14 +103,13 @@ impl GameLoopHandle {
             }
         }
 
-        // Create and broadcast game start message
-        let snapshot = game.create_snapshot();
-        if let Ok(state_bytes) = snapshot.to_bytes() {
-            drop(game);
-            self.p2p.send_game_start(snapshot.rng_seed, state_bytes, gamerule);
-            self.loop_state.set(GameLoopState::Running);
-            tracing::info!("Game started, broadcasting to peers");
+        // Broadcast game start via Bevy's P2P system
+        drop(game);
+        if let Err(e) = marble_core::bevy::wasm_entry::send_command(r#"{"type":"broadcast_game_start"}"#) {
+            tracing::error!("Failed to broadcast game start: {:?}", e);
         }
+        self.loop_state.set(GameLoopState::Running);
+        tracing::info!("Game started, broadcasting to peers");
     }
 
     /// Initialize game from received GameStart message (non-host)
@@ -201,13 +200,13 @@ impl GameLoopHandle {
         // Get game state info for RPC
         let start_frame = game.current_frame();
         let rng_seed = game.rng_seed;
-        let gamerule = game.gamerule().to_string();
-        let snapshot = game.create_snapshot();
 
-        // Broadcast updated state to peers (always do this for P2P sync)
-        if let Ok(state_bytes) = snapshot.to_bytes() {
-            drop(game);
-            self.p2p.send_game_start(snapshot.rng_seed, state_bytes, gamerule);
+        // Broadcast updated state to peers via Bevy's P2P system
+        drop(game);
+        if let Err(e) = marble_core::bevy::wasm_entry::send_command(r#"{"type":"broadcast_game_start"}"#) {
+            tracing::error!("Failed to broadcast game start: {:?}", e);
+        }
+        {
             tracing::info!("Marbles spawned for {} players", peers.len() + 1);
 
             // Call StartGame RPC to register with server (only first time)
@@ -374,12 +373,10 @@ pub fn use_game_loop(
     // Track if game start has been reported to server
     let server_game_started: Rc<RefCell<bool>> = use_mut_ref(|| false);
 
-    // Share game state with P2P layer (run once on mount)
+    // Set host status on mount
     {
-        let game_state = game_state.clone();
         let p2p = p2p.clone();
         use_effect_with(seed, move |_seed| {
-            p2p.set_game_state((*game_state).clone());
             p2p.set_host_status(is_host);
         });
     }
@@ -545,13 +542,7 @@ pub fn use_game_loop(
                             current_frame.set(frame);
                             *accumulated_time.borrow_mut() -= PHYSICS_DT_MS;
 
-                            // Host: broadcast hash periodically
-                            if is_host && should_broadcast_hash(frame, p2p.last_hash_frame()) {
-                                let game = game_state.borrow();
-                                let hash = game.compute_hash();
-                                drop(game);
-                                p2p.send_frame_hash(frame, hash);
-                            }
+                            // NOTE: Frame hash broadcasting is now handled by Bevy's P2P sync systems
                         }
 
                         // Update camera

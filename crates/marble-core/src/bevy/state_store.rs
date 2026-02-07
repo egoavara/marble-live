@@ -139,6 +139,8 @@ impl ConnectionStore {
 #[derive(Debug, Default)]
 pub struct PeerStore {
     peers: RwLock<Vec<PeerInfo>>,
+    /// This socket's own peer ID (assigned by signaling server).
+    my_peer_id: RwLock<Option<String>>,
     version: RwLock<u64>,
 }
 
@@ -157,6 +159,15 @@ impl PeerStore {
 
     pub fn set_peers(&self, peers: Vec<PeerInfo>) {
         *self.peers.write() = peers;
+        *self.version.write() += 1;
+    }
+
+    pub fn get_my_peer_id(&self) -> Option<String> {
+        self.my_peer_id.read().clone()
+    }
+
+    pub fn set_my_peer_id(&self, peer_id: String) {
+        *self.my_peer_id.write() = Some(peer_id);
         *self.version.write() += 1;
     }
 

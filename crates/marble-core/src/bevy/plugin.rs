@@ -120,6 +120,7 @@ impl Plugin for MarbleUnifiedPlugin {
         // Core messages
         app.add_message::<MarbleArrivedEvent>()
             .add_message::<SpawnMarblesEvent>()
+            .add_message::<SpawnMarblesAtEvent>()
             .add_message::<MapLoadedEvent>()
             .add_message::<SyncSnapshotReceivedEvent>()
             .add_message::<LoadMapEvent>()
@@ -128,6 +129,10 @@ impl Plugin for MarbleUnifiedPlugin {
             .add_message::<PlayerAddedEvent>()
             .add_message::<RemovePlayerEvent>()
             .add_message::<GameOverEvent>();
+
+        // P2P sync messages
+        app.add_message::<BroadcastGameStartEvent>()
+            .add_message::<SyncSnapshotRequestEvent>();
 
         // Editor messages
         app.add_message::<systems::SelectObjectEvent>()
@@ -178,6 +183,7 @@ impl Plugin for MarbleUnifiedPlugin {
                 systems::handle_load_map,
                 systems::handle_clear_marbles,
                 systems::handle_spawn_marbles,
+                systems::handle_spawn_marbles_at,
             )
                 .chain(),
         );
@@ -185,6 +191,48 @@ impl Plugin for MarbleUnifiedPlugin {
         // WASM exit system
         #[cfg(target_arch = "wasm32")]
         app.add_systems(Update, crate::bevy::wasm_entry::check_exit_system);
+
+        // ====================================================================
+        // P2P Sync Systems (WASM only)
+        // ====================================================================
+        #[cfg(target_arch = "wasm32")]
+        {
+            use crate::bevy::systems::p2p_sync;
+
+            // Socket lifecycle + message polling (always active)
+            app.add_systems(
+                Update,
+                (
+                    p2p_sync::pickup_pending_p2p,
+                    p2p_sync::handle_p2p_disconnect,
+                    p2p_sync::poll_p2p_socket,
+                )
+                    .chain(),
+            );
+
+            // Frame hash + desync detection (Game mode, FixedUpdate after physics)
+            app.add_systems(
+                FixedUpdate,
+                (
+                    p2p_sync::broadcast_frame_hash,
+                    p2p_sync::check_desync,
+                )
+                    .chain()
+                    .after(PhysicsSet::Writeback)
+                    .run_if(in_state(AppMode::Game)),
+            );
+
+            // Sync snapshot + game start (Game mode, Update)
+            app.add_systems(
+                Update,
+                (
+                    p2p_sync::handle_sync_request,
+                    p2p_sync::apply_sync_snapshot,
+                    p2p_sync::broadcast_game_start,
+                )
+                    .run_if(in_state(AppMode::Game)),
+            );
+        }
 
         // Core state sync (always active)
         app.add_systems(

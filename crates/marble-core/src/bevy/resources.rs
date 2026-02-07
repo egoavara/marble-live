@@ -130,7 +130,7 @@ impl Default for GameContextRes {
 }
 
 /// Specifies which keyframe sequences should be activated.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ActivatedKeyframes {
     /// No keyframes active (paused/stopped).
     #[default]
@@ -280,6 +280,10 @@ pub struct SyncState {
     pub last_sync_frame: u64,
     /// Pending snapshot to apply.
     pub pending_snapshot: Option<Vec<u8>>,
+    /// Hash buffer: (frame, hash) from host that haven't been verified yet.
+    pub pending_hashes: Vec<(u64, u64)>,
+    /// Session version (incremented on each game start).
+    pub session_version: u64,
 }
 
 /// Local player ID for camera following.
@@ -386,6 +390,26 @@ pub enum GameCommand {
         angle_snap_enabled: Option<bool>,
         angle_snap_interval: Option<f32>,
     },
+
+    // ========== P2P Sync Commands ==========
+    /// Set the RNG seed (for deterministic sync).
+    SetSeed { seed: u64 },
+    /// Set whether this client is the sync host.
+    SetSyncHost { is_host: bool },
+    /// Set the game rule.
+    SetGamerule { gamerule: String },
+    /// Tell Bevy to broadcast a GameStart message to all peers.
+    BroadcastGameStart,
+    /// Spawn marbles at specific positions (peer: uses host-provided coordinates).
+    SpawnMarblesAt { positions: Vec<[f32; 2]> },
+
+    // ========== P2P Chat/Reaction Commands ==========
+    /// Send a chat message via P2P.
+    SendChat { content: String },
+    /// Send a reaction emoji via P2P.
+    SendReaction { emoji: String },
+    /// Send a ping to all peers.
+    SendPing,
 }
 
 impl GameCommand {
@@ -405,6 +429,14 @@ impl GameCommand {
                 | Self::ResetSimulation
                 | Self::PreviewSequence { .. }
                 | Self::UpdateSnapConfig { .. }
+        )
+    }
+
+    /// Returns true if this is a P2P outgoing message command.
+    pub fn is_p2p_send_command(&self) -> bool {
+        matches!(
+            self,
+            Self::SendChat { .. } | Self::SendReaction { .. } | Self::SendPing
         )
     }
 }
@@ -471,8 +503,8 @@ impl CommandQueue {
                 continue;
             }
 
-            if cmd.is_editor_command() {
-                // Editor commands are left for drain_editor
+            if cmd.is_editor_command() || cmd.is_p2p_send_command() {
+                // Editor and P2P send commands are left for their own drain methods
                 remaining.push_back(cmd);
                 continue;
             }
@@ -489,6 +521,24 @@ impl CommandQueue {
 
         *guard = remaining;
         commands
+    }
+
+    /// Drain P2P send commands (SendChat, SendReaction, SendPing).
+    pub fn drain_p2p_send(&self) -> Vec<GameCommand> {
+        let mut guard = self.inner.lock();
+        let mut p2p_commands = Vec::new();
+        let mut remaining = VecDeque::new();
+
+        for cmd in guard.drain(..) {
+            if cmd.is_p2p_send_command() {
+                p2p_commands.push(cmd);
+            } else {
+                remaining.push_back(cmd);
+            }
+        }
+
+        *guard = remaining;
+        p2p_commands
     }
 
     /// Drain only editor-specific commands, leaving others in the queue.

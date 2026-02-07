@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use bevy::prelude::*;
 use bevy::winit::{UpdateMode, WinitSettings};
+use matchbox_socket::WebRtcSocket;
 use wasm_bindgen::prelude::*;
 
 use crate::bevy::{
@@ -46,6 +47,35 @@ impl GlobalState {
 /// Global state protected by Mutex for thread-safe access.
 /// Using Option to allow resetting on page reload.
 static GLOBAL_STATE: Mutex<Option<GlobalState>> = Mutex::new(None);
+
+// ============================================================================
+// P2P Socket Pending Init
+// ============================================================================
+
+/// Pending P2P socket initialization data.
+/// Stored in a global slot and picked up by Bevy's `pickup_pending_p2p` system.
+pub struct PendingP2pInit {
+    pub socket: WebRtcSocket,
+    pub mesh_group: u32,
+    pub is_bridge: bool,
+    pub player_id: String,
+    pub is_host: bool,
+}
+
+// SAFETY: WASM is single-threaded; no data races possible.
+unsafe impl Send for PendingP2pInit {}
+unsafe impl Sync for PendingP2pInit {}
+
+/// Global pending P2P init slot.
+static PENDING_P2P: parking_lot::Mutex<Option<PendingP2pInit>> =
+    parking_lot::Mutex::new(None);
+
+/// Atomic flag for P2P disconnect request.
+static P2P_DISCONNECT: AtomicBool = AtomicBool::new(false);
+
+/// Pending peer_id → player_id updates (from Yew gRPC calls).
+static PENDING_PEER_UPDATES: parking_lot::Mutex<Vec<(String, String)>> =
+    parking_lot::Mutex::new(Vec::new());
 
 fn ensure_global_state() {
     let mut guard = GLOBAL_STATE.lock().unwrap();
@@ -303,6 +333,21 @@ pub fn send_command(command_json: &str) -> Result<(), JsValue> {
 
     let command = match command_type {
         "spawn_marbles" => GameCommand::SpawnMarbles,
+        "spawn_marbles_at" => {
+            let positions = value["positions"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| {
+                            let x = v[0].as_f64()? as f32;
+                            let y = v[1].as_f64()? as f32;
+                            Some([x, y])
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            GameCommand::SpawnMarblesAt { positions }
+        }
         "clear_marbles" => GameCommand::ClearMarbles,
         "clear_players" => GameCommand::ClearPlayers,
         "yield" => GameCommand::Yield,
@@ -447,6 +492,45 @@ pub fn send_command(command_json: &str) -> Result<(), JsValue> {
         "init_editor" => GameCommand::InitEditor,
         "clear_mode" => GameCommand::ClearMode,
 
+        // P2P sync commands
+        "set_seed" => {
+            let seed = value["seed"]
+                .as_u64()
+                .ok_or_else(|| JsValue::from_str("Missing 'seed' field"))?;
+            GameCommand::SetSeed { seed }
+        }
+        "set_sync_host" => {
+            let is_host = value["is_host"]
+                .as_bool()
+                .ok_or_else(|| JsValue::from_str("Missing 'is_host' field"))?;
+            GameCommand::SetSyncHost { is_host }
+        }
+        "set_gamerule" => {
+            let gamerule = value["gamerule"]
+                .as_str()
+                .ok_or_else(|| JsValue::from_str("Missing 'gamerule' field"))?
+                .to_string();
+            GameCommand::SetGamerule { gamerule }
+        }
+        "broadcast_game_start" => GameCommand::BroadcastGameStart,
+
+        // P2P chat/reaction commands
+        "send_chat" => {
+            let content = value["content"]
+                .as_str()
+                .ok_or_else(|| JsValue::from_str("Missing 'content' field"))?
+                .to_string();
+            GameCommand::SendChat { content }
+        }
+        "send_reaction" => {
+            let emoji = value["emoji"]
+                .as_str()
+                .ok_or_else(|| JsValue::from_str("Missing 'emoji' field"))?
+                .to_string();
+            GameCommand::SendReaction { emoji }
+        }
+        "send_ping" => GameCommand::SendPing,
+
         _ => {
             return Err(JsValue::from_str(&format!(
                 "Unknown command type: {}",
@@ -483,6 +567,16 @@ pub fn get_connection_state() -> JsValue {
 pub fn get_connection_version() -> u64 {
     // Connection store doesn't have version, always return 0
     0
+}
+
+/// Get this socket's own peer ID (assigned by signaling server).
+/// Returns empty string if not yet assigned.
+#[wasm_bindgen]
+pub fn get_my_peer_id() -> String {
+    get_state_stores()
+        .peers
+        .get_my_peer_id()
+        .unwrap_or_default()
 }
 
 /// Get peer list.
@@ -639,4 +733,81 @@ pub fn get_editor_map_loaded() -> bool {
         return false;
     }
     get_state_stores().editor.is_map_loaded()
+}
+
+// ============================================================================
+// P2P Socket Management
+// ============================================================================
+
+/// Initialize a P2P socket connection.
+///
+/// Creates a `WebRtcSocket` and stores it in a pending slot.
+/// The Bevy `pickup_pending_p2p` system will insert it as a Resource next frame.
+#[wasm_bindgen]
+pub fn init_p2p_socket(
+    signaling_url: &str,
+    mesh_group: u32,
+    is_bridge: bool,
+    player_id: &str,
+    is_host: bool,
+) {
+    tracing::info!(
+        "[marble] init_p2p_socket: url={}, group={}, bridge={}, player={}, host={}",
+        signaling_url,
+        mesh_group,
+        is_bridge,
+        player_id,
+        is_host
+    );
+
+    let (socket, loop_fut) = WebRtcSocket::new_reliable(signaling_url);
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = loop_fut.await {
+            tracing::error!("[marble] P2P signaling error: {:?}", e);
+        }
+    });
+
+    PENDING_P2P.lock().replace(PendingP2pInit {
+        socket,
+        mesh_group,
+        is_bridge,
+        player_id: player_id.to_string(),
+        is_host,
+    });
+}
+
+/// Request P2P socket disconnection.
+///
+/// The Bevy `handle_p2p_disconnect` system will remove the Resource next frame.
+#[wasm_bindgen]
+pub fn disconnect_p2p() {
+    tracing::info!("[marble] disconnect_p2p called");
+    P2P_DISCONNECT.store(true, Ordering::SeqCst);
+}
+
+/// Update peer_id → player_id mapping from Yew (resolved via gRPC).
+///
+/// The Bevy `poll_p2p_socket` system will apply these updates.
+#[wasm_bindgen]
+pub fn update_peer_player_id(peer_id_str: &str, player_id: &str) {
+    PENDING_PEER_UPDATES
+        .lock()
+        .push((peer_id_str.to_string(), player_id.to_string()));
+}
+
+// --- Internal accessors for Bevy systems ---
+
+/// Take the pending P2P init data (called by `pickup_pending_p2p` system).
+pub fn take_pending_p2p() -> Option<PendingP2pInit> {
+    PENDING_P2P.lock().take()
+}
+
+/// Check and reset the P2P disconnect flag.
+pub fn take_p2p_disconnect() -> bool {
+    P2P_DISCONNECT.swap(false, Ordering::SeqCst)
+}
+
+/// Take pending peer_id → player_id updates.
+pub fn take_pending_peer_updates() -> Vec<(String, String)> {
+    std::mem::take(&mut *PENDING_PEER_UPDATES.lock())
 }

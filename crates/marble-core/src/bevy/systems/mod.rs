@@ -19,6 +19,8 @@ pub mod game_rules;
 pub mod keyframe;
 pub mod map_loader;
 pub mod marble;
+#[cfg(target_arch = "wasm32")]
+pub mod p2p_sync;
 pub mod physics;
 pub mod preview;
 pub mod rendering;
