@@ -19,7 +19,7 @@ pub use wasm_entry::*;
 
 pub use components::*;
 pub use events::*;
-pub use plugin::{EditorState, MarbleCorePlugin, MarbleEditorPlugin, MarbleGamePlugin};
+pub use plugin::{AppMode, EditorState, MarbleCorePlugin, MarbleEditorPlugin, MarbleGamePlugin, MarbleUnifiedPlugin};
 pub use resources::*;
 pub use state_store::{
     ChatMessage, ChatStore, ConnectionState, ConnectionStore, EditorStateSummary, EditorStore,

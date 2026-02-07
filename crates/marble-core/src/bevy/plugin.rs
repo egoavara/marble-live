@@ -1,9 +1,8 @@
 //! Bevy plugins for the marble game.
 //!
-//! Provides three plugins:
-//! - `MarbleCorePlugin`: Core functionality shared between game and editor
-//! - `MarbleGamePlugin`: Game-specific features (includes Core)
-//! - `MarbleEditorPlugin`: Editor-specific features (includes Core)
+//! Provides:
+//! - `MarbleUnifiedPlugin`: Single plugin with dynamic mode switching via `AppMode` state
+//! - `MarbleGamePlugin` / `MarbleEditorPlugin`: Legacy wrappers (deprecated)
 
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
@@ -14,25 +13,39 @@ use crate::bevy::state_store::StateStores;
 use crate::bevy::systems;
 use crate::physics::PHYSICS_DT;
 
-/// Core plugin with shared functionality.
+/// Application mode state for dynamic mode switching.
+#[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum AppMode {
+    #[default]
+    Idle,
+    Game,
+    Editor,
+}
+
+/// Editor states (SubState of AppMode::Editor).
 ///
-/// Includes:
-/// - ECS components, resources, and events registration
-/// - Physics configuration (bevy_rapier2d with 60Hz fixed timestep)
-/// - Blackhole force application
-/// - Roll animation
-/// - Keyframe animation
-/// - Trigger detection and game rules
-pub struct MarbleCorePlugin {
-    /// RNG seed for deterministic simulation.
+/// Only exists when AppMode is Editor. Automatically removed when
+/// AppMode transitions away from Editor.
+#[derive(SubStates, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[source(AppMode = AppMode::Editor)]
+pub enum EditorState {
+    #[default]
+    Editing,
+    Simulating,
+    Preview,
+}
+
+/// Unified plugin that supports dynamic mode switching via `AppMode` state.
+///
+/// All game and editor systems are registered here with `run_if` guards.
+/// Mode is controlled by sending `InitGame`, `InitEditor`, or `ClearMode` commands.
+pub struct MarbleUnifiedPlugin {
     pub seed: u64,
-    /// Command queue for external commands (WASM interop).
     pub command_queue: Option<CommandQueue>,
-    /// State stores for Yew integration.
     pub state_stores: Option<StateStores>,
 }
 
-impl Default for MarbleCorePlugin {
+impl Default for MarbleUnifiedPlugin {
     fn default() -> Self {
         Self {
             seed: 12345,
@@ -42,15 +55,35 @@ impl Default for MarbleCorePlugin {
     }
 }
 
-impl Plugin for MarbleCorePlugin {
-    fn build(&self, app: &mut App) {
-        // Configure fixed timestep
-        app.insert_resource(Time::<Fixed>::from_seconds(PHYSICS_DT as f64));
+impl MarbleUnifiedPlugin {
+    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
+        Self {
+            seed: 12345,
+            command_queue: Some(command_queue),
+            state_stores: Some(state_stores),
+        }
+    }
+}
 
-        // Add Rapier physics plugin
+impl Plugin for MarbleUnifiedPlugin {
+    fn build(&self, app: &mut App) {
+        // ====================================================================
+        // States
+        // ====================================================================
+        app.init_state::<AppMode>();
+        app.add_sub_state::<EditorState>();
+
+        // ====================================================================
+        // Physics
+        // ====================================================================
+        app.insert_resource(Time::<Fixed>::from_seconds(PHYSICS_DT as f64));
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default());
 
-        // Register resources
+        // ====================================================================
+        // Resources (all registered upfront, systems gated by run_if)
+        // ====================================================================
+
+        // Core resources
         app.insert_resource(MarbleGameState::new(self.seed))
             .insert_resource(DeterministicRng::new(self.seed))
             .insert_resource(GameContextRes::new(self.seed))
@@ -63,7 +96,28 @@ impl Plugin for MarbleCorePlugin {
             .insert_resource(self.command_queue.clone().unwrap_or_default())
             .insert_resource(self.state_stores.clone().unwrap_or_default());
 
-        // Register messages (events)
+        // Rendering resources (shared)
+        app.insert_resource(systems::ShapeGizmoConfig::default());
+
+        // Game-specific resources
+        app.insert_resource(crate::bevy::LocalPlayerId::default());
+
+        // Editor-specific resources
+        app.insert_resource(crate::bevy::CameraInputState::default());
+        app.insert_resource(systems::EditorStateRes::default());
+        app.insert_resource(systems::EditorStateStore::new());
+        app.insert_resource(systems::SnapConfig::default());
+
+        // Grid resources (editor)
+        app.init_resource::<systems::GridConfig>();
+        app.init_resource::<systems::GridLabelState>();
+        app.init_resource::<systems::GridMeshState>();
+
+        // ====================================================================
+        // Messages (all registered upfront)
+        // ====================================================================
+
+        // Core messages
         app.add_message::<MarbleArrivedEvent>()
             .add_message::<SpawnMarblesEvent>()
             .add_message::<MapLoadedEvent>()
@@ -75,11 +129,25 @@ impl Plugin for MarbleCorePlugin {
             .add_message::<RemovePlayerEvent>()
             .add_message::<GameOverEvent>();
 
-        // Add systems
+        // Editor messages
+        app.add_message::<systems::SelectObjectEvent>()
+            .add_message::<systems::UpdateObjectEvent>()
+            .add_message::<AddObjectEvent>()
+            .add_message::<DeleteObjectEvent>()
+            .add_message::<StartSimulationEvent>()
+            .add_message::<StopSimulationEvent>()
+            .add_message::<ResetSimulationEvent>()
+            .add_message::<PreviewSequenceEvent>()
+            .add_message::<UpdateKeyframeEvent>();
+
+        // ====================================================================
+        // Core systems (always active)
+        // ====================================================================
+
+        // Pre-physics (FixedUpdate)
         app.add_systems(
             FixedUpdate,
             (
-                // Pre-physics
                 systems::clear_external_forces,
                 systems::update_game_context,
                 systems::apply_vector_field_forces,
@@ -90,10 +158,10 @@ impl Plugin for MarbleCorePlugin {
                 .before(PhysicsSet::SyncBackend),
         );
 
+        // Post-physics (FixedUpdate)
         app.add_systems(
             FixedUpdate,
             (
-                // Post-physics
                 systems::check_trigger_arrivals,
                 systems::handle_marble_arrivals,
                 systems::check_game_over,
@@ -102,28 +170,23 @@ impl Plugin for MarbleCorePlugin {
                 .after(PhysicsSet::Writeback),
         );
 
-        // Event handlers (can run any time)
+        // Command processing and event handlers (always active)
         app.add_systems(
             Update,
             (
-                // Process external commands first
                 systems::process_commands,
-                // Then handle events
                 systems::handle_load_map,
-                // Clear must run before spawn so that spawn's clear event
-                // is processed before newly spawned marbles exist
                 systems::handle_clear_marbles,
                 systems::handle_spawn_marbles,
             )
                 .chain(),
         );
 
-        // WASM exit system - checks if exit was requested and sends AppExit
+        // WASM exit system
         #[cfg(target_arch = "wasm32")]
         app.add_systems(Update, crate::bevy::wasm_entry::check_exit_system);
 
-        // State sync to shared stores (for Yew UI)
-        // sync_live_rankings must run first to populate LiveRankings resource
+        // Core state sync (always active)
         app.add_systems(
             PostUpdate,
             (
@@ -132,224 +195,87 @@ impl Plugin for MarbleCorePlugin {
             )
                 .chain(),
         );
-    }
-}
 
-/// Game plugin for the marble roulette game.
-///
-/// Includes `MarbleCorePlugin` plus game-specific features:
-/// - Camera setup
-/// - Game UI hooks
-/// - Input handling
-pub struct MarbleGamePlugin {
-    /// RNG seed for deterministic simulation.
-    pub seed: u64,
-    /// Command queue for external commands (WASM interop).
-    pub command_queue: Option<CommandQueue>,
-    /// State stores for Yew integration.
-    pub state_stores: Option<StateStores>,
-}
+        // ====================================================================
+        // Rendering systems (Game | Editor)
+        // ====================================================================
 
-impl Default for MarbleGamePlugin {
-    fn default() -> Self {
-        Self {
-            seed: 12345,
-            command_queue: None,
-            state_stores: None,
-        }
-    }
-}
+        let in_game_or_editor =
+            in_state(AppMode::Game).or(in_state(AppMode::Editor));
 
-impl MarbleGamePlugin {
-    /// Create a new game plugin with shared handles.
-    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: Some(state_stores),
-        }
-    }
-
-    /// Create a new game plugin with the given command queue (legacy).
-    pub fn with_command_queue(command_queue: CommandQueue) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: None,
-        }
-    }
-}
-
-impl Plugin for MarbleGamePlugin {
-    fn build(&self, app: &mut App) {
-        // Add core plugin
-        app.add_plugins(MarbleCorePlugin {
-            seed: self.seed,
-            command_queue: self.command_queue.clone(),
-            state_stores: self.state_stores.clone(),
-        });
-
-        // Add gizmo config for rendering
-        app.insert_resource(systems::ShapeGizmoConfig::default());
-
-        // Add camera resources
-        app.insert_resource(crate::bevy::LocalPlayerId::default());
-
-        // Add game-specific systems
-        app.add_systems(Startup, setup_game_camera);
-
-        // Add rendering systems
         app.add_systems(
             Update,
             (
                 systems::render_map_objects,
                 systems::render_marbles,
-            ),
+            )
+                .run_if(in_game_or_editor.clone()),
         );
 
-        // Add camera systems (run after physics for accurate marble positions)
+        // ====================================================================
+        // Game camera systems (Game only)
+        // ====================================================================
+
         app.add_systems(
             Update,
             (
                 systems::update_follow_target,
                 systems::update_follow_leader,
                 systems::update_overview_camera,
-                systems::apply_camera_smoothing,
             )
-                .chain(),
+                .chain()
+                .run_if(in_state(AppMode::Game)),
         );
-    }
-}
 
-/// Editor plugin for the map editor.
-///
-/// Includes `MarbleCorePlugin` plus editor-specific features:
-/// - Gizmo rendering
-/// - Object selection
-/// - Keyframe preview
-/// - Editor state machine
-pub struct MarbleEditorPlugin {
-    /// RNG seed for deterministic simulation.
-    pub seed: u64,
-    /// Command queue for external commands (WASM interop).
-    pub command_queue: Option<CommandQueue>,
-    /// State stores for Yew integration.
-    pub state_stores: Option<StateStores>,
-}
+        // ====================================================================
+        // Editor camera systems (Editor only)
+        // ====================================================================
 
-impl Default for MarbleEditorPlugin {
-    fn default() -> Self {
-        Self {
-            seed: 12345,
-            command_queue: None,
-            state_stores: None,
-        }
-    }
-}
+        app.add_systems(
+            Update,
+            systems::handle_editor_camera_input
+                .run_if(in_state(AppMode::Editor)),
+        );
 
-impl MarbleEditorPlugin {
-    /// Create a new editor plugin with shared handles.
-    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: Some(state_stores),
-        }
-    }
+        // Camera smoothing (Game | Editor)
+        app.add_systems(
+            Update,
+            systems::apply_camera_smoothing
+                .run_if(in_game_or_editor.clone()),
+        );
 
-    /// Create a new editor plugin with the given command queue (legacy).
-    pub fn with_command_queue(command_queue: CommandQueue) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: None,
-        }
-    }
-}
+        // ====================================================================
+        // Editor command processing (Editor only)
+        // ====================================================================
 
-/// Editor states.
-#[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum EditorState {
-    #[default]
-    Editing,
-    Simulating,
-    Preview,
-}
-
-impl Plugin for MarbleEditorPlugin {
-    fn build(&self, app: &mut App) {
-        // Add core plugin
-        app.add_plugins(MarbleCorePlugin {
-            seed: self.seed,
-            command_queue: self.command_queue.clone(),
-            state_stores: self.state_stores.clone(),
-        });
-
-        // Add gizmo config for rendering
-        app.insert_resource(systems::ShapeGizmoConfig::default());
-
-        // Add camera resources for editor
-        app.insert_resource(crate::bevy::CameraInputState::default());
-
-        // Add editor state
-        app.init_state::<EditorState>();
-
-        // Add editor resources
-        app.insert_resource(systems::EditorStateRes::default());
-        app.insert_resource(systems::EditorStateStore::new());
-        app.insert_resource(systems::SnapConfig::default());
-
-        // Add editor messages
-        app.add_message::<systems::SelectObjectEvent>();
-        app.add_message::<systems::UpdateObjectEvent>();
-        app.add_message::<AddObjectEvent>();
-        app.add_message::<DeleteObjectEvent>();
-        app.add_message::<StartSimulationEvent>();
-        app.add_message::<StopSimulationEvent>();
-        app.add_message::<ResetSimulationEvent>();
-        app.add_message::<PreviewSequenceEvent>();
-        app.add_message::<UpdateKeyframeEvent>();
-
-        // Add editor-specific systems
-        app.add_systems(Startup, setup_editor_camera);
-
-        // Add editor command processing (runs after process_commands)
         app.add_systems(
             Update,
             (
                 systems::process_editor_commands.after(systems::process_commands),
                 systems::handle_add_object,
                 systems::handle_delete_object,
-            ),
+            )
+                .run_if(in_state(AppMode::Editor)),
         );
 
-        // Add rendering systems
-        app.init_resource::<systems::GridConfig>();
-        app.init_resource::<systems::GridLabelState>();
-        app.init_resource::<systems::GridMeshState>();
+        // ====================================================================
+        // Editor grid/guidelines (Editor only)
+        // ====================================================================
 
         app.add_systems(
             Update,
             (
                 systems::render_grid,
                 systems::manage_grid_labels,
-                systems::render_map_objects,
-                systems::render_marbles,
                 systems::render_guidelines,
-            ),
-        );
-
-        // Add editor camera systems
-        app.add_systems(
-            Update,
-            (
-                systems::handle_editor_camera_input,
-                systems::apply_camera_smoothing,
             )
-                .chain(),
+                .run_if(in_state(AppMode::Editor)),
         );
 
-        // Editor input and selection systems (Editing state only)
+        // ====================================================================
+        // Editor input and selection (EditorState::Editing only)
+        // ====================================================================
+
         app.add_systems(
             Update,
             (
@@ -369,7 +295,7 @@ impl Plugin for MarbleEditorPlugin {
                 .run_if(in_state(EditorState::Editing)),
         );
 
-        // Editor gizmo rendering (always visible in Editing state)
+        // Editor gizmo rendering (EditorState::Editing only)
         app.add_systems(
             Update,
             (
@@ -382,8 +308,10 @@ impl Plugin for MarbleEditorPlugin {
                 .run_if(in_state(EditorState::Editing)),
         );
 
-        // Sync editor state to stores (for Yew UI)
-        // mark_map_loaded_on_event must run before sync systems to set the flag
+        // ====================================================================
+        // Editor state sync (Editor only, PostUpdate)
+        // ====================================================================
+
         app.add_systems(
             PostUpdate,
             (
@@ -392,10 +320,14 @@ impl Plugin for MarbleEditorPlugin {
                 systems::sync_editor_to_stores,
                 systems::sync_snap_config_to_stores,
             )
-                .chain(),
+                .chain()
+                .run_if(in_state(AppMode::Editor)),
         );
 
-        // Simulation control systems
+        // ====================================================================
+        // Simulation control (Editor only)
+        // ====================================================================
+
         app.add_systems(
             Update,
             (
@@ -403,41 +335,247 @@ impl Plugin for MarbleEditorPlugin {
                 systems::handle_stop_simulation,
                 systems::handle_reset_simulation,
                 systems::clear_executors_on_map_load,
-            ),
+            )
+                .run_if(in_state(AppMode::Editor)),
         );
 
-        // Preview systems
-        app.add_systems(Update, systems::handle_preview_sequence);
+        // ====================================================================
+        // Preview systems (Editor only)
+        // ====================================================================
+
         app.add_systems(
             Update,
-            systems::update_preview_transforms.run_if(in_state(EditorState::Preview)),
+            systems::handle_preview_sequence
+                .run_if(in_state(AppMode::Editor)),
+        );
+        app.add_systems(
+            Update,
+            systems::update_preview_transforms
+                .run_if(in_state(EditorState::Preview)),
         );
         app.add_systems(OnExit(EditorState::Preview), systems::on_exit_preview);
+
+        // ====================================================================
+        // OnEnter / OnExit transition systems
+        // ====================================================================
+
+        app.add_systems(OnEnter(AppMode::Game), setup_game_camera);
+        app.add_systems(OnEnter(AppMode::Editor), setup_editor_camera);
+        app.add_systems(OnExit(AppMode::Game), cleanup_game_mode);
+        app.add_systems(OnExit(AppMode::Editor), cleanup_editor_mode);
     }
 }
 
-/// Sets up the game camera.
-fn setup_game_camera(mut commands: Commands) {
+/// Sets up or reconfigures the camera for Game mode.
+///
+/// Reuses existing camera entity to avoid destroying GPU textures
+/// mid-frame (which causes "Destroyed texture used in a submit" errors).
+fn setup_game_camera(
+    mut commands: Commands,
+    mut existing: Query<&mut crate::bevy::GameCamera, With<crate::bevy::MainCamera>>,
+) {
     tracing::info!("[marble] setup_game_camera called");
 
-    commands.spawn((
-        Camera2d,
-        crate::bevy::MainCamera,
-        crate::bevy::GameCamera::game(), // Overview mode by default
-    ));
-
-    tracing::info!("[marble] game camera spawned (Overview mode)");
+    if let Ok(mut cam) = existing.single_mut() {
+        // Reuse existing camera — just reconfigure it
+        *cam = crate::bevy::GameCamera::game();
+        tracing::info!("[marble] game camera reconfigured (Overview mode)");
+    } else {
+        // No camera yet — spawn a fresh one
+        commands.spawn((
+            Camera2d,
+            crate::bevy::MainCamera,
+            crate::bevy::GameCamera::game(),
+        ));
+        tracing::info!("[marble] game camera spawned (Overview mode)");
+    }
 }
 
-/// Sets up the editor camera.
-fn setup_editor_camera(mut commands: Commands) {
+/// Sets up or reconfigures the camera for Editor mode.
+fn setup_editor_camera(
+    mut commands: Commands,
+    mut existing: Query<&mut crate::bevy::GameCamera, With<crate::bevy::MainCamera>>,
+) {
     tracing::info!("[marble] setup_editor_camera called");
 
-    commands.spawn((
-        Camera2d,
-        crate::bevy::MainCamera,
-        crate::bevy::GameCamera::editor(), // Editor mode for manual pan/zoom
-    ));
+    if let Ok(mut cam) = existing.single_mut() {
+        *cam = crate::bevy::GameCamera::editor();
+        tracing::info!("[marble] editor camera reconfigured (Editor mode)");
+    } else {
+        commands.spawn((
+            Camera2d,
+            crate::bevy::MainCamera,
+            crate::bevy::GameCamera::editor(),
+        ));
+        tracing::info!("[marble] editor camera spawned (Editor mode)");
+    }
+}
 
-    tracing::info!("[marble] editor camera spawned (Editor mode)");
+/// Cleanup when exiting Game mode.
+///
+/// NOTE: Camera entities are NOT despawned here to avoid destroying GPU
+/// textures while render commands still reference them. The OnEnter system
+/// of the next mode reconfigures the existing camera instead.
+fn cleanup_game_mode(
+    mut commands: Commands,
+    map_objects: Query<Entity, With<crate::bevy::MapObjectMarker>>,
+    marbles: Query<Entity, With<crate::bevy::Marble>>,
+    marble_visuals: Query<Entity, With<crate::bevy::MarbleVisual>>,
+    mut object_map: ResMut<ObjectEntityMap>,
+    mut initial_transforms: ResMut<InitialTransforms>,
+    mut keyframe_executors: ResMut<KeyframeExecutors>,
+    mut game_state: ResMut<MarbleGameState>,
+) {
+    tracing::info!("[marble] cleanup_game_mode");
+
+    for entity in map_objects.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in marbles.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in marble_visuals.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    object_map.clear();
+    initial_transforms.clear();
+    keyframe_executors.clear();
+    game_state.players.clear();
+    game_state.arrival_order.clear();
+    game_state.frame = 0;
+}
+
+/// Cleanup when exiting Editor mode.
+///
+/// NOTE: Camera entities are NOT despawned here (see cleanup_game_mode).
+fn cleanup_editor_mode(
+    mut commands: Commands,
+    map_objects: Query<Entity, With<crate::bevy::MapObjectMarker>>,
+    marbles: Query<Entity, With<crate::bevy::Marble>>,
+    marble_visuals: Query<Entity, With<crate::bevy::MarbleVisual>>,
+    grid_meshes: Query<Entity, With<systems::GridMesh>>,
+    grid_labels: Query<Entity, With<systems::GridLabel>>,
+    mut object_map: ResMut<ObjectEntityMap>,
+    mut initial_transforms: ResMut<InitialTransforms>,
+    mut keyframe_executors: ResMut<KeyframeExecutors>,
+    mut editor_state: ResMut<systems::EditorStateRes>,
+    mut grid_mesh_state: ResMut<systems::GridMeshState>,
+    mut grid_label_state: ResMut<systems::GridLabelState>,
+) {
+    tracing::info!("[marble] cleanup_editor_mode");
+
+    for entity in map_objects.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in marbles.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in marble_visuals.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in grid_meshes.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in grid_labels.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    object_map.clear();
+    initial_transforms.clear();
+    keyframe_executors.clear();
+    *editor_state = systems::EditorStateRes::default();
+    *grid_mesh_state = systems::GridMeshState::default();
+    *grid_label_state = systems::GridLabelState::default();
+}
+
+// ============================================================================
+// Legacy plugins (deprecated, kept for compatibility)
+// ============================================================================
+
+/// Core plugin with shared functionality (legacy).
+pub struct MarbleCorePlugin {
+    pub seed: u64,
+    pub command_queue: Option<CommandQueue>,
+    pub state_stores: Option<StateStores>,
+}
+
+impl Default for MarbleCorePlugin {
+    fn default() -> Self {
+        Self {
+            seed: 12345,
+            command_queue: None,
+            state_stores: None,
+        }
+    }
+}
+
+/// Game plugin (legacy wrapper).
+pub struct MarbleGamePlugin {
+    pub seed: u64,
+    pub command_queue: Option<CommandQueue>,
+    pub state_stores: Option<StateStores>,
+}
+
+impl Default for MarbleGamePlugin {
+    fn default() -> Self {
+        Self {
+            seed: 12345,
+            command_queue: None,
+            state_stores: None,
+        }
+    }
+}
+
+impl MarbleGamePlugin {
+    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
+        Self {
+            seed: 12345,
+            command_queue: Some(command_queue),
+            state_stores: Some(state_stores),
+        }
+    }
+
+    pub fn with_command_queue(command_queue: CommandQueue) -> Self {
+        Self {
+            seed: 12345,
+            command_queue: Some(command_queue),
+            state_stores: None,
+        }
+    }
+}
+
+/// Editor plugin (legacy wrapper).
+pub struct MarbleEditorPlugin {
+    pub seed: u64,
+    pub command_queue: Option<CommandQueue>,
+    pub state_stores: Option<StateStores>,
+}
+
+impl Default for MarbleEditorPlugin {
+    fn default() -> Self {
+        Self {
+            seed: 12345,
+            command_queue: None,
+            state_stores: None,
+        }
+    }
+}
+
+impl MarbleEditorPlugin {
+    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
+        Self {
+            seed: 12345,
+            command_queue: Some(command_queue),
+            state_stores: Some(state_stores),
+        }
+    }
+
+    pub fn with_command_queue(command_queue: CommandQueue) -> Self {
+        Self {
+            seed: 12345,
+            command_queue: Some(command_queue),
+            state_stores: None,
+        }
+    }
 }

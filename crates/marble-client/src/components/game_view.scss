@@ -12,11 +12,6 @@
     background: transparent;
     pointer-events: none;
 
-    // Re-enable pointer events for interactive children
-    > * {
-        pointer-events: auto;
-    }
-
     &.fullscreen {
         position: fixed;
         top: 0;
@@ -27,25 +22,6 @@
         background: transparent; // Canvas is rendered globally, no background needed
         pointer-events: none;
         z-index: 1; // Above the global canvas (z-index: 0)
-
-        > * {
-            pointer-events: auto;
-        }
-
-        // Game canvas is now managed globally by App.rs
-        // This style is kept for reference but won't be applied
-        .game-canvas {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            background: $color-bg-primary;
-            border-radius: $radius-lg;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-        }
     }
 }
 
@@ -103,6 +79,7 @@
     left: 50%;
     transform: translateX(-50%);
     z-index: $z-header;
+    pointer-events: auto;
 }
 
 .spawn-btn {
@@ -231,6 +208,7 @@
     backdrop-filter: blur(12px);
     z-index: $z-floating-panel;
     box-shadow: $shadow-lg;
+    pointer-events: auto;
 }
 
 .camera-btn {
@@ -258,6 +236,7 @@
     background: rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(3px);
     z-index: $z-overlay;
+    pointer-events: auto;
 }
 
 .lobby-panel {
@@ -429,6 +408,7 @@
     flex-direction: column;
     background: rgba(0, 0, 0, 0.8);
     z-index: $z-overlay;
+    pointer-events: auto;
 
     p {
         margin-top: $spacing-lg;

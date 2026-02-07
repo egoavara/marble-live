@@ -1,6 +1,6 @@
 //! MarbleEditor component - Bevy-based map editor view.
 //!
-//! Uses BevyProvider for editor initialization and renders to canvas.
+//! Uses the global BevyProvider (from App.rs) for rendering.
 //! UI panels (PropertyPanel, TimelinePanel, etc.) are still Yew components
 //! that sync with Bevy state via polling.
 
@@ -8,17 +8,16 @@ use wasm_bindgen::JsCast;
 use web_sys::MouseEvent;
 use yew::prelude::*;
 
+use crate::app::BEVY_CANVAS_ID;
 use crate::components::editor::{ContextMenu, ContextMenuState};
-use crate::hooks::{use_bevy, BevyProvider};
+use crate::hooks::use_bevy;
 
-/// Canvas ID for the editor.
-pub const EDITOR_CANVAS_ID: &str = "marble-editor-canvas";
+/// Canvas ID for the editor (uses the global canvas from App.rs).
+pub const EDITOR_CANVAS_ID: &str = BEVY_CANVAS_ID;
 
 /// Props for MarbleEditor component.
 #[derive(Properties, PartialEq)]
 pub struct MarbleEditorProps {
-    /// Map configuration JSON.
-    pub config_json: String,
     /// Children (UI panels).
     #[prop_or_default]
     pub children: Children,
@@ -45,27 +44,25 @@ pub struct MarbleEditorProps {
     pub on_mirror_y: Callback<usize>,
 }
 
-/// MarbleEditor component - renders the map editor canvas.
+/// MarbleEditor component - renders the map editor UI.
+///
+/// NOTE: The editor canvas is managed globally by App.rs to persist across
+/// route changes and avoid Bevy's RecreationAttempt error in WASM.
 #[function_component(MarbleEditor)]
 pub fn marble_editor(props: &MarbleEditorProps) -> Html {
+    // No local BevyProvider needed - uses the global one from App.rs
     html! {
-        <BevyProvider
-            canvas_id={EDITOR_CANVAS_ID}
-            config_json={props.config_json.clone()}
-            editor_mode={true}
+        <MarbleEditorInner
+            has_clipboard={props.has_clipboard}
+            selected_object={props.selected_object}
+            on_copy={props.on_copy.clone()}
+            on_paste={props.on_paste.clone()}
+            on_delete={props.on_delete.clone()}
+            on_mirror_x={props.on_mirror_x.clone()}
+            on_mirror_y={props.on_mirror_y.clone()}
         >
-            <MarbleEditorInner
-                has_clipboard={props.has_clipboard}
-                selected_object={props.selected_object}
-                on_copy={props.on_copy.clone()}
-                on_paste={props.on_paste.clone()}
-                on_delete={props.on_delete.clone()}
-                on_mirror_x={props.on_mirror_x.clone()}
-                on_mirror_y={props.on_mirror_y.clone()}
-            >
-                { props.children.clone() }
-            </MarbleEditorInner>
-        </BevyProvider>
+            { props.children.clone() }
+        </MarbleEditorInner>
     }
 }
 
@@ -126,74 +123,74 @@ fn marble_editor_inner(props: &MarbleEditorInnerProps) -> Html {
     let on_mirror_x = props.on_mirror_x.clone();
     let on_mirror_y = props.on_mirror_y.clone();
 
-    // Right-click handler for context menu
-    let oncontextmenu = {
+    // Bind contextmenu event to the global canvas via JS
+    {
         let context_menu_state = context_menu_state.clone();
         let selected_object = props.selected_object;
-        Callback::from(move |e: MouseEvent| {
-            e.prevent_default();
 
-            let screen_x = e.client_x() as f32;
-            let screen_y = e.client_y() as f32;
+        use_effect_with(selected_object, move |selected_object| {
+            let selected_object = *selected_object;
 
-            // Get world position from canvas
-            let world_pos = if let Some(target) = e.target() {
-                if let Some(canvas) = target.dyn_ref::<web_sys::HtmlCanvasElement>() {
-                    screen_to_world(screen_x, screen_y, canvas)
-                } else {
-                    // Try to find the canvas from the event target's parent
-                    if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                        if let Some(canvas) = gloo::utils::document()
+            let listener = gloo::utils::document()
+                .get_element_by_id(EDITOR_CANVAS_ID)
+                .map(|canvas| {
+                    gloo::events::EventListener::new(&canvas, "contextmenu", move |event| {
+                        event.prevent_default();
+                        let e: &MouseEvent = event.dyn_ref().unwrap();
+
+                        let screen_x = e.client_x() as f32;
+                        let screen_y = e.client_y() as f32;
+
+                        let world_pos = if let Some(canvas) = gloo::utils::document()
                             .get_element_by_id(EDITOR_CANVAS_ID)
                             .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
                         {
                             screen_to_world(screen_x, screen_y, &canvas)
                         } else {
-                            (3.0, 5.0) // Default center
-                        }
-                    } else {
-                        (3.0, 5.0)
-                    }
-                }
-            } else {
-                (3.0, 5.0)
-            };
+                            (3.0, 5.0)
+                        };
 
-            context_menu_state.set(ContextMenuState::show(
-                (screen_x, screen_y),
-                world_pos,
-                selected_object,
-            ));
-        })
-    };
+                        context_menu_state.set(ContextMenuState::show(
+                            (screen_x, screen_y),
+                            world_pos,
+                            selected_object,
+                        ));
+                    })
+                });
 
-    // Close context menu on left click
-    let onclick = {
+            move || drop(listener)
+        });
+    }
+
+    // Bind click event to close context menu
+    {
         let context_menu_state = context_menu_state.clone();
-        Callback::from(move |_: MouseEvent| {
-            if context_menu_state.visible {
-                context_menu_state.set(ContextMenuState::hide());
-            }
-        })
-    };
+
+        use_effect_with((), move |_| {
+            let listener = gloo::utils::document()
+                .get_element_by_id(EDITOR_CANVAS_ID)
+                .map(|canvas| {
+                    gloo::events::EventListener::new(&canvas, "click", move |_event| {
+                        if context_menu_state.visible {
+                            context_menu_state.set(ContextMenuState::hide());
+                        }
+                    })
+                });
+
+            move || drop(listener)
+        });
+    }
 
     html! {
         <div class="marble-editor">
-            // Canvas container - Bevy renders here
-            <div class="marble-editor__canvas-container" {onclick}>
-                <canvas
-                    id={EDITOR_CANVAS_ID}
-                    class="marble-editor__canvas"
-                    {oncontextmenu}
-                />
-                // Loading overlay
-                if !bevy.initialized {
-                    <div class="marble-editor__loading">
-                        <div class="marble-editor__spinner"></div>
-                        <p>{"Initializing editor..."}</p>
-                    </div>
-                }
-            </div>
+            // NOTE: Canvas is now managed globally by App.rs
+            // Loading overlay
+            if !bevy.initialized {
+                <div class="marble-editor__loading">
+                    <div class="marble-editor__spinner"></div>
+                    <p>{"Initializing editor..."}</p>
+                </div>
+            }
 
             // Context menu
             <ContextMenu

@@ -10,6 +10,7 @@ use crate::bevy::{
     MarbleGameState, PreviewSequenceEvent, RemovePlayerEvent, ResetSimulationEvent,
     SpawnMarblesEvent, StartSimulationEvent, StopSimulationEvent,
 };
+use crate::bevy::plugin::AppMode;
 use crate::bevy::systems::editor::{EditorStateRes, SelectObjectEvent, SnapConfig, UpdateObjectEvent};
 use crate::game::Player;
 
@@ -28,6 +29,7 @@ pub fn process_commands(
     mut add_player_events: MessageWriter<AddPlayerEvent>,
     mut remove_player_events: MessageWriter<RemovePlayerEvent>,
     mut load_map_events: MessageWriter<LoadMapEvent>,
+    mut next_app_mode: ResMut<NextState<AppMode>>,
 ) {
     // Use drain_until_yield() to process game commands until Yield or empty.
     // This allows frame-separated command processing.
@@ -73,6 +75,19 @@ pub fn process_commands(
                 if let Some(ref mut local) = local_player {
                     local.set(player_id);
                 }
+            }
+            // Mode switching commands
+            GameCommand::InitGame => {
+                tracing::info!("[command] InitGame -> AppMode::Game");
+                next_app_mode.set(AppMode::Game);
+            }
+            GameCommand::InitEditor => {
+                tracing::info!("[command] InitEditor -> AppMode::Editor");
+                next_app_mode.set(AppMode::Editor);
+            }
+            GameCommand::ClearMode => {
+                tracing::info!("[command] ClearMode -> AppMode::Idle");
+                next_app_mode.set(AppMode::Idle);
             }
             // Yield is consumed by drain_until_yield(), should not reach here
             GameCommand::Yield => {}

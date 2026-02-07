@@ -25,6 +25,7 @@ pub fn handle_load_map(
     mut initial_transforms: ResMut<InitialTransforms>,
     mut keyframe_executors: ResMut<KeyframeExecutors>,
     existing_objects: Query<Entity, With<MapObjectMarker>>,
+    app_mode: Res<State<crate::bevy::plugin::AppMode>>,
 ) {
     for event in events.read() {
         // Clear existing map objects
@@ -143,8 +144,8 @@ pub fn handle_load_map(
             }
         }
 
-        // Auto-activate keyframes if there are autoplay sequences
-        if has_autoplay {
+        // Auto-activate keyframes only in Game mode
+        if has_autoplay && *app_mode.get() == crate::bevy::plugin::AppMode::Game {
             keyframe_executors.activate_all();
         }
 

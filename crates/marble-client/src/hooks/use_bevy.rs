@@ -19,7 +19,8 @@ use yew::prelude::*;
 // ============================================================================
 
 pub use marble_core::bevy::{
-    start_marble_game, start_marble_editor, send_command,
+    start_bevy_app, start_marble_game, start_marble_editor, send_command,
+    init_game_mode, init_editor_mode,
     get_connection_state, get_peers, get_peers_version,
     get_players, get_arrival_order, get_players_version,
     get_chat_messages, get_chat_version,
@@ -196,14 +197,12 @@ pub struct BevyProviderProps {
     pub children: Children,
     /// Canvas element ID.
     pub canvas_id: String,
-    /// Map configuration JSON.
-    pub config_json: String,
-    /// Whether to start as editor (vs game).
-    #[prop_or(false)]
-    pub editor_mode: bool,
 }
 
-/// Provider component that initializes Bevy and provides context.
+/// Provider component that initializes the unified Bevy app.
+///
+/// Starts the app in Idle mode. Pages are responsible for sending
+/// `init_game_mode` or `init_editor_mode` commands to switch modes.
 #[function_component(BevyProvider)]
 pub fn bevy_provider(props: &BevyProviderProps) -> Html {
     let initialized = use_state(|| false);
@@ -212,17 +211,13 @@ pub fn bevy_provider(props: &BevyProviderProps) -> Html {
     {
         let initialized = initialized.clone();
         let canvas_id = props.canvas_id.clone();
-        let config_json = props.config_json.clone();
-        let editor_mode = props.editor_mode;
 
         use_effect_with((), move |_| {
             // Register beforeunload handler to cleanup Bevy state on page reload
             let window = web_sys::window().expect("no global window");
             let beforeunload_closure = Closure::<dyn Fn()>::new(move || {
                 tracing::info!("beforeunload: requesting Bevy exit and cleaning up state");
-                // First request the app to exit (sends AppExit event)
                 request_bevy_exit();
-                // Then reset global state
                 reset_bevy_state();
             });
 
@@ -236,19 +231,11 @@ pub fn bevy_provider(props: &BevyProviderProps) -> Html {
             // Small delay to ensure canvas is mounted
             let initialized = initialized.clone();
             let timeout = gloo::timers::callback::Timeout::new(100, move || {
-                // Set initialized before calling app.run() which doesn't return
                 initialized.set(true);
-                tracing::info!("Bevy initializing...");
+                tracing::info!("Bevy initializing (unified app)...");
 
-                // Spawn Bevy in a separate async context so it doesn't block
                 wasm_bindgen_futures::spawn_local(async move {
-                    let result = if editor_mode {
-                        start_marble_editor(&canvas_id, &config_json)
-                    } else {
-                        start_marble_game(&canvas_id, &config_json)
-                    };
-
-                    if let Err(e) = result {
+                    if let Err(e) = start_bevy_app(&canvas_id) {
                         tracing::error!("Failed to initialize Bevy: {:?}", e);
                     }
                 });
@@ -257,19 +244,11 @@ pub fn bevy_provider(props: &BevyProviderProps) -> Html {
             // Cleanup function - called on unmount
             let window_clone = web_sys::window().expect("no global window");
             move || {
-                // Remove beforeunload listener
                 let _ = window_clone.remove_event_listener_with_callback(
                     "beforeunload",
                     beforeunload_closure.as_ref().unchecked_ref(),
                 );
-
-                // NOTE: We do NOT call request_bevy_exit() or reset_bevy_state() here.
-                // The Bevy App must stay alive to avoid RecreationAttempt errors
-                // when transitioning between rooms. The App will only be cleaned up
-                // on actual page unload (handled by beforeunload listener).
-                tracing::info!("BevyProvider unmounting: keeping Bevy app alive for room transition");
-
-                // Drop timeout to prevent it from firing after unmount
+                tracing::info!("BevyProvider unmounting: keeping Bevy app alive for mode transition");
                 drop(timeout);
             }
         });
@@ -279,12 +258,10 @@ pub fn bevy_provider(props: &BevyProviderProps) -> Html {
         initialized: *initialized,
     };
 
-    // Canvas style: fixed position, full screen, behind other content
     let canvas_style = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;";
 
     html! {
         <ContextProvider<BevyContext> context={context}>
-            // Canvas for Bevy rendering (fixed position, full screen)
             <canvas
                 id={props.canvas_id.clone()}
                 class="bevy-canvas"

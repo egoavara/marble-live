@@ -26,11 +26,7 @@ pub struct MarbleGameProps {
 #[function_component(MarbleGame)]
 pub fn marble_game(props: &MarbleGameProps) -> Html {
     html! {
-        <BevyProvider
-            canvas_id={GAME_CANVAS_ID}
-            config_json={props.config_json.clone()}
-            editor_mode={false}
-        >
+        <BevyProvider canvas_id={GAME_CANVAS_ID}>
             <MarbleGameInner on_game_end={props.on_game_end.clone()} />
         </BevyProvider>
     }

@@ -3,7 +3,6 @@
 //! Uses MarbleEditor (Bevy) for rendering and interaction,
 //! with Yew UI panels for property editing.
 
-use marble_core::RouletteConfig;
 use yew::prelude::*;
 
 use crate::components::editor::{EditorToolbar, ObjectList, PropertyPanel, TimelinePanel};
@@ -133,10 +132,6 @@ pub fn editor_page() -> Html {
         })
     };
 
-    // Serialize config for Bevy
-    let config_json = serde_json::to_string(&editor_state.config)
-        .unwrap_or_else(|_| serde_json::to_string(&RouletteConfig::default_classic()).unwrap());
-
     // Keyboard shortcuts
     let on_kb_copy = {
         let on_copy = editor_state.on_copy.clone();
@@ -181,11 +176,10 @@ pub fn editor_page() -> Html {
     });
 
     html! {
-        <Layout show_settings={false}>
+        <Layout show_settings={false} transparent={true}>
             <div class="editor-fullscreen">
                 // Bevy-rendered canvas with gizmos
                 <MarbleEditor
-                    config_json={config_json}
                     has_clipboard={editor_state.clipboard.is_some()}
                     selected_object={editor_state.selected_object}
                     on_copy={editor_state.on_copy.clone()}

@@ -338,6 +338,14 @@ pub enum GameCommand {
     /// Frame boundary marker - commands after this are processed in the next frame.
     Yield,
 
+    // ========== Mode Commands ==========
+    /// Switch to game mode.
+    InitGame,
+    /// Switch to editor mode.
+    InitEditor,
+    /// Clear current mode (return to Idle).
+    ClearMode,
+
     // ========== Camera Commands ==========
     /// Set the camera mode.
     SetCameraMode { mode: crate::bevy::CameraMode },

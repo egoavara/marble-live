@@ -12,6 +12,9 @@ pub struct LayoutProps {
     /// Whether to show the meatball menu (default: true).
     #[prop_or(true)]
     pub show_settings: bool,
+    /// Whether to make layout transparent for Bevy canvas (Play/Editor pages).
+    #[prop_or(false)]
+    pub transparent: bool,
 }
 
 /// Minimal layout component with meatball menu in top-right corner.
@@ -41,8 +44,14 @@ pub fn layout(props: &LayoutProps) -> Html {
         })
     };
 
+    let layout_class = if props.transparent {
+        "app-layout app-layout--transparent"
+    } else {
+        "app-layout"
+    };
+
     html! {
-        <div class="app-layout">
+        <div class={layout_class}>
             <div class="top-left-logo" onmouseenter={on_logo_mouseenter} onmouseleave={on_logo_mouseleave}>
                 <LogoExpandable state={*logo_hovered} size={28} />
             </div>

@@ -19,8 +19,8 @@ use crate::hooks::{
     PlayerInfo,
 };
 
-/// Canvas ID for the game view.
-pub const GAME_VIEW_CANVAS_ID: &str = "game-view-canvas";
+/// Canvas ID for the game view (uses the global canvas from App.rs).
+pub use crate::app::BEVY_CANVAS_ID as GAME_VIEW_CANVAS_ID;
 
 /// Game phase - tracks whether we're in lobby or playing
 #[derive(Clone, Copy, PartialEq, Debug)]

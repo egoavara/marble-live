@@ -73,7 +73,7 @@ pub fn play_page(props: &PlayPageProps) -> Html {
     };
 
     html! {
-        <Layout>
+        <Layout transparent={true}>
             <div class="game-fullscreen">
                 {content}
             </div>

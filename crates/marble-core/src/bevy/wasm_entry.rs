@@ -10,7 +10,7 @@ use bevy::winit::{UpdateMode, WinitSettings};
 use wasm_bindgen::prelude::*;
 
 use crate::bevy::{
-    CameraMode, CommandQueue, GameCommand, MarbleEditorPlugin, MarbleGamePlugin, StateStores,
+    CameraMode, CommandQueue, GameCommand, MarbleUnifiedPlugin, StateStores,
 };
 use crate::map::RouletteConfig;
 use crate::marble::Color;
@@ -110,39 +110,28 @@ pub fn check_exit_system(mut exit: MessageWriter<bevy::app::AppExit>) {
 // Initialization
 // ============================================================================
 
-/// Starts the marble game with the given canvas ID and configuration.
+/// Starts the unified Bevy app in Idle mode.
 ///
-/// If the Bevy App is already running, this will reuse it by calling
-/// `prepare_new_room()` instead of creating a new App instance.
-/// This avoids the RecreationAttempt error in WASM.
+/// The app starts without any game or editor mode active.
+/// Use `init_game_mode()` or `init_editor_mode()` to switch modes via commands.
 #[wasm_bindgen]
-pub fn start_marble_game(canvas_id: &str, config_json: &str) -> Result<(), JsValue> {
+pub fn start_bevy_app(canvas_id: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
 
-    tracing::info!("[marble] start_marble_game called");
+    tracing::info!("[marble] start_bevy_app called");
 
-    // If the app is already running, reuse it instead of creating a new one
     if BEVY_APP_STARTED.load(Ordering::SeqCst) {
-        tracing::info!("[marble] App already running, preparing new room instead");
-        return prepare_new_room(config_json);
+        tracing::info!("[marble] App already running, skipping creation");
+        return Ok(());
     }
-
-    let config: RouletteConfig = serde_json::from_str(config_json)
-        .map_err(|e| JsValue::from_str(&format!("Failed to parse config: {}", e)))?;
-
-    tracing::info!("[marble] config parsed");
 
     let command_queue = get_command_queue().clone();
     let state_stores = get_state_stores().clone();
 
-    // Queue the initial map load command
-    command_queue.push(GameCommand::LoadMap { config });
-
-    tracing::info!("[marble] creating Bevy app for canvas: #{}", canvas_id);
+    tracing::info!("[marble] creating unified Bevy app for canvas: #{}", canvas_id);
 
     let mut app = App::new();
 
-    // Configure for WASM
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
@@ -157,100 +146,115 @@ pub fn start_marble_game(canvas_id: &str, config_json: &str) -> Result<(), JsVal
             .disable::<bevy::log::LogPlugin>(),
     );
 
-    // Use game-friendly update settings (continuous when focused)
     app.insert_resource(WinitSettings {
         focused_mode: UpdateMode::Continuous,
         unfocused_mode: UpdateMode::Continuous,
     });
 
-    tracing::info!("[marble] adding MarbleGamePlugin");
+    tracing::info!("[marble] adding MarbleUnifiedPlugin");
+    app.add_plugins(MarbleUnifiedPlugin::new(command_queue, state_stores));
 
-    // Add game plugin with shared handles
-    app.add_plugins(MarbleGamePlugin::new(command_queue, state_stores));
-
-    // Mark app as started before running
     BEVY_APP_STARTED.store(true, Ordering::SeqCst);
 
     tracing::info!("[marble] calling app.run()");
-
-    // Run the app (in WASM, this uses requestAnimationFrame internally)
     app.run();
-
-    // Note: app.run() should return immediately in WASM
     tracing::info!("[marble] app.run() returned");
 
     Ok(())
 }
 
-/// Starts the marble editor with the given canvas ID and configuration.
+/// Initialize game mode with the given map configuration.
 ///
-/// If the Bevy App is already running, this will reuse it by calling
-/// `prepare_new_room()` instead of creating a new App instance.
-/// This avoids the RecreationAttempt error in WASM.
+/// Command sequence: ClearMode → Yield → InitGame → Yield → ClearMarbles → ClearPlayers → LoadMap
 #[wasm_bindgen]
-pub fn start_marble_editor(canvas_id: &str, config_json: &str) -> Result<(), JsValue> {
-    console_error_panic_hook::set_once();
-
-    tracing::info!("[marble] start_marble_editor called");
-
-    // If the app is already running, reuse it instead of creating a new one
-    if BEVY_APP_STARTED.load(Ordering::SeqCst) {
-        tracing::info!("[marble] App already running, preparing new room instead");
-        return prepare_new_room(config_json);
+pub fn init_game_mode(config_json: &str) -> Result<(), JsValue> {
+    if is_shutdown_requested() {
+        return Err(JsValue::from_str("Bevy app is shutting down"));
     }
 
     let config: RouletteConfig = serde_json::from_str(config_json)
         .map_err(|e| JsValue::from_str(&format!("Failed to parse config: {}", e)))?;
 
-    tracing::info!("[marble] config parsed");
+    let queue = get_command_queue();
+    let stores = get_state_stores();
 
-    let command_queue = get_command_queue().clone();
-    let state_stores = get_state_stores().clone();
+    tracing::info!("[marble] init_game_mode: switching to Game mode");
 
-    // Queue the initial map load command
-    command_queue.push(GameCommand::LoadMap { config });
+    stores.reset_for_new_room();
 
-    tracing::info!("[marble] creating Bevy app for canvas: #{}", canvas_id);
-
-    let mut app = App::new();
-
-    // Configure for WASM
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    canvas: Some(format!("#{}", canvas_id)),
-                    fit_canvas_to_parent: true,
-                    prevent_default_event_handling: true,
-                    ..default()
-                }),
-                ..default()
-            })
-            .disable::<bevy::log::LogPlugin>(),
-    );
-
-    // Use game-friendly update settings (continuous when focused)
-    app.insert_resource(WinitSettings {
-        focused_mode: UpdateMode::Continuous,
-        unfocused_mode: UpdateMode::Continuous,
-    });
-
-    tracing::info!("[marble] adding MarbleEditorPlugin");
-
-    // Add editor plugin with shared handles
-    app.add_plugins(MarbleEditorPlugin::new(command_queue, state_stores));
-
-    // Mark app as started before running
-    BEVY_APP_STARTED.store(true, Ordering::SeqCst);
-
-    tracing::info!("[marble] calling app.run()");
-
-    // Run the app
-    app.run();
-
-    tracing::info!("[marble] app.run() returned");
+    queue.push(GameCommand::ClearMode);
+    queue.push(GameCommand::Yield);
+    queue.push(GameCommand::InitGame);
+    queue.push(GameCommand::Yield);
+    queue.push(GameCommand::ClearMarbles);
+    queue.push(GameCommand::ClearPlayers);
+    queue.push(GameCommand::LoadMap { config });
 
     Ok(())
+}
+
+/// Initialize editor mode with the given map configuration.
+///
+/// Command sequence: ClearMode → Yield → InitEditor → Yield → ClearMarbles → ClearPlayers → LoadMap
+#[wasm_bindgen]
+pub fn init_editor_mode(config_json: &str) -> Result<(), JsValue> {
+    if is_shutdown_requested() {
+        return Err(JsValue::from_str("Bevy app is shutting down"));
+    }
+
+    let config: RouletteConfig = serde_json::from_str(config_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse config: {}", e)))?;
+
+    let queue = get_command_queue();
+    let stores = get_state_stores();
+
+    tracing::info!("[marble] init_editor_mode: switching to Editor mode");
+
+    stores.reset_for_new_room();
+
+    queue.push(GameCommand::ClearMode);
+    queue.push(GameCommand::Yield);
+    queue.push(GameCommand::InitEditor);
+    queue.push(GameCommand::Yield);
+    queue.push(GameCommand::ClearMarbles);
+    queue.push(GameCommand::ClearPlayers);
+    queue.push(GameCommand::LoadMap { config });
+
+    Ok(())
+}
+
+/// Legacy wrapper: starts the marble game.
+///
+/// If the Bevy App is already running, delegates to `init_game_mode`.
+/// Otherwise, starts the unified app and then initializes game mode.
+#[wasm_bindgen]
+pub fn start_marble_game(canvas_id: &str, config_json: &str) -> Result<(), JsValue> {
+    console_error_panic_hook::set_once();
+
+    tracing::info!("[marble] start_marble_game called (legacy wrapper)");
+
+    if !BEVY_APP_STARTED.load(Ordering::SeqCst) {
+        start_bevy_app(canvas_id)?;
+    }
+
+    init_game_mode(config_json)
+}
+
+/// Legacy wrapper: starts the marble editor.
+///
+/// If the Bevy App is already running, delegates to `init_editor_mode`.
+/// Otherwise, starts the unified app and then initializes editor mode.
+#[wasm_bindgen]
+pub fn start_marble_editor(canvas_id: &str, config_json: &str) -> Result<(), JsValue> {
+    console_error_panic_hook::set_once();
+
+    tracing::info!("[marble] start_marble_editor called (legacy wrapper)");
+
+    if !BEVY_APP_STARTED.load(Ordering::SeqCst) {
+        start_bevy_app(canvas_id)?;
+    }
+
+    init_editor_mode(config_json)
 }
 
 // ============================================================================
@@ -275,32 +279,11 @@ pub fn is_bevy_app_running() -> bool {
 
 /// Prepare for a new room by resetting state and loading a new map.
 ///
-/// This reuses the existing Bevy App instance instead of creating a new one,
-/// avoiding the RecreationAttempt error in WASM where EventLoop can only be
-/// created once.
+/// Delegates to `init_game_mode` for proper mode transition.
 #[wasm_bindgen]
 pub fn prepare_new_room(config_json: &str) -> Result<(), JsValue> {
-    if is_shutdown_requested() {
-        return Err(JsValue::from_str("Bevy app is shutting down"));
-    }
-
-    let config: RouletteConfig = serde_json::from_str(config_json)
-        .map_err(|e| JsValue::from_str(&format!("Failed to parse config: {}", e)))?;
-
-    let queue = get_command_queue();
-    let stores = get_state_stores();
-
-    tracing::info!("[marble] prepare_new_room: resetting state and loading new map");
-
-    // 1. Reset all StateStores for the new room
-    stores.reset_for_new_room();
-
-    // 2. Queue commands to reset game state using existing command system
-    queue.push(GameCommand::ClearMarbles);
-    queue.push(GameCommand::ClearPlayers);
-    queue.push(GameCommand::LoadMap { config });
-
-    Ok(())
+    tracing::info!("[marble] prepare_new_room: delegating to init_game_mode");
+    init_game_mode(config_json)
 }
 
 /// Sends a command to the running game/editor.
@@ -458,6 +441,11 @@ pub fn send_command(command_json: &str) -> Result<(), JsValue> {
             let player_id = value["player_id"].as_u64().map(|id| id as u32);
             GameCommand::SetLocalPlayerId { player_id }
         }
+
+        // Mode commands
+        "init_game" => GameCommand::InitGame,
+        "init_editor" => GameCommand::InitEditor,
+        "clear_mode" => GameCommand::ClearMode,
 
         _ => {
             return Err(JsValue::from_str(&format!(

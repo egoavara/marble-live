@@ -74,6 +74,7 @@
     background: $color-bg-primary;
     border-radius: $radius-lg;
     min-height: 300px;
+    pointer-events: auto;
 }
 
 .connecting-spinner {
@@ -125,10 +126,6 @@
     overflow: hidden;
     background: transparent; // Canvas is rendered globally
     pointer-events: none;
-
-    > * {
-        pointer-events: auto;
-    }
 }
 
 .game-canvas-container {

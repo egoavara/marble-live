@@ -12,6 +12,7 @@
     justify-content: center;
     z-index: 200;
     animation: fadeIn 0.3s ease;
+    pointer-events: auto;
 }
 
 .winner-modal {
@@ -215,6 +216,7 @@
     justify-content: center;
     z-index: $z-modal;
     cursor: pointer;
+    pointer-events: auto;
 }
 
 .winner-overlay .winner-modal {
