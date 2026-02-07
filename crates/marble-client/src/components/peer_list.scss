@@ -12,6 +12,7 @@
     width: 220px;
     @include floating-panel;
     z-index: $z-floating-panel;
+    pointer-events: auto;
 }
 
 .peer-list-header {

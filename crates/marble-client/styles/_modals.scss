@@ -11,6 +11,7 @@
     align-items: center;
     justify-content: center;
     z-index: $z-modal;
+    pointer-events: auto;
 }
 
 // ===== 기본 모달 =====

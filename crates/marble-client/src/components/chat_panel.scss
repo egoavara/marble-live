@@ -17,6 +17,7 @@
     z-index: $z-floating-panel;
     display: flex;
     flex-direction: column;
+    pointer-events: auto;
 
     &.inactive .chat-panel-messages {
         opacity: 0;

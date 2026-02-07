@@ -12,8 +12,9 @@ use super::peer_list::ArrivalInfo;
 use super::reaction_panel::{REACTION_COOLDOWN_MS, get_reaction_emoji};
 use super::{ChatPanel, PeerList, ReactionDisplay};
 use crate::hooks::{
-    P2pRoomConfig, PlayerInfo, send_command, use_bevy, use_bevy_game, use_bevy_players,
-    use_config_secret, use_config_username, use_p2p_room_with_credentials,
+    P2pRoomConfig, PlayerInfo, send_command, use_bevy, use_bevy_chat, use_bevy_game,
+    use_bevy_players, use_bevy_reactions, use_config_secret, use_config_username,
+    use_p2p_room_with_credentials,
 };
 
 /// Canvas ID for the game view (uses the global canvas from App.rs).
@@ -113,7 +114,8 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
 
     let peers = p2p.peers();
     let connection_state = p2p.state();
-    let messages = p2p.messages();
+    let chat_messages = use_bevy_chat();
+    let reactions = use_bevy_reactions();
     let is_connected = matches!(
         connection_state,
         crate::services::p2p::P2pConnectionState::Connected
@@ -490,13 +492,13 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
             }
 
             // Floating emoji reactions
-            <ReactionDisplay messages={messages.clone()} />
+            <ReactionDisplay reactions={reactions} />
 
             // Bottom-right: Chat panel with integrated reactions
             <ChatPanel
                 p2p={p2p}
                 is_connected={is_connected}
-                messages={messages}
+                messages={chat_messages}
                 my_player_id={player_id}
                 on_reaction_send={on_reaction_send}
                 reaction_disabled={reaction_disabled}

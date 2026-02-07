@@ -1,10 +1,9 @@
 //! ReactionDisplay component - floating emoji animations.
 
 use gloo::timers::callback::Interval;
-use marble_proto::play::p2p_message::Payload;
 use yew::prelude::*;
 
-use crate::services::p2p::ReceivedMessage;
+use crate::hooks::Reaction;
 
 /// Duration of the float animation in milliseconds
 const ANIMATION_DURATION_MS: f64 = 3000.0;
@@ -15,7 +14,7 @@ const CLEANUP_INTERVAL_MS: u32 = 500;
 /// Floating emoji state
 #[derive(Clone)]
 struct FloatingEmoji {
-    id: String,
+    id: u64,
     emoji: String,
     x_percent: f32,
     created_at: f64,
@@ -30,8 +29,8 @@ impl FloatingEmoji {
 /// Props for the ReactionDisplay component.
 #[derive(Properties, PartialEq)]
 pub struct ReactionDisplayProps {
-    /// All messages including reactions
-    pub messages: Vec<ReceivedMessage>,
+    /// Reaction data from Bevy
+    pub reactions: Vec<Reaction>,
 }
 
 /// ReactionDisplay component - shows floating emoji animations.
@@ -39,7 +38,7 @@ pub struct ReactionDisplayProps {
 pub fn reaction_display(props: &ReactionDisplayProps) -> Html {
     // 실제 데이터는 RefCell에 저장 (렌더링과 독립적으로 수정 가능)
     let emojis_ref = use_mut_ref(Vec::<FloatingEmoji>::new);
-    let processed_ids = use_mut_ref(Vec::<String>::new);
+    let processed_ids = use_mut_ref(Vec::<u64>::new);
 
     // re-render를 트리거하기 위한 상태 (값 자체는 중요하지 않음)
     let render_version = use_state(|| 0u64);
@@ -49,31 +48,29 @@ pub fn reaction_display(props: &ReactionDisplayProps) -> Html {
         let emojis_ref = emojis_ref.clone();
         let processed_ids = processed_ids.clone();
         let render_version = render_version.clone();
-        let messages = props.messages.clone();
+        let reactions = props.reactions.clone();
 
-        use_effect_with(messages.len(), move |_| {
+        use_effect_with(reactions.len(), move |_| {
             let now = js_sys::Date::now();
             let mut processed = processed_ids.borrow_mut();
             let mut emojis = emojis_ref.borrow_mut();
             let mut changed = false;
 
-            for msg in messages.iter() {
-                if processed.contains(&msg.id) {
+            for reaction in reactions.iter() {
+                if processed.contains(&reaction.id) {
                     continue;
                 }
 
-                if let Payload::Reaction(reaction) = &msg.payload {
-                    let x_percent = 10.0 + (js_sys::Math::random() as f32) * 80.0;
+                let x_percent = 10.0 + (js_sys::Math::random() as f32) * 80.0;
 
-                    emojis.push(FloatingEmoji {
-                        id: msg.id.clone(),
-                        emoji: reaction.emoji.clone(),
-                        x_percent,
-                        created_at: now,
-                    });
-                    processed.push(msg.id.clone());
-                    changed = true;
-                }
+                emojis.push(FloatingEmoji {
+                    id: reaction.id,
+                    emoji: reaction.emoji.clone(),
+                    x_percent,
+                    created_at: now,
+                });
+                processed.push(reaction.id);
+                changed = true;
             }
 
             // 만료된 이모지 정리
@@ -134,7 +131,7 @@ pub fn reaction_display(props: &ReactionDisplayProps) -> Html {
                     <span
                         class="floating-emoji"
                         style={style}
-                        key={emoji.id.clone()}
+                        key={emoji.id.to_string()}
                     >
                         { &emoji.emoji }
                     </span>

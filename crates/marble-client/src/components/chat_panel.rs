@@ -1,12 +1,12 @@
 //! ChatPanel component for P2P chat messaging with integrated reactions.
 
-use marble_proto::play::p2p_message::Payload;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_icons::{Icon, IconData};
 
 use super::reaction_panel::{ReactionPanel, get_last_emoji, save_last_emoji};
-use crate::services::p2p::{P2pRoomHandle, ReceivedMessage};
+use crate::hooks::ChatMessage;
+use crate::services::p2p::P2pRoomHandle;
 
 /// Inactivity timeout in milliseconds (15 seconds).
 const INACTIVITY_TIMEOUT_MS: u32 = 15000;
@@ -19,7 +19,7 @@ pub struct ChatPanelProps {
     /// Whether P2P is connected (passed separately for reactivity)
     pub is_connected: bool,
     /// Chat messages (passed separately for reactivity)
-    pub messages: Vec<ReceivedMessage>,
+    pub messages: Vec<ChatMessage>,
     /// Current player ID
     pub my_player_id: String,
     /// Callback when a reaction is sent (for cooldown management)
@@ -60,12 +60,7 @@ pub fn chat_panel(props: &ChatPanelProps) -> Html {
         });
     }
 
-    // Filter chat messages from props
-    let messages: Vec<_> = props
-        .messages
-        .iter()
-        .filter(|m| matches!(&m.payload, Payload::ChatMessage(_)))
-        .collect();
+    let messages = &props.messages;
     let messages_len = messages.len();
     let my_player_id = &props.my_player_id;
 
@@ -181,24 +176,13 @@ pub fn chat_panel(props: &ChatPanelProps) -> Html {
         <div class={panel_class}>
             <div class="chat-panel-messages">
                 { for messages.iter().map(|msg| {
-                    let is_self = match &msg.payload {
-                        Payload::ChatMessage(chat) => chat.player_id == *my_player_id,
-                        _ => false,
-                    };
-                    let sender = match &msg.payload {
-                        Payload::ChatMessage(chat) => chat.player_id.clone(),
-                        _ => "Unknown".to_string(),
-                    };
-                    let content = match &msg.payload {
-                        Payload::ChatMessage(chat) => chat.content.clone(),
-                        _ => String::new(),
-                    };
+                    let is_self = msg.sender_id == *my_player_id;
                     let msg_class = if is_self { "chat-message self" } else { "chat-message" };
 
                     html! {
-                        <div class={msg_class} key={msg.id.clone()}>
-                            <span class="chat-sender">{sender}{":"}</span>
-                            <span class="chat-content">{content}</span>
+                        <div class={msg_class} key={msg.id.to_string()}>
+                            <span class="chat-sender">{&msg.sender_id}{":"}</span>
+                            <span class="chat-content">{&msg.content}</span>
                         </div>
                     }
                 })}
