@@ -7,7 +7,7 @@ use web_sys::{HtmlInputElement, Url};
 use yew::prelude::*;
 use yew_icons::{Icon, IconData};
 
-use crate::hooks::{send_command, SnapConfigSummary};
+use crate::hooks::{SnapConfigSummary, send_command};
 
 /// Props for the EditorToolbar component.
 #[derive(Properties, PartialEq)]
@@ -55,7 +55,10 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
         Callback::from(move |_: MouseEvent| {
             if is_dirty {
                 let confirmed = web_sys::window()
-                    .and_then(|w| w.confirm_with_message("Unsaved changes will be lost. Continue?").ok())
+                    .and_then(|w| {
+                        w.confirm_with_message("Unsaved changes will be lost. Continue?")
+                            .ok()
+                    })
                     .unwrap_or(false);
                 if !confirmed {
                     return;
@@ -113,7 +116,10 @@ pub fn editor_toolbar(props: &EditorToolbarProps) -> Html {
         Callback::from(move |e: Event| {
             if is_dirty {
                 let confirmed = web_sys::window()
-                    .and_then(|w| w.confirm_with_message("Unsaved changes will be lost. Continue?").ok())
+                    .and_then(|w| {
+                        w.confirm_with_message("Unsaved changes will be lost. Continue?")
+                            .ok()
+                    })
                     .unwrap_or(false);
                 if !confirmed {
                     return;

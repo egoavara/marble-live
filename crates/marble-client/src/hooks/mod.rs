@@ -14,13 +14,13 @@ mod use_room_player;
 mod use_userhash;
 
 pub use use_bevy::*;
-pub use use_keyboard_shortcuts::*;
 pub use use_config::*;
 pub use use_editor_state::*;
 pub use use_fingerprint::use_fingerprint;
-pub use use_game_loop::{use_game_loop, GameLoopHandle, GameLoopState};
+pub use use_game_loop::{GameLoopHandle, GameLoopState, use_game_loop};
 pub use use_grpc_room_service::use_grpc_room_service;
 pub use use_join_room::*;
+pub use use_keyboard_shortcuts::*;
 pub use use_localstorage::use_localstorage;
 pub use use_p2p_room::*;
 // Re-export P2P types for hook users

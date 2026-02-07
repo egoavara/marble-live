@@ -51,7 +51,6 @@ pub fn update_keyframe_animations(
         current_positions.insert(target.object_id.clone(), ([pos.x, pos.y], rot));
     }
 
-
     // Convert initial transforms to the format expected by KeyframeExecutor
     let initial_transforms_map: HashMap<String, ([f32; 2], f32)> = initial_transforms
         .transforms

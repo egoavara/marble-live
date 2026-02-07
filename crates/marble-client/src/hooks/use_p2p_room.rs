@@ -8,9 +8,7 @@ use std::rc::Rc;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-use crate::services::p2p::{
-    P2pConnectionState, P2pRoomConfig, P2pRoomHandle, P2pRoomState,
-};
+use crate::services::p2p::{P2pConnectionState, P2pRoomConfig, P2pRoomHandle, P2pRoomState};
 
 // Re-export types for convenience
 pub use crate::services::p2p::{P2pPeerInfo, ReceivedMessage};
@@ -89,11 +87,7 @@ pub fn use_p2p_room_with_credentials(
 
 /// Internal hook implementation shared by all variants
 #[hook]
-fn use_p2p_room_internal(
-    room_id: &str,
-    player_id: &str,
-    config: P2pRoomConfig,
-) -> P2pRoomHandle {
+fn use_p2p_room_internal(room_id: &str, player_id: &str, config: P2pRoomConfig) -> P2pRoomHandle {
     let player_id = player_id.to_string();
 
     // Yew state handles for reactive updates
@@ -105,16 +99,13 @@ fn use_p2p_room_internal(
     let config_clone = config.clone();
 
     // Create inner state
-    let inner = use_memo(
-        (room_id_owned.clone(), player_id.clone()),
-        |(rid, pid)| {
-            Rc::new(RefCell::new(P2pRoomState::new(
-                rid.clone(),
-                pid.clone(),
-                config_clone.clone(),
-            )))
-        },
-    );
+    let inner = use_memo((room_id_owned.clone(), player_id.clone()), |(rid, pid)| {
+        Rc::new(RefCell::new(P2pRoomState::new(
+            rid.clone(),
+            pid.clone(),
+            config_clone.clone(),
+        )))
+    });
 
     // Handle room_id changes
     {

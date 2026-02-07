@@ -22,7 +22,11 @@ impl ContextMenuState {
     }
 
     /// Show context menu at the given position.
-    pub fn show(screen_pos: (f32, f32), world_pos: (f32, f32), target_index: Option<usize>) -> Self {
+    pub fn show(
+        screen_pos: (f32, f32),
+        world_pos: (f32, f32),
+        target_index: Option<usize>,
+    ) -> Self {
         Self {
             visible: true,
             screen_pos,
@@ -136,8 +140,7 @@ pub fn context_menu(props: &ContextMenuProps) -> Html {
 
     let style = format!(
         "left: {}px; top: {}px;",
-        props.state.screen_pos.0,
-        props.state.screen_pos.1
+        props.state.screen_pos.0, props.state.screen_pos.1
     );
 
     let has_object = props.state.target_index.is_some();

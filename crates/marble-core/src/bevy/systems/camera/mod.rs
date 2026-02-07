@@ -32,8 +32,8 @@ pub fn apply_camera_smoothing(
             .lerp(game_camera.target_position, game_camera.smoothing);
 
         // Interpolate zoom
-        game_camera.zoom = game_camera.zoom
-            + (game_camera.target_zoom - game_camera.zoom) * game_camera.smoothing;
+        game_camera.zoom =
+            game_camera.zoom + (game_camera.target_zoom - game_camera.zoom) * game_camera.smoothing;
 
         // Apply to transform
         transform.translation.x = game_camera.target.x;

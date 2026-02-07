@@ -82,7 +82,11 @@ struct MarbleEditorInnerProps {
 /// Convert screen position to world position.
 /// This is a simplified conversion - in a real implementation,
 /// you'd need to account for camera position and zoom.
-fn screen_to_world(screen_x: f32, screen_y: f32, canvas: &web_sys::HtmlCanvasElement) -> (f32, f32) {
+fn screen_to_world(
+    screen_x: f32,
+    screen_y: f32,
+    canvas: &web_sys::HtmlCanvasElement,
+) -> (f32, f32) {
     let rect = canvas.get_bounding_client_rect();
     let canvas_width = rect.width() as f32;
     let canvas_height = rect.height() as f32;

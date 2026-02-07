@@ -20,8 +20,8 @@ mod logo_expandable;
 mod meatball;
 mod modal;
 pub mod network_visualization;
-mod peer_list;
 pub mod peer_instance_card;
+mod peer_list;
 // mod peer_status;
 mod player_dashboard;
 // mod player_legend;
@@ -36,17 +36,17 @@ pub use camera_controls::*;
 pub use chat_panel::*;
 #[allow(unused_imports)]
 pub use game_view::*;
-pub use marble_editor::*;
-pub use marble_game::*;
 pub use layout::*;
 pub use logo::*;
 pub use logo_expandable::*;
+pub use marble_editor::*;
+pub use marble_game::*;
 pub use meatball::*;
 pub use modal::*;
 #[allow(unused_imports)]
 pub use network_visualization::{NetworkVisualization, PeerNetworkInfo};
-pub use peer_list::*;
 pub use peer_instance_card::{PeerConfig, PeerInstanceCard};
+pub use peer_list::*;
 #[allow(unused_imports)]
 pub use player_dashboard::*;
 pub use reaction_display::*;

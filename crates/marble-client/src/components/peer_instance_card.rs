@@ -8,7 +8,9 @@ use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 use crate::components::network_visualization::PeerNetworkInfo;
-use crate::hooks::{use_grpc_room_service, use_p2p_room_with_credentials, P2pConnectionState, P2pRoomConfig};
+use crate::hooks::{
+    P2pConnectionState, P2pRoomConfig, use_grpc_room_service, use_p2p_room_with_credentials,
+};
 
 /// Configuration for a single peer instance
 #[derive(Clone, PartialEq)]
@@ -41,8 +43,7 @@ pub struct PeerInstanceCardProps {
 
 /// Peer colors for consistent styling
 const PEER_COLORS: [&str; 8] = [
-    "#667eea", "#4caf50", "#ff9800", "#e91e63",
-    "#00bcd4", "#9c27b0", "#ff5722", "#3f51b5",
+    "#667eea", "#4caf50", "#ff9800", "#e91e63", "#00bcd4", "#9c27b0", "#ff5722", "#3f51b5",
 ];
 
 /// A single peer instance card component

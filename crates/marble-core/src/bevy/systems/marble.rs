@@ -3,15 +3,18 @@
 //! Handles marble spawning, tracking, and visual updates.
 
 use bevy::prelude::*;
-use tracing::warn;
-use bevy_rapier2d::prelude::*;
 use rand::Rng;
+use rapier2d::prelude::*;
+use tracing::warn;
 
+use crate::bevy::plugin::EditorState;
+use crate::bevy::rapier_plugin::{
+    PhysicsBody, PhysicsExternalForce, PhysicsWorldRes, USER_DATA_MARBLE, encode_user_data,
+};
 use crate::bevy::{
     ClearMarblesEvent, DeterministicRng, GameContextRes, MapConfig, Marble, MarbleGameState,
     MarbleVisual, SpawnMarblesAtEvent, SpawnMarblesEvent,
 };
-use crate::bevy::plugin::EditorState;
 use crate::map::{EvaluatedShape, ObjectRole};
 use crate::marble::DEFAULT_MARBLE_RADIUS;
 
@@ -28,6 +31,7 @@ pub fn handle_spawn_marbles(
     mut rng: ResMut<DeterministicRng>,
     game_context: Res<GameContextRes>,
     editor_state: Option<Res<State<EditorState>>>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for _ in events.read() {
         // In editor mode, only allow spawning during simulation
@@ -51,7 +55,12 @@ pub fn handle_spawn_marbles(
             continue;
         };
 
-        let Some(spawner_obj) = config.0.objects.iter().find(|o| o.role == ObjectRole::Spawner) else {
+        let Some(spawner_obj) = config
+            .0
+            .objects
+            .iter()
+            .find(|o| o.role == ObjectRole::Spawner)
+        else {
             warn!("No spawner found in map config");
             continue;
         };
@@ -70,6 +79,7 @@ pub fn handle_spawn_marbles(
 
             let entity = spawn_marble_at(
                 &mut commands,
+                &mut physics,
                 player.id,
                 player.color,
                 Vec2::new(x, y),
@@ -84,11 +94,16 @@ pub fn handle_spawn_marbles(
 pub fn handle_clear_marbles(
     mut commands: Commands,
     mut events: MessageReader<ClearMarblesEvent>,
-    marbles: Query<Entity, With<Marble>>,
+    marbles: Query<(Entity, Option<&PhysicsBody>), With<Marble>>,
     mut game_state: ResMut<MarbleGameState>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for _ in events.read() {
-        for entity in marbles.iter() {
+        for (entity, body) in marbles.iter() {
+            // Remove from physics world
+            if let Some(body) = body {
+                physics.world.remove_rigid_body(body.0);
+            }
             commands.entity(entity).despawn();
         }
         game_state.arrival_order.clear();
@@ -100,6 +115,7 @@ pub fn handle_spawn_marbles_at(
     mut commands: Commands,
     mut events: MessageReader<SpawnMarblesAtEvent>,
     game_state: Res<MarbleGameState>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for event in events.read() {
         if game_state.players.is_empty() {
@@ -117,6 +133,7 @@ pub fn handle_spawn_marbles_at(
             let pos = event.positions.get(i).copied().unwrap_or([0.0, 0.0]);
             spawn_marble_at(
                 &mut commands,
+                &mut physics,
                 player.id,
                 player.color,
                 Vec2::new(pos[0], pos[1]),
@@ -133,32 +150,55 @@ pub fn handle_spawn_marbles_at(
 }
 
 /// Spawns a marble at the given position.
+///
+/// Creates a Rapier dynamic body + collider in PhysicsWorldRes,
+/// then spawns a Bevy entity with PhysicsBody + PhysicsExternalForce components.
 fn spawn_marble_at(
     commands: &mut Commands,
+    physics: &mut ResMut<PhysicsWorldRes>,
     owner_id: u32,
     color: crate::marble::Color,
     position: Vec2,
     radius: f32,
 ) -> Entity {
-    commands
+    // First spawn the entity to get its ID
+    let entity = commands
         .spawn((
             Marble::new(owner_id),
             MarbleVisual { color, radius },
             Transform::from_translation(position.extend(0.0)),
-            RigidBody::Dynamic,
-            Collider::ball(radius),
-            Restitution::coefficient(0.7),
-            Friction::coefficient(0.3),
-            Damping {
-                linear_damping: 0.5,
-                angular_damping: 0.5,
-            },
-            Velocity::default(),
-            ExternalForce::default(),
-            Ccd::enabled(),
-            ActiveEvents::COLLISION_EVENTS,
+            PhysicsExternalForce::default(),
         ))
-        .id()
+        .id();
+
+    // Create rapier rigid body with entity bits as user_data
+    let body = RigidBodyBuilder::dynamic()
+        .translation(Vector::new(position.x, position.y))
+        .ccd_enabled(true)
+        .user_data(entity.to_bits() as u128)
+        .build();
+    let body_handle = physics.world.add_rigid_body(body);
+
+    // Create rapier collider
+    let collider = ColliderBuilder::ball(radius)
+        .restitution(0.7)
+        .friction(0.3)
+        .density(1.0)
+        .active_events(ActiveEvents::COLLISION_EVENTS)
+        .user_data(encode_user_data(USER_DATA_MARBLE, owner_id as u64))
+        .build();
+    physics.world.add_collider(collider, body_handle);
+
+    // Set damping on the body
+    if let Some(body) = physics.world.get_rigid_body_mut(body_handle) {
+        body.set_linear_damping(0.5);
+        body.set_angular_damping(0.5);
+    }
+
+    // Insert the PhysicsBody component
+    commands.entity(entity).insert(PhysicsBody(body_handle));
+
+    entity
 }
 
 /// Returns a random position within the given shape.

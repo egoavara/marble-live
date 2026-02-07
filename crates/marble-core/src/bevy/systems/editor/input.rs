@@ -3,13 +3,13 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::bevy::{GameCamera, MainCamera, MapConfig};
 use crate::bevy::events::UpdateKeyframeEvent;
+use crate::bevy::{GameCamera, MainCamera, MapConfig};
 use crate::map::{EvaluatedShape, Keyframe, ObjectRole, PivotMode};
 
 use super::{
-    EditorStateRes, EditorStateStore, GizmoHandle, ObjectTransform,
-    SelectObjectEvent, SnapManager, UpdateObjectEvent,
+    EditorStateRes, EditorStateStore, GizmoHandle, ObjectTransform, SelectObjectEvent, SnapManager,
+    UpdateObjectEvent,
 };
 
 /// Gizmo hit test tolerance (in world units).
@@ -200,14 +200,19 @@ pub fn handle_mouse_drag(
     let delta = mouse_pos - drag_start_mouse;
 
     // Get selected object ID for excluding self from snap targets
-    let selected_object_id = map_config.0.objects.get(selected).and_then(|o| o.id.clone());
+    let selected_object_id = map_config
+        .0
+        .objects
+        .get(selected)
+        .and_then(|o| o.id.clone());
 
     // Now get mutable reference to the object
     let Some(obj) = map_config.0.objects.get_mut(selected) else {
         return;
     };
 
-    let shift_pressed = keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
+    let shift_pressed =
+        keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
 
     // Apply transform based on handle type
     match handle {
@@ -234,7 +239,13 @@ pub fn handle_mouse_drag(
             let projected_distance = delta.dot(local_x_axis);
             let new_center = drag_start_center + local_x_axis * projected_distance;
             // Local move: use snap_local with object's rotation, no shift snapping
-            let result = snap_manager.snap_local(new_center, drag_start_center, rotation, false, selected_object_id.as_ref());
+            let result = snap_manager.snap_local(
+                new_center,
+                drag_start_center,
+                rotation,
+                false,
+                selected_object_id.as_ref(),
+            );
             obj.shape = move_shape_center(&obj.shape, result.position);
         }
         GizmoHandle::LocalMoveY => {
@@ -245,7 +256,13 @@ pub fn handle_mouse_drag(
             let projected_distance = delta.dot(local_y_axis);
             let new_center = drag_start_center + local_y_axis * projected_distance;
             // Local move: use snap_local with object's rotation, no shift snapping
-            let result = snap_manager.snap_local(new_center, drag_start_center, rotation, false, selected_object_id.as_ref());
+            let result = snap_manager.snap_local(
+                new_center,
+                drag_start_center,
+                rotation,
+                false,
+                selected_object_id.as_ref(),
+            );
             obj.shape = move_shape_center(&obj.shape, result.position);
         }
         GizmoHandle::LineStart => {
@@ -303,7 +320,13 @@ pub fn handle_mouse_drag(
         | GizmoHandle::ScaleBottomLeft
         | GizmoHandle::ScaleBottomRight => {
             // Corner scale handles - uniform scaling from corners
-            if let crate::map::Shape::Rect { center, size, rotation, .. } = &mut obj.shape {
+            if let crate::map::Shape::Rect {
+                center,
+                size,
+                rotation,
+                ..
+            } = &mut obj.shape
+            {
                 let start_size = editor_state.drag_start_size.unwrap_or(Vec2::ONE);
                 let start_rotation_rad = editor_state.drag_start_rotation.unwrap_or(0.0);
 
@@ -321,21 +344,26 @@ pub fn handle_mouse_drag(
                 };
 
                 // Scale by 2x delta because we're scaling from center
-                let new_width = snap_manager.snap_scalar(
-                    (start_size.x + local_delta.x * scale_x_sign * 2.0).max(0.1),
-                );
-                let new_height = snap_manager.snap_scalar(
-                    (start_size.y + local_delta.y * scale_y_sign * 2.0).max(0.1),
-                );
+                let new_width = snap_manager
+                    .snap_scalar((start_size.x + local_delta.x * scale_x_sign * 2.0).max(0.1));
+                let new_height = snap_manager
+                    .snap_scalar((start_size.y + local_delta.y * scale_y_sign * 2.0).max(0.1));
 
-                *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
+                *center =
+                    crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
                 *size = crate::dsl::Vec2OrExpr::Static([new_width, new_height]);
                 *rotation = crate::dsl::NumberOrExpr::Number(start_rotation_rad.to_degrees());
             }
         }
         GizmoHandle::ScaleTop | GizmoHandle::ScaleBottom => {
             // Vertical edge scale handles
-            if let crate::map::Shape::Rect { center, size, rotation, .. } = &mut obj.shape {
+            if let crate::map::Shape::Rect {
+                center,
+                size,
+                rotation,
+                ..
+            } = &mut obj.shape
+            {
                 let start_size = editor_state.drag_start_size.unwrap_or(Vec2::ONE);
                 let start_rotation_rad = editor_state.drag_start_rotation.unwrap_or(0.0);
 
@@ -348,18 +376,24 @@ pub fn handle_mouse_drag(
                     -1.0
                 };
 
-                let new_height = snap_manager.snap_scalar(
-                    (start_size.y + local_delta.y * scale_y_sign * 2.0).max(0.1),
-                );
+                let new_height = snap_manager
+                    .snap_scalar((start_size.y + local_delta.y * scale_y_sign * 2.0).max(0.1));
 
-                *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
+                *center =
+                    crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
                 *size = crate::dsl::Vec2OrExpr::Static([start_size.x, new_height]);
                 *rotation = crate::dsl::NumberOrExpr::Number(start_rotation_rad.to_degrees());
             }
         }
         GizmoHandle::ScaleLeft | GizmoHandle::ScaleRight => {
             // Horizontal edge scale handles
-            if let crate::map::Shape::Rect { center, size, rotation, .. } = &mut obj.shape {
+            if let crate::map::Shape::Rect {
+                center,
+                size,
+                rotation,
+                ..
+            } = &mut obj.shape
+            {
                 let start_size = editor_state.drag_start_size.unwrap_or(Vec2::ONE);
                 let start_rotation_rad = editor_state.drag_start_rotation.unwrap_or(0.0);
 
@@ -372,11 +406,11 @@ pub fn handle_mouse_drag(
                     -1.0
                 };
 
-                let new_width = snap_manager.snap_scalar(
-                    (start_size.x + local_delta.x * scale_x_sign * 2.0).max(0.1),
-                );
+                let new_width = snap_manager
+                    .snap_scalar((start_size.x + local_delta.x * scale_x_sign * 2.0).max(0.1));
 
-                *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
+                *center =
+                    crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
                 *size = crate::dsl::Vec2OrExpr::Static([new_width, start_size.y]);
                 *rotation = crate::dsl::NumberOrExpr::Number(start_rotation_rad.to_degrees());
             }
@@ -386,7 +420,8 @@ pub fn handle_mouse_drag(
             if let crate::map::Shape::Circle { center, radius } = &mut obj.shape {
                 let raw_radius = (mouse_pos.y - drag_start_center.y).abs().max(0.05);
                 let new_radius = snap_manager.snap_scalar(raw_radius);
-                *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
+                *center =
+                    crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
                 *radius = crate::dsl::NumberOrExpr::Number(new_radius);
             }
         }
@@ -395,7 +430,8 @@ pub fn handle_mouse_drag(
             if let crate::map::Shape::Circle { center, radius } = &mut obj.shape {
                 let raw_radius = (mouse_pos.x - drag_start_center.x).abs().max(0.05);
                 let new_radius = snap_manager.snap_scalar(raw_radius);
-                *center = crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
+                *center =
+                    crate::dsl::Vec2OrExpr::Static([drag_start_center.x, drag_start_center.y]);
                 *radius = crate::dsl::NumberOrExpr::Number(new_radius);
             }
         }
@@ -437,11 +473,11 @@ pub fn handle_mouse_drag(
             }
         }
         // Keyframe handles are handled by handle_keyframe_drag system
-        GizmoHandle::KeyframePivot |
-        GizmoHandle::KeyframeAngle |
-        GizmoHandle::KeyframeTranslateX |
-        GizmoHandle::KeyframeTranslateY |
-        GizmoHandle::KeyframeTranslateFree => {
+        GizmoHandle::KeyframePivot
+        | GizmoHandle::KeyframeAngle
+        | GizmoHandle::KeyframeTranslateX
+        | GizmoHandle::KeyframeTranslateY
+        | GizmoHandle::KeyframeTranslateFree => {
             return; // Handled by separate system
         }
     }
@@ -472,7 +508,10 @@ pub fn sync_editor_state_from_store(
 }
 
 /// System to sync editor state to store (Bevy -> Yew).
-pub fn sync_editor_state_to_store(editor_state: Res<EditorStateRes>, editor_store: Res<EditorStateStore>) {
+pub fn sync_editor_state_to_store(
+    editor_state: Res<EditorStateRes>,
+    editor_store: Res<EditorStateStore>,
+) {
     editor_store.sync_from_bevy(&editor_state);
 }
 
@@ -533,7 +572,11 @@ fn hit_test_gizmo(shape: &EvaluatedShape, point: Vec2) -> Option<GizmoHandle> {
 
             None
         }
-        EvaluatedShape::Rect { center, size, rotation } => {
+        EvaluatedShape::Rect {
+            center,
+            size,
+            rotation,
+        } => {
             let pos = Vec2::new(center[0], center[1]);
             let rotation_rad = rotation.to_radians();
             let rot = Rot2::radians(rotation_rad);
@@ -573,10 +616,22 @@ fn hit_test_gizmo(shape: &EvaluatedShape, point: Vec2) -> Option<GizmoHandle> {
             // Scale corners
             let half = Vec2::new(size[0], size[1]) / 2.0;
             let corners = [
-                (pos + rot * Vec2::new(-half.x, half.y), GizmoHandle::ScaleTopLeft),
-                (pos + rot * Vec2::new(half.x, half.y), GizmoHandle::ScaleTopRight),
-                (pos + rot * Vec2::new(-half.x, -half.y), GizmoHandle::ScaleBottomLeft),
-                (pos + rot * Vec2::new(half.x, -half.y), GizmoHandle::ScaleBottomRight),
+                (
+                    pos + rot * Vec2::new(-half.x, half.y),
+                    GizmoHandle::ScaleTopLeft,
+                ),
+                (
+                    pos + rot * Vec2::new(half.x, half.y),
+                    GizmoHandle::ScaleTopRight,
+                ),
+                (
+                    pos + rot * Vec2::new(-half.x, -half.y),
+                    GizmoHandle::ScaleBottomLeft,
+                ),
+                (
+                    pos + rot * Vec2::new(half.x, -half.y),
+                    GizmoHandle::ScaleBottomRight,
+                ),
             ];
 
             for (corner, handle) in corners {
@@ -626,7 +681,13 @@ fn hit_test_gizmo(shape: &EvaluatedShape, point: Vec2) -> Option<GizmoHandle> {
 
             None
         }
-        EvaluatedShape::Bezier { start, control1, control2, end, .. } => {
+        EvaluatedShape::Bezier {
+            start,
+            control1,
+            control2,
+            end,
+            ..
+        } => {
             let start_pos = Vec2::new(start[0], start[1]);
             let ctrl1 = Vec2::new(control1[0], control1[1]);
             let ctrl2 = Vec2::new(control2[0], control2[1]);
@@ -676,7 +737,11 @@ fn hit_test_shape(shape: &EvaluatedShape, point: Vec2) -> bool {
             let pos = Vec2::new(center[0], center[1]);
             point.distance(pos) <= *radius
         }
-        EvaluatedShape::Rect { center, size, rotation } => {
+        EvaluatedShape::Rect {
+            center,
+            size,
+            rotation,
+        } => {
             let pos = Vec2::new(center[0], center[1]);
             let half = Vec2::new(size[0], size[1]) / 2.0;
             let rot = Rot2::radians(-rotation.to_radians());
@@ -688,7 +753,13 @@ fn hit_test_shape(shape: &EvaluatedShape, point: Vec2) -> bool {
             let end_pos = Vec2::new(end[0], end[1]);
             point_to_segment_distance(point, start_pos, end_pos) < 0.1
         }
-        EvaluatedShape::Bezier { start, control1, control2, end, .. } => {
+        EvaluatedShape::Bezier {
+            start,
+            control1,
+            control2,
+            end,
+            ..
+        } => {
             let points = super::gizmo::bezier_to_points(
                 &[start[0], start[1]],
                 &[control1[0], control1[1]],
@@ -714,7 +785,11 @@ fn get_shape_transform(shape: &EvaluatedShape) -> ObjectTransform {
             size: Vec2::new(*radius * 2.0, *radius * 2.0),
             rotation: 0.0,
         },
-        EvaluatedShape::Rect { center, size, rotation } => ObjectTransform {
+        EvaluatedShape::Rect {
+            center,
+            size,
+            rotation,
+        } => ObjectTransform {
             center: Vec2::new(center[0], center[1]),
             size: Vec2::new(size[0], size[1]),
             rotation: rotation.to_radians(),
@@ -846,7 +921,10 @@ pub fn update_keyframe_gizmo_hover(
         .target_ids
         .iter()
         .filter_map(|target_id| {
-            map_config.0.objects.iter()
+            map_config
+                .0
+                .objects
+                .iter()
                 .find(|o| o.id.as_ref() == Some(target_id))
                 .map(|obj| {
                     let shape = obj.shape.evaluate(&ctx);
@@ -859,7 +937,8 @@ pub fn update_keyframe_gizmo_hover(
         return;
     }
 
-    let avg_center = target_centers.iter().fold(Vec2::ZERO, |acc, c| acc + *c) / target_centers.len() as f32;
+    let avg_center =
+        target_centers.iter().fold(Vec2::ZERO, |acc, c| acc + *c) / target_centers.len() as f32;
 
     // Try to hit test keyframe gizmo
     if let Some(handle) = hit_test_keyframe_gizmo(keyframe, avg_center, mouse_pos) {
@@ -888,12 +967,17 @@ fn hit_test_keyframe_gizmo(
     point: Vec2,
 ) -> Option<GizmoHandle> {
     match keyframe {
-        Keyframe::PivotRotate { pivot, pivot_mode, angle, .. } => {
-            hit_test_pivot_rotate_gizmo(*pivot, *pivot_mode, *angle, target_center, point)
-        }
-        Keyframe::Apply { translation, rotation, .. } => {
-            hit_test_apply_gizmo(*translation, *rotation, target_center, point)
-        }
+        Keyframe::PivotRotate {
+            pivot,
+            pivot_mode,
+            angle,
+            ..
+        } => hit_test_pivot_rotate_gizmo(*pivot, *pivot_mode, *angle, target_center, point),
+        Keyframe::Apply {
+            translation,
+            rotation,
+            ..
+        } => hit_test_apply_gizmo(*translation, *rotation, target_center, point),
         // ContinuousRotate, LoopStart, LoopEnd, Delay don't have interactive gizmos
         _ => None,
     }
@@ -1053,7 +1137,10 @@ pub fn handle_keyframe_gizmo_click(
         .target_ids
         .iter()
         .filter_map(|target_id| {
-            map_config.0.objects.iter()
+            map_config
+                .0
+                .objects
+                .iter()
                 .find(|o| o.id.as_ref() == Some(target_id))
                 .map(|obj| {
                     let shape = obj.shape.evaluate(&ctx);
@@ -1066,7 +1153,8 @@ pub fn handle_keyframe_gizmo_click(
         return;
     }
 
-    let avg_center = target_centers.iter().fold(Vec2::ZERO, |acc, c| acc + *c) / target_centers.len() as f32;
+    let avg_center =
+        target_centers.iter().fold(Vec2::ZERO, |acc, c| acc + *c) / target_centers.len() as f32;
 
     // Hit test keyframe gizmo
     if let Some(handle) = hit_test_keyframe_gizmo(keyframe, avg_center, mouse_pos) {
@@ -1082,8 +1170,13 @@ pub fn handle_keyframe_gizmo_click(
                 editor_state.drag_start_keyframe_angle = Some(*angle);
                 editor_state.drag_start_object_center = Some(avg_center);
             }
-            Keyframe::Apply { translation, rotation, .. } => {
-                editor_state.drag_start_keyframe_translation = Some(translation.unwrap_or([0.0, 0.0]));
+            Keyframe::Apply {
+                translation,
+                rotation,
+                ..
+            } => {
+                editor_state.drag_start_keyframe_translation =
+                    Some(translation.unwrap_or([0.0, 0.0]));
                 editor_state.drag_start_keyframe_angle = *rotation;
                 editor_state.drag_start_object_center = Some(avg_center);
             }
@@ -1104,12 +1197,13 @@ pub fn handle_keyframe_drag(
     if mouse_button.just_released(MouseButton::Left) && editor_state.is_dragging {
         // Check if we were dragging a keyframe handle
         if let Some(handle) = editor_state.active_handle {
-            if matches!(handle,
-                GizmoHandle::KeyframePivot |
-                GizmoHandle::KeyframeAngle |
-                GizmoHandle::KeyframeTranslateX |
-                GizmoHandle::KeyframeTranslateY |
-                GizmoHandle::KeyframeTranslateFree
+            if matches!(
+                handle,
+                GizmoHandle::KeyframePivot
+                    | GizmoHandle::KeyframeAngle
+                    | GizmoHandle::KeyframeTranslateX
+                    | GizmoHandle::KeyframeTranslateY
+                    | GizmoHandle::KeyframeTranslateFree
             ) {
                 // Clear keyframe-specific drag state
                 editor_state.drag_start_keyframe_pivot = None;
@@ -1125,12 +1219,13 @@ pub fn handle_keyframe_drag(
         return;
     };
 
-    if !matches!(handle,
-        GizmoHandle::KeyframePivot |
-        GizmoHandle::KeyframeAngle |
-        GizmoHandle::KeyframeTranslateX |
-        GizmoHandle::KeyframeTranslateY |
-        GizmoHandle::KeyframeTranslateFree
+    if !matches!(
+        handle,
+        GizmoHandle::KeyframePivot
+            | GizmoHandle::KeyframeAngle
+            | GizmoHandle::KeyframeTranslateX
+            | GizmoHandle::KeyframeTranslateY
+            | GizmoHandle::KeyframeTranslateFree
     ) {
         return;
     }
@@ -1166,7 +1261,16 @@ pub fn handle_keyframe_drag(
 
     // Apply changes based on handle type
     let updated_keyframe = match (handle, keyframe.clone()) {
-        (GizmoHandle::KeyframePivot, Keyframe::PivotRotate { pivot_mode, angle, duration, easing, .. }) => {
+        (
+            GizmoHandle::KeyframePivot,
+            Keyframe::PivotRotate {
+                pivot_mode,
+                angle,
+                duration,
+                easing,
+                ..
+            },
+        ) => {
             // Move pivot to mouse position with grid snap
             // For Relative mode, convert world position to relative offset
             let result = snap_manager.snap(mouse_pos, false, None);
@@ -1174,7 +1278,10 @@ pub fn handle_keyframe_drag(
                 PivotMode::Absolute => [result.position.x, result.position.y],
                 PivotMode::Relative => {
                     // Convert world position to offset from target center
-                    [result.position.x - target_center.x, result.position.y - target_center.y]
+                    [
+                        result.position.x - target_center.x,
+                        result.position.y - target_center.y,
+                    ]
                 }
             };
             Some(Keyframe::PivotRotate {
@@ -1185,7 +1292,16 @@ pub fn handle_keyframe_drag(
                 easing,
             })
         }
-        (GizmoHandle::KeyframeAngle, Keyframe::PivotRotate { pivot, pivot_mode, duration, easing, .. }) => {
+        (
+            GizmoHandle::KeyframeAngle,
+            Keyframe::PivotRotate {
+                pivot,
+                pivot_mode,
+                duration,
+                easing,
+                ..
+            },
+        ) => {
             // Calculate world pivot position based on mode
             let pivot_pos = match pivot_mode {
                 PivotMode::Absolute => Vec2::new(pivot[0], pivot[1]),
@@ -1207,8 +1323,18 @@ pub fn handle_keyframe_drag(
                 easing,
             })
         }
-        (GizmoHandle::KeyframeTranslateX, Keyframe::Apply { rotation, duration, easing, .. }) => {
-            let start_trans = editor_state.drag_start_keyframe_translation.unwrap_or([0.0, 0.0]);
+        (
+            GizmoHandle::KeyframeTranslateX,
+            Keyframe::Apply {
+                rotation,
+                duration,
+                easing,
+                ..
+            },
+        ) => {
+            let start_trans = editor_state
+                .drag_start_keyframe_translation
+                .unwrap_or([0.0, 0.0]);
             let new_x = snap_manager.snap_scalar(start_trans[0] + delta.x);
             let y = start_trans[1];
             let new_translation = if new_x.abs() < 0.001 && y.abs() < 0.001 {
@@ -1224,8 +1350,18 @@ pub fn handle_keyframe_drag(
                 easing,
             })
         }
-        (GizmoHandle::KeyframeTranslateY, Keyframe::Apply { rotation, duration, easing, .. }) => {
-            let start_trans = editor_state.drag_start_keyframe_translation.unwrap_or([0.0, 0.0]);
+        (
+            GizmoHandle::KeyframeTranslateY,
+            Keyframe::Apply {
+                rotation,
+                duration,
+                easing,
+                ..
+            },
+        ) => {
+            let start_trans = editor_state
+                .drag_start_keyframe_translation
+                .unwrap_or([0.0, 0.0]);
             let x = start_trans[0];
             let new_y = snap_manager.snap_scalar(start_trans[1] + delta.y);
             let new_translation = if x.abs() < 0.001 && new_y.abs() < 0.001 {
@@ -1241,15 +1377,26 @@ pub fn handle_keyframe_drag(
                 easing,
             })
         }
-        (GizmoHandle::KeyframeTranslateFree, Keyframe::Apply { rotation, duration, easing, .. }) => {
-            let start_trans = editor_state.drag_start_keyframe_translation.unwrap_or([0.0, 0.0]);
+        (
+            GizmoHandle::KeyframeTranslateFree,
+            Keyframe::Apply {
+                rotation,
+                duration,
+                easing,
+                ..
+            },
+        ) => {
+            let start_trans = editor_state
+                .drag_start_keyframe_translation
+                .unwrap_or([0.0, 0.0]);
             let raw_pos = Vec2::new(start_trans[0] + delta.x, start_trans[1] + delta.y);
             let result = snap_manager.snap(raw_pos, false, None);
-            let new_translation = if result.position.x.abs() < 0.001 && result.position.y.abs() < 0.001 {
-                None
-            } else {
-                Some([result.position.x, result.position.y])
-            };
+            let new_translation =
+                if result.position.x.abs() < 0.001 && result.position.y.abs() < 0.001 {
+                    None
+                } else {
+                    Some([result.position.x, result.position.y])
+                };
 
             Some(Keyframe::Apply {
                 translation: new_translation,
@@ -1258,7 +1405,15 @@ pub fn handle_keyframe_drag(
                 easing,
             })
         }
-        (GizmoHandle::KeyframeAngle, Keyframe::Apply { translation, duration, easing, .. }) => {
+        (
+            GizmoHandle::KeyframeAngle,
+            Keyframe::Apply {
+                translation,
+                duration,
+                easing,
+                ..
+            },
+        ) => {
             // Rotation handle for Apply with angle snap
             let angle_rad = (mouse_pos - target_center).to_angle();
             let start_angle = editor_state.drag_start_keyframe_angle.unwrap_or(0.0);
@@ -1267,7 +1422,11 @@ pub fn handle_keyframe_drag(
             let new_rotation_rad = (start_angle + delta_angle.to_degrees()).to_radians();
             let snapped_rotation = snap_manager.snap_angle(new_rotation_rad);
             let new_rotation_deg = snapped_rotation.to_degrees();
-            let new_rotation = if new_rotation_deg.abs() < 0.001 { None } else { Some(new_rotation_deg) };
+            let new_rotation = if new_rotation_deg.abs() < 0.001 {
+                None
+            } else {
+                Some(new_rotation_deg)
+            };
 
             Some(Keyframe::Apply {
                 translation,
@@ -1330,4 +1489,3 @@ fn hit_test_guideline_gizmo(shape: &EvaluatedShape, point: Vec2) -> Option<Gizmo
         _ => None,
     }
 }
-

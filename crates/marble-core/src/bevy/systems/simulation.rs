@@ -4,11 +4,14 @@
 
 use bevy::prelude::*;
 
+use crate::bevy::MapLoadedEvent;
+use crate::bevy::Marble;
 use crate::bevy::events::{ResetSimulationEvent, StartSimulationEvent, StopSimulationEvent};
 use crate::bevy::plugin::EditorState;
-use crate::bevy::resources::{DeterministicRng, InitialTransforms, KeyframeExecutors, MapConfig, MarbleGameState};
-use crate::bevy::Marble;
-use crate::bevy::MapLoadedEvent;
+use crate::bevy::rapier_plugin::{PhysicsBody, PhysicsWorldRes};
+use crate::bevy::resources::{
+    DeterministicRng, InitialTransforms, KeyframeExecutors, MapConfig, MarbleGameState,
+};
 use crate::keyframe::KeyframeExecutor;
 
 /// System to handle start simulation event.
@@ -29,7 +32,10 @@ pub fn handle_start_simulation(
             keyframe_executors.clear();
             for seq in &config.0.keyframes {
                 if seq.autoplay {
-                    tracing::info!("[simulation] Adding keyframe executor for sequence: {}", seq.name);
+                    tracing::info!(
+                        "[simulation] Adding keyframe executor for sequence: {}",
+                        seq.name
+                    );
                     keyframe_executors.add(KeyframeExecutor::new(seq.name.clone()));
                 }
             }
@@ -51,7 +57,8 @@ pub fn handle_stop_simulation(
     object_entity_map: Res<crate::bevy::ObjectEntityMap>,
     mut transforms: Query<&mut Transform>,
     mut commands: Commands,
-    marble_entities: Query<Entity, With<Marble>>,
+    marble_entities: Query<(Entity, Option<&PhysicsBody>), With<Marble>>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for _ in events.read() {
         tracing::info!("[simulation] Stopping simulation");
@@ -61,8 +68,11 @@ pub fn handle_stop_simulation(
         keyframe_executors.deactivate();
         keyframe_executors.clear();
 
-        // Despawn all marbles
-        for entity in marble_entities.iter() {
+        // Despawn all marbles (remove from physics too)
+        for (entity, body) in marble_entities.iter() {
+            if let Some(body) = body {
+                physics.world.remove_rigid_body(body.0);
+            }
             commands.entity(entity).despawn();
         }
 
@@ -89,9 +99,10 @@ pub fn handle_reset_simulation(
     initial_transforms: Res<InitialTransforms>,
     mut keyframe_executors: ResMut<KeyframeExecutors>,
     mut commands: Commands,
-    marble_entities: Query<Entity, With<Marble>>,
+    marble_entities: Query<(Entity, Option<&PhysicsBody>), With<Marble>>,
     mut transforms: Query<&mut Transform>,
     object_entity_map: Res<crate::bevy::ObjectEntityMap>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for _ in events.read() {
         tracing::info!("[simulation] Resetting simulation");
@@ -108,8 +119,11 @@ pub fn handle_reset_simulation(
             executor.reset();
         }
 
-        // Despawn all marbles
-        for entity in marble_entities.iter() {
+        // Despawn all marbles (remove from physics too)
+        for (entity, body) in marble_entities.iter() {
+            if let Some(body) = body {
+                physics.world.remove_rigid_body(body.0);
+            }
             commands.entity(entity).despawn();
         }
 
@@ -135,7 +149,10 @@ pub fn clear_executors_on_map_load(
     mut keyframe_executors: ResMut<KeyframeExecutors>,
 ) {
     for event in events.read() {
-        tracing::info!("[simulation] Map loaded ({}), clearing autoplay executors for editor", event.map_name);
+        tracing::info!(
+            "[simulation] Map loaded ({}), clearing autoplay executors for editor",
+            event.map_name
+        );
         keyframe_executors.deactivate();
         keyframe_executors.clear();
     }

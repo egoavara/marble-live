@@ -104,7 +104,11 @@ impl MeshGroup {
     pub fn get_bridge_peer_ids(&self) -> Vec<(String, String)> {
         self.bridge_players
             .iter()
-            .filter_map(|pid| self.players.get(pid).map(|peer_id| (pid.clone(), peer_id.clone())))
+            .filter_map(|pid| {
+                self.players
+                    .get(pid)
+                    .map(|peer_id| (pid.clone(), peer_id.clone()))
+            })
             .collect()
     }
 

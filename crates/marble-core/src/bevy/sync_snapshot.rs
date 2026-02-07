@@ -84,6 +84,10 @@ pub struct BevySyncSnapshot {
     /// Current transforms of keyframe-animated map objects.
     #[serde(default)]
     pub map_object_transforms: Vec<MapObjectTransformSnapshot>,
+    /// Serialized PhysicsWorld bytes for complete Rapier state restoration.
+    /// When present, this takes priority over marble-level position/velocity sync.
+    #[serde(default)]
+    pub physics_world_bytes: Vec<u8>,
 }
 
 impl BevySyncSnapshot {

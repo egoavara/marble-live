@@ -5,14 +5,14 @@ use std::collections::HashMap;
 use marble_core::dsl::{BoolOrExpr, NumberOrExpr, Vec2OrExpr};
 use marble_core::map::{
     BumperProperties, EasingType, GuidelineProperties, Keyframe, KeyframeSequence, MapMeta,
-    MapObject, ObjectProperties, ObjectRole, PivotMode, RollDirection, RouletteConfig, Shape, SpawnProperties,
-    TriggerProperties, VectorFieldFalloff, VectorFieldProperties,
+    MapObject, ObjectProperties, ObjectRole, PivotMode, RollDirection, RouletteConfig, Shape,
+    SpawnProperties, TriggerProperties, VectorFieldFalloff, VectorFieldProperties,
 };
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_icons::{Icon, IconData};
 
-use crate::hooks::{create_shape_from_cache, get_shape_center, ShapeCache};
+use crate::hooks::{ShapeCache, create_shape_from_cache, get_shape_center};
 
 /// Helper to extract static value from NumberOrExpr
 fn get_number_static(n: &NumberOrExpr) -> Option<f32> {
@@ -649,7 +649,10 @@ fn properties_editor(props: &PropertiesEditorProps) -> Html {
         }
         ObjectRole::Trigger => {
             let trigger = props.properties.trigger.clone();
-            let action = trigger.as_ref().map(|t| t.action.clone()).unwrap_or_else(|| "gamerule".to_string());
+            let action = trigger
+                .as_ref()
+                .map(|t| t.action.clone())
+                .unwrap_or_else(|| "gamerule".to_string());
             html! {
                 <div class="property-section">
                     <div class="property-section-title">{"Trigger Properties"}</div>
@@ -676,7 +679,10 @@ fn properties_editor(props: &PropertiesEditorProps) -> Html {
         }
         ObjectRole::Obstacle => {
             let has_bumper = props.properties.bumper.is_some();
-            let bumper_force = props.properties.bumper.as_ref()
+            let bumper_force = props
+                .properties
+                .bumper
+                .as_ref()
                 .and_then(|b| get_number_static(&b.force))
                 .unwrap_or(1.0);
             html! {
@@ -843,12 +849,17 @@ fn properties_editor(props: &PropertiesEditorProps) -> Html {
             }
         }
         ObjectRole::VectorField => {
-            let vf = props.properties.vector_field.clone().unwrap_or_else(|| VectorFieldProperties {
-                direction: Vec2OrExpr::Static([0.0, -1.0]),
-                magnitude: NumberOrExpr::Number(5.0),
-                enabled: BoolOrExpr::Bool(true),
-                falloff: VectorFieldFalloff::Uniform,
-            });
+            let vf =
+                props
+                    .properties
+                    .vector_field
+                    .clone()
+                    .unwrap_or_else(|| VectorFieldProperties {
+                        direction: Vec2OrExpr::Static([0.0, -1.0]),
+                        magnitude: NumberOrExpr::Number(5.0),
+                        enabled: BoolOrExpr::Bool(true),
+                        falloff: VectorFieldFalloff::Uniform,
+                    });
             let direction = get_vec2_static(&vf.direction).unwrap_or([0.0, -1.0]);
             let magnitude = get_number_static(&vf.magnitude).unwrap_or(5.0);
             let enabled_bool = get_bool_static(&vf.enabled).unwrap_or(true);
@@ -1036,7 +1047,8 @@ fn meta_properties_panel(props: &MetaPropertiesPanelProps) -> Html {
         Callback::from(move |e: InputEvent| {
             let input: HtmlInputElement = e.target_unchecked_into();
             let mut new_meta = meta.clone();
-            new_meta.gamerule = input.value()
+            new_meta.gamerule = input
+                .value()
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
@@ -1232,7 +1244,9 @@ fn render_keyframe_editor(
             angle,
             duration,
             easing,
-        } => render_pivot_editor(pivot, pivot_mode, angle, duration, easing, kf_idx, on_update),
+        } => render_pivot_editor(
+            pivot, pivot_mode, angle, duration, easing, kf_idx, on_update,
+        ),
         Keyframe::ContinuousRotate { speed, direction } => {
             render_continuous_rotate_editor(speed, direction, kf_idx, on_update)
         }
@@ -1323,7 +1337,12 @@ fn render_delay_editor(
                 } else {
                     NumberOrExpr::Expr(value)
                 };
-                on_update.emit((kf_idx, Keyframe::Delay { duration: new_duration }));
+                on_update.emit((
+                    kf_idx,
+                    Keyframe::Delay {
+                        duration: new_duration,
+                    },
+                ));
             }
         })
     };
@@ -1376,7 +1395,11 @@ fn render_apply_editor(
             if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
                 let x = input.value().parse::<f32>().unwrap_or(0.0);
                 let y = translation.map(|t| t[1]).unwrap_or(0.0);
-                let new_translation = if x == 0.0 && y == 0.0 { None } else { Some([x, y]) };
+                let new_translation = if x == 0.0 && y == 0.0 {
+                    None
+                } else {
+                    Some([x, y])
+                };
                 on_update.emit((
                     kf_idx,
                     Keyframe::Apply {
@@ -1398,7 +1421,11 @@ fn render_apply_editor(
             if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
                 let x = translation.map(|t| t[0]).unwrap_or(0.0);
                 let y = input.value().parse::<f32>().unwrap_or(0.0);
-                let new_translation = if x == 0.0 && y == 0.0 { None } else { Some([x, y]) };
+                let new_translation = if x == 0.0 && y == 0.0 {
+                    None
+                } else {
+                    Some([x, y])
+                };
                 on_update.emit((
                     kf_idx,
                     Keyframe::Apply {

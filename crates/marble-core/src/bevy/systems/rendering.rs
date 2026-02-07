@@ -4,8 +4,8 @@
 //! This provides immediate feedback while a more sophisticated
 //! renderer can be added later.
 
-use bevy::prelude::*;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::prelude::*;
 
 use crate::bevy::{GameCamera, MainCamera, MapConfig, Marble, MarbleVisual};
 use crate::map::{EvaluatedShape, ObjectRole};
@@ -108,7 +108,6 @@ pub struct GridMeshState {
     pub material_handles: Vec<Handle<ColorMaterial>>,
 }
 
-
 /// System to render coordinate grid using mesh.
 pub fn render_grid(
     mut commands: Commands,
@@ -177,8 +176,15 @@ pub fn render_grid(
 
     // Build mesh for regular grid lines
     let (grid_mesh, grid_color) = build_grid_mesh(
-        min_x, max_x, min_y, max_y, cell_size, line_width, major_line_width,
-        grid_config.line_color, grid_config.major_line_color,
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+        cell_size,
+        line_width,
+        major_line_width,
+        grid_config.line_color,
+        grid_config.major_line_color,
     );
 
     let grid_mesh_handle = meshes.add(grid_mesh);
@@ -186,7 +192,9 @@ pub fn render_grid(
 
     // Store handles for later cleanup
     grid_state.mesh_handles.push(grid_mesh_handle.clone());
-    grid_state.material_handles.push(grid_material_handle.clone());
+    grid_state
+        .material_handles
+        .push(grid_material_handle.clone());
 
     commands.spawn((
         GridMesh,
@@ -228,7 +236,11 @@ pub fn render_grid(
     // Build tick marks
     let tick_interval = cell_size / 10.0;
     let (x_ticks_mesh, y_ticks_mesh) = build_tick_meshes(
-        min_x, max_x, min_y, max_y, tick_interval,
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+        tick_interval,
         grid_config.tick_length_small,
         grid_config.tick_length_medium,
         grid_config.tick_length_large,
@@ -263,9 +275,15 @@ pub fn render_grid(
 
 /// Build a mesh for grid lines.
 fn build_grid_mesh(
-    min_x: f32, max_x: f32, min_y: f32, max_y: f32,
-    cell_size: f32, line_width: f32, major_line_width: f32,
-    line_color: Color, _major_color: Color,
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
+    cell_size: f32,
+    line_width: f32,
+    major_line_width: f32,
+    line_color: Color,
+    _major_color: Color,
 ) -> (Mesh, Color) {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -280,7 +298,11 @@ fn build_grid_mesh(
         let is_axis = x.abs() < 0.001;
 
         if !is_axis {
-            let hw = if x_int % 10 == 0 { half_major } else { half_width };
+            let hw = if x_int % 10 == 0 {
+                half_major
+            } else {
+                half_width
+            };
             add_line_quad(&mut positions, &mut indices, x - hw, min_y, x + hw, max_y);
         }
         x += cell_size;
@@ -293,7 +315,11 @@ fn build_grid_mesh(
         let is_axis = y.abs() < 0.001;
 
         if !is_axis {
-            let hw = if y_int % 10 == 0 { half_major } else { half_width };
+            let hw = if y_int % 10 == 0 {
+                half_major
+            } else {
+                half_width
+            };
             add_line_quad(&mut positions, &mut indices, min_x, y - hw, max_x, y + hw);
         }
         y += cell_size;
@@ -326,9 +352,14 @@ fn build_line_mesh(x1: f32, x2: f32, y1: f32, y2: f32, width: f32, horizontal: b
 
 /// Build tick mark meshes for both axes.
 fn build_tick_meshes(
-    min_x: f32, max_x: f32, min_y: f32, max_y: f32,
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
     tick_interval: f32,
-    tick_small: f32, tick_medium: f32, tick_large: f32,
+    tick_small: f32,
+    tick_medium: f32,
+    tick_large: f32,
 ) -> (Mesh, Mesh) {
     let tick_width = 0.008;
     let hw = tick_width / 2.0;
@@ -348,7 +379,14 @@ fn build_tick_meshes(
             } else {
                 tick_small
             };
-            add_line_quad(&mut x_positions, &mut x_indices, x - hw, -tick_length, x + hw, tick_length);
+            add_line_quad(
+                &mut x_positions,
+                &mut x_indices,
+                x - hw,
+                -tick_length,
+                x + hw,
+                tick_length,
+            );
         }
         x += tick_interval;
     }
@@ -372,7 +410,14 @@ fn build_tick_meshes(
             } else {
                 tick_small
             };
-            add_line_quad(&mut y_positions, &mut y_indices, -tick_length, y - hw, tick_length, y + hw);
+            add_line_quad(
+                &mut y_positions,
+                &mut y_indices,
+                -tick_length,
+                y - hw,
+                tick_length,
+                y + hw,
+            );
         }
         y += tick_interval;
     }
@@ -385,7 +430,14 @@ fn build_tick_meshes(
 }
 
 /// Add a quad (rectangle) to the mesh.
-fn add_line_quad(positions: &mut Vec<[f32; 3]>, indices: &mut Vec<u32>, x1: f32, y1: f32, x2: f32, y2: f32) {
+fn add_line_quad(
+    positions: &mut Vec<[f32; 3]>,
+    indices: &mut Vec<u32>,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+) {
     let base = positions.len() as u32;
 
     positions.push([x1, y1, 0.0]);
@@ -570,7 +622,12 @@ pub fn render_map_objects(
 }
 
 /// Helper function to draw a shape using entity's transform (for animated objects).
-fn draw_shape_with_transform(gizmos: &mut Gizmos, shape: &EvaluatedShape, transform: &Transform, color: Color) {
+fn draw_shape_with_transform(
+    gizmos: &mut Gizmos,
+    shape: &EvaluatedShape,
+    transform: &Transform,
+    color: Color,
+) {
     let pos = transform.translation.truncate();
     let rot = transform.rotation.to_euler(EulerRot::ZYX).0;
 
@@ -799,13 +856,7 @@ fn draw_dashed_line(gizmos: &mut Gizmos, start: Vec2, end: Vec2, color: Color, d
 }
 
 /// Draw ruler ticks along a guideline.
-fn draw_ruler_ticks(
-    gizmos: &mut Gizmos,
-    start: Vec2,
-    end: Vec2,
-    interval: f32,
-    color: Color,
-) {
+fn draw_ruler_ticks(gizmos: &mut Gizmos, start: Vec2, end: Vec2, interval: f32, color: Color) {
     let dir = end - start;
     let length = dir.length();
 

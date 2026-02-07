@@ -5,7 +5,7 @@ use web_sys::HtmlInputElement;
 use yew::prelude::*;
 use yew_icons::{Icon, IconData};
 
-use super::reaction_panel::{get_last_emoji, save_last_emoji, ReactionPanel};
+use super::reaction_panel::{ReactionPanel, get_last_emoji, save_last_emoji};
 use crate::services::p2p::{P2pRoomHandle, ReceivedMessage};
 
 /// Inactivity timeout in milliseconds (15 seconds).

@@ -72,7 +72,10 @@ pub fn peer_list(props: &PeerListProps) -> Html {
     let mut players: Vec<PlayerRenderInfo> = Vec::new();
 
     // Add self
-    let self_arrival = props.arrival_info.iter().find(|a| a.player_id == props.my_player_id);
+    let self_arrival = props
+        .arrival_info
+        .iter()
+        .find(|a| a.player_id == props.my_player_id);
     players.push(PlayerRenderInfo {
         player_id: props.my_player_id.clone(),
         is_self: true,
@@ -85,9 +88,14 @@ pub fn peer_list(props: &PeerListProps) -> Html {
 
     // Add peers
     for peer in &props.peers {
-        let display_name = peer.player_id.clone()
+        let display_name = peer
+            .player_id
+            .clone()
             .unwrap_or_else(|| format!("Peer-{}", &peer.peer_id.to_string()[..8]));
-        let peer_arrival = props.arrival_info.iter().find(|a| a.player_id == display_name);
+        let peer_arrival = props
+            .arrival_info
+            .iter()
+            .find(|a| a.player_id == display_name);
         players.push(PlayerRenderInfo {
             player_id: display_name,
             is_self: false,

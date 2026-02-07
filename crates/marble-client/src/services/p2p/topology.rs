@@ -155,7 +155,12 @@ impl TopologyHandler {
 
     /// Get expected peer count
     pub fn expected_peer_count(&self) -> usize {
-        self.expected_peers.len() + if self.is_bridge { self.expected_bridges.len() } else { 0 }
+        self.expected_peers.len()
+            + if self.is_bridge {
+                self.expected_bridges.len()
+            } else {
+                0
+            }
     }
 
     /// Get connected peer count

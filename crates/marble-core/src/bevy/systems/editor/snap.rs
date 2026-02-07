@@ -38,7 +38,14 @@ pub struct SnapResult {
 #[derive(SystemParam)]
 pub struct SnapManager<'w, 's> {
     config: Res<'w, SnapConfig>,
-    guidelines: Query<'w, 's, (&'static crate::bevy::MapObjectMarker, &'static crate::bevy::GuidelineMarker)>,
+    guidelines: Query<
+        'w,
+        's,
+        (
+            &'static crate::bevy::MapObjectMarker,
+            &'static crate::bevy::GuidelineMarker,
+        ),
+    >,
 }
 
 impl<'w, 's> SnapManager<'w, 's> {
@@ -222,14 +229,19 @@ mod tests {
         assert!((dist - 3.0).abs() < 0.001);
 
         // 수직선 X=3
-        let dist = perpendicular_distance(Vec2::new(5.0, 4.0), Vec2::new(3.0, 0.0), Vec2::new(3.0, 10.0));
+        let dist = perpendicular_distance(
+            Vec2::new(5.0, 4.0),
+            Vec2::new(3.0, 0.0),
+            Vec2::new(3.0, 10.0),
+        );
         assert!((dist - 2.0).abs() < 0.001);
     }
 
     #[test]
     fn test_snap_to_line_interval() {
         // 수평선 Y=0, interval=1.0
-        let snapped = snap_to_line_interval(Vec2::new(2.3, 0.5), Vec2::ZERO, Vec2::new(10.0, 0.0), 1.0);
+        let snapped =
+            snap_to_line_interval(Vec2::new(2.3, 0.5), Vec2::ZERO, Vec2::new(10.0, 0.0), 1.0);
         assert!((snapped.x - 2.0).abs() < 0.001);
         assert!(snapped.y.abs() < 0.001);
     }

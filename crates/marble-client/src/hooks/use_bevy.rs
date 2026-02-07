@@ -5,8 +5,8 @@
 //! only when that slice of state changes.
 
 use gloo::timers::callback::Interval;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use yew::prelude::*;
 
 // ============================================================================
@@ -19,18 +19,13 @@ use yew::prelude::*;
 // ============================================================================
 
 pub use marble_core::bevy::{
-    start_bevy_app, start_marble_game, start_marble_editor, send_command,
-    init_game_mode, init_editor_mode,
-    get_connection_state, get_peers, get_peers_version,
-    get_players, get_arrival_order, get_players_version,
-    get_chat_messages, get_chat_version,
-    get_reactions, get_recent_reactions, get_reactions_version,
-    get_game_state, get_game_version,
-    get_editor_state, get_editor_state_version, get_editor_objects,
-    get_editor_keyframes, get_editor_keyframes_version,
-    get_snap_config, get_snap_config_version,
-    reset_bevy_state, is_bevy_ready, request_bevy_exit,
-    is_bevy_app_running, prepare_new_room,
+    get_arrival_order, get_chat_messages, get_chat_version, get_connection_state,
+    get_editor_keyframes, get_editor_keyframes_version, get_editor_objects, get_editor_state,
+    get_editor_state_version, get_game_state, get_game_version, get_peers, get_peers_version,
+    get_players, get_players_version, get_reactions, get_reactions_version, get_recent_reactions,
+    get_snap_config, get_snap_config_version, init_editor_mode, init_game_mode,
+    is_bevy_app_running, is_bevy_ready, prepare_new_room, request_bevy_exit, reset_bevy_state,
+    send_command, start_bevy_app, start_marble_editor, start_marble_game,
 };
 
 // ============================================================================
@@ -248,7 +243,9 @@ pub fn bevy_provider(props: &BevyProviderProps) -> Html {
                     "beforeunload",
                     beforeunload_closure.as_ref().unchecked_ref(),
                 );
-                tracing::info!("BevyProvider unmounting: keeping Bevy app alive for mode transition");
+                tracing::info!(
+                    "BevyProvider unmounting: keeping Bevy app alive for mode transition"
+                );
                 drop(timeout);
             }
         });
@@ -353,7 +350,8 @@ pub fn use_bevy_players() -> (Vec<PlayerInfo>, Vec<u32>) {
                     *last_version.borrow_mut() = version;
 
                     let js_players = get_players();
-                    if let Ok(list) = serde_wasm_bindgen::from_value::<Vec<PlayerInfo>>(js_players) {
+                    if let Ok(list) = serde_wasm_bindgen::from_value::<Vec<PlayerInfo>>(js_players)
+                    {
                         players.set(list);
                     }
 
@@ -442,7 +440,8 @@ pub fn use_bevy_game() -> GameStateSummary {
                 if version != *last_version.borrow() {
                     *last_version.borrow_mut() = version;
                     let js_value = get_game_state();
-                    if let Ok(summary) = serde_wasm_bindgen::from_value::<GameStateSummary>(js_value)
+                    if let Ok(summary) =
+                        serde_wasm_bindgen::from_value::<GameStateSummary>(js_value)
                     {
                         state.set(summary);
                     }
@@ -471,7 +470,9 @@ pub fn use_bevy_editor_state() -> EditorStateSummary {
                 if version != *last_version.borrow() {
                     *last_version.borrow_mut() = version;
                     let js_value = get_editor_state();
-                    if let Ok(summary) = serde_wasm_bindgen::from_value::<EditorStateSummary>(js_value) {
+                    if let Ok(summary) =
+                        serde_wasm_bindgen::from_value::<EditorStateSummary>(js_value)
+                    {
                         state.set(summary);
                     }
                 }
@@ -503,7 +504,9 @@ pub fn use_bevy_editor_objects() -> Vec<marble_core::map::MapObject> {
                 if version != *last_version.borrow() {
                     *last_version.borrow_mut() = version;
                     let js_value = get_editor_objects();
-                    if let Ok(list) = serde_wasm_bindgen::from_value::<Vec<marble_core::map::MapObject>>(js_value) {
+                    if let Ok(list) =
+                        serde_wasm_bindgen::from_value::<Vec<marble_core::map::MapObject>>(js_value)
+                    {
                         objects.set(list);
                     }
                 }
@@ -535,7 +538,10 @@ pub fn use_bevy_editor_keyframes() -> Vec<marble_core::map::KeyframeSequence> {
                 if version != *last_version.borrow() {
                     *last_version.borrow_mut() = version;
                     let js_value = get_editor_keyframes();
-                    if let Ok(list) = serde_wasm_bindgen::from_value::<Vec<marble_core::map::KeyframeSequence>>(js_value) {
+                    if let Ok(list) = serde_wasm_bindgen::from_value::<
+                        Vec<marble_core::map::KeyframeSequence>,
+                    >(js_value)
+                    {
                         keyframes.set(list);
                     }
                 }
@@ -563,7 +569,9 @@ pub fn use_bevy_snap_config() -> SnapConfigSummary {
                 if version != *last_version.borrow() {
                     *last_version.borrow_mut() = version;
                     let js_value = get_snap_config();
-                    if let Ok(summary) = serde_wasm_bindgen::from_value::<SnapConfigSummary>(js_value) {
+                    if let Ok(summary) =
+                        serde_wasm_bindgen::from_value::<SnapConfigSummary>(js_value)
+                    {
                         config.set(summary);
                     }
                 }

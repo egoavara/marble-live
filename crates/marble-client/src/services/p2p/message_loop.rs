@@ -48,10 +48,7 @@ pub fn resolve_peer_ids_from_server(
 
                 for (peer_id_str, player_id) in resp.peer_to_player {
                     // Forward to Bevy so the P2P socket resource gets updated
-                    marble_core::bevy::wasm_entry::update_peer_player_id(
-                        &peer_id_str,
-                        &player_id,
-                    );
+                    marble_core::bevy::wasm_entry::update_peer_player_id(&peer_id_str, &player_id);
                 }
 
                 tracing::debug!(

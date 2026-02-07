@@ -7,9 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::dsl::GameContext;
 use crate::keyframe::KeyframeExecutor;
-use crate::map::{EvaluatedShape, LiveRankingConfig, RollDirection, RouletteConfig, SpawnerData, VectorFieldData, VectorFieldFalloff};
+use crate::map::{
+    EvaluatedShape, LiveRankingConfig, RollDirection, RouletteConfig, SpawnerData, VectorFieldData,
+    VectorFieldFalloff,
+};
 use crate::marble::{Color, MarbleManager, PlayerId};
-use crate::physics::{PhysicsWorld, PHYSICS_DT};
+use crate::physics::{PHYSICS_DT, PhysicsWorld};
 
 /// Player information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,7 +111,8 @@ impl GameState {
         self.keyframe_executors.clear();
         for seq in &config.keyframes {
             if seq.autoplay {
-                self.keyframe_executors.push(KeyframeExecutor::new(seq.name.clone()));
+                self.keyframe_executors
+                    .push(KeyframeExecutor::new(seq.name.clone()));
             }
         }
 
@@ -169,7 +173,8 @@ impl GameState {
 
         // Update game context for CEL expressions
         let time = self.physics_world.current_frame() as f32 / 60.0;
-        self.game_context.update(time, self.physics_world.current_frame());
+        self.game_context
+            .update(time, self.physics_world.current_frame());
 
         // Apply roll rotations to animated objects
         self.apply_roll_rotations();
@@ -211,7 +216,8 @@ impl GameState {
                 }
 
                 // Check trigger action
-                let action = self.trigger_actions
+                let action = self
+                    .trigger_actions
                     .get(*trigger_idx)
                     .map(|s| s.as_str())
                     .unwrap_or("gamerule");
@@ -226,12 +232,14 @@ impl GameState {
 
         // Remove marbles for "gamerule" triggers (completely from memory)
         for marble_id in marbles_to_remove {
-            self.marble_manager.remove_marble(&mut self.physics_world, marble_id);
+            self.marble_manager
+                .remove_marble(&mut self.physics_world, marble_id);
         }
 
         // Disable physics for other triggers (keep in memory)
         for marble_id in marbles_to_disable {
-            self.marble_manager.disable_marble_physics(&mut self.physics_world, marble_id);
+            self.marble_manager
+                .disable_marble_physics(&mut self.physics_world, marble_id);
         }
 
         newly_arrived
@@ -471,11 +479,8 @@ impl GameState {
     /// Used for keyframe animation preview.
     pub fn set_kinematic_position(&mut self, object_id: &str, pos: [f32; 2], rot: f32) {
         if let Some(&handle) = self.kinematic_bodies.get(object_id) {
-            self.physics_world.set_kinematic_target(
-                handle,
-                Vector::new(pos[0], pos[1]),
-                rot,
-            );
+            self.physics_world
+                .set_kinematic_target(handle, Vector::new(pos[0], pos[1]), rot);
         }
     }
 
@@ -502,7 +507,10 @@ impl GameState {
     /// Gets the center position of an object by its ID.
     fn get_object_center(&self, object_id: &str) -> Option<(f32, f32)> {
         let config = self.map_config.as_ref()?;
-        let obj = config.objects.iter().find(|o| o.id.as_deref() == Some(object_id))?;
+        let obj = config
+            .objects
+            .iter()
+            .find(|o| o.id.as_deref() == Some(object_id))?;
 
         // Evaluate shape to get center
         let shape = obj.shape.evaluate(&self.game_context);

@@ -8,8 +8,8 @@ use yew::prelude::*;
 use crate::components::editor::{EditorToolbar, ObjectList, PropertyPanel, TimelinePanel};
 use crate::components::{Layout, MarbleEditor};
 use crate::hooks::{
-    get_shape_center, send_command, use_bevy_editor_state, use_bevy_snap_config, use_editor_state,
-    use_keyboard_shortcuts, KeyboardShortcutsConfig,
+    KeyboardShortcutsConfig, get_shape_center, send_command, use_bevy_editor_state,
+    use_bevy_snap_config, use_editor_state, use_keyboard_shortcuts,
 };
 
 /// Map Editor page component.
@@ -27,7 +27,8 @@ pub fn editor_page() -> Html {
     let is_previewing = use_state(|| false);
 
     // 현재 선택된 시퀀스의 실행 인덱스 가져오기 (Bevy에서 동기화)
-    let preview_keyframe_index = editor_state.selected_sequence
+    let preview_keyframe_index = editor_state
+        .selected_sequence
         .and_then(|seq_idx| editor_state.config.keyframes.get(seq_idx))
         .and_then(|seq| bevy_editor_state.executing_keyframes.get(&seq.name))
         .copied();
@@ -316,14 +317,14 @@ pub fn editor_page() -> Html {
 /// 테스트 플레이어 색상 (인덱스 기반)
 fn get_test_player_color(index: u32) -> [u8; 4] {
     const COLORS: [[u8; 4]; 8] = [
-        [255, 0, 0, 255],     // Red
-        [0, 255, 0, 255],     // Green
-        [0, 0, 255, 255],     // Blue
-        [255, 255, 0, 255],   // Yellow
-        [255, 0, 255, 255],   // Magenta
-        [0, 255, 255, 255],   // Cyan
-        [255, 128, 0, 255],   // Orange
-        [128, 0, 255, 255],   // Purple
+        [255, 0, 0, 255],   // Red
+        [0, 255, 0, 255],   // Green
+        [0, 0, 255, 255],   // Blue
+        [255, 255, 0, 255], // Yellow
+        [255, 0, 255, 255], // Magenta
+        [0, 255, 255, 255], // Cyan
+        [255, 128, 0, 255], // Orange
+        [128, 0, 255, 255], // Purple
     ];
     COLORS[(index as usize) % COLORS.len()]
 }

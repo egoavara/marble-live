@@ -52,8 +52,10 @@ impl ActiveAnimation {
         } else {
             // Standard translation + rotation interpolation
             let pos = [
-                self.start_translation[0] + (self.end_translation[0] - self.start_translation[0]) * eased_t,
-                self.start_translation[1] + (self.end_translation[1] - self.start_translation[1]) * eased_t,
+                self.start_translation[0]
+                    + (self.end_translation[0] - self.start_translation[0]) * eased_t,
+                self.start_translation[1]
+                    + (self.end_translation[1] - self.start_translation[1]) * eased_t,
             ];
             let rot = self.start_rotation + (self.end_rotation - self.start_rotation) * eased_t;
 
@@ -213,7 +215,9 @@ impl KeyframeExecutor {
                         let current = current_positions.get(target_id);
                         let initial = initial_transforms.get(target_id);
 
-                        if let (Some(&(cur_pos, cur_rot)), Some(&(init_pos, init_rot))) = (current, initial) {
+                        if let (Some(&(cur_pos, cur_rot)), Some(&(init_pos, init_rot))) =
+                            (current, initial)
+                        {
                             let end_translation = translation
                                 .map(|t| [init_pos[0] + t[0], init_pos[1] + t[1]])
                                 .unwrap_or(cur_pos);
@@ -251,14 +255,17 @@ impl KeyframeExecutor {
                         let current = current_positions.get(target_id);
                         let initial = initial_transforms.get(target_id);
 
-                        if let (Some(&(cur_pos, cur_rot)), Some(&(init_pos, init_rot))) = (current, initial) {
+                        if let (Some(&(cur_pos, cur_rot)), Some(&(init_pos, init_rot))) =
+                            (current, initial)
+                        {
                             // Calculate world pivot and offset based on pivot mode
                             let (world_pivot, offset, end_rotation) = match pivot_mode {
                                 PivotMode::Absolute => {
                                     // Absolute mode: pivot is in world coordinates
                                     // angle is relative to initial rotation
                                     // Convert world offset to local coordinates (remove initial rotation)
-                                    let world_offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                                    let world_offset =
+                                        [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
                                     let (sin_init, cos_init) = (-init_rot).sin_cos();
                                     let offset = [
                                         world_offset[0] * cos_init - world_offset[1] * sin_init,
@@ -274,7 +281,10 @@ impl KeyframeExecutor {
                                     let (sin, cos) = cur_rot.sin_cos();
                                     let rotated_pivot_x = pivot[0] * cos - pivot[1] * sin;
                                     let rotated_pivot_y = pivot[0] * sin + pivot[1] * cos;
-                                    let world_pivot = [cur_pos[0] + rotated_pivot_x, cur_pos[1] + rotated_pivot_y];
+                                    let world_pivot = [
+                                        cur_pos[0] + rotated_pivot_x,
+                                        cur_pos[1] + rotated_pivot_y,
+                                    ];
                                     // offset is in local coordinates (-pivot)
                                     let offset = [-pivot[0], -pivot[1]];
                                     let end_rot = cur_rot + angle.to_radians();
@@ -416,12 +426,18 @@ impl KeyframeExecutor {
                         }
                     }
                 }
-                Keyframe::PivotRotate { pivot, pivot_mode, angle, .. } => {
+                Keyframe::PivotRotate {
+                    pivot,
+                    pivot_mode,
+                    angle,
+                    ..
+                } => {
                     // Apply pivot rotation to all targets
                     for target_id in &sequence.target_ids {
                         if let Some(&(init_pos, init_rot)) = initial_transforms.get(target_id) {
                             // Get current state (result of previous keyframes) or use initial
-                            let (cur_pos, _cur_rot) = state.get(target_id)
+                            let (cur_pos, _cur_rot) = state
+                                .get(target_id)
                                 .copied()
                                 .unwrap_or((init_pos, init_rot));
 
@@ -430,7 +446,8 @@ impl KeyframeExecutor {
                                 PivotMode::Absolute => {
                                     // Absolute mode: use initial position for offset calculation
                                     // Convert world offset to local coordinates (remove initial rotation)
-                                    let world_offset = [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
+                                    let world_offset =
+                                        [init_pos[0] - pivot[0], init_pos[1] - pivot[1]];
                                     let (sin_init, cos_init) = (-init_rot).sin_cos();
                                     let offset = [
                                         world_offset[0] * cos_init - world_offset[1] * sin_init,
@@ -442,14 +459,16 @@ impl KeyframeExecutor {
                                 PivotMode::Relative => {
                                     // Relative mode: pivot is offset from current position in local coordinates
                                     // Get current rotation from state
-                                    let cur_rot = state.get(target_id)
-                                        .map(|(_, r)| *r)
-                                        .unwrap_or(init_rot);
+                                    let cur_rot =
+                                        state.get(target_id).map(|(_, r)| *r).unwrap_or(init_rot);
                                     // Rotate pivot offset by current rotation to get world coordinates
                                     let (sin, cos) = cur_rot.sin_cos();
                                     let rotated_pivot_x = pivot[0] * cos - pivot[1] * sin;
                                     let rotated_pivot_y = pivot[0] * sin + pivot[1] * cos;
-                                    let world_pivot = [cur_pos[0] + rotated_pivot_x, cur_pos[1] + rotated_pivot_y];
+                                    let world_pivot = [
+                                        cur_pos[0] + rotated_pivot_x,
+                                        cur_pos[1] + rotated_pivot_y,
+                                    ];
                                     // offset is in local coordinates (-pivot)
                                     let offset = [-pivot[0], -pivot[1]];
                                     let final_rot = cur_rot + angle.to_radians();
@@ -501,7 +520,9 @@ mod tests {
                     duration: 1.0,
                     easing: EasingType::Linear,
                 },
-                Keyframe::Delay { duration: NumberOrExpr::Number(0.5) },
+                Keyframe::Delay {
+                    duration: NumberOrExpr::Number(0.5),
+                },
                 Keyframe::Apply {
                     translation: Some([0.0, 0.0]),
                     rotation: None,
@@ -553,7 +574,8 @@ mod tests {
 
         // Simulate animation progress
         for _ in 0..10 {
-            let updates = executor.update(0.1, &sequences, &positions, &initials, &mut game_context);
+            let updates =
+                executor.update(0.1, &sequences, &positions, &initials, &mut game_context);
             if !updates.is_empty() {
                 positions.insert(updates[0].0.clone(), (updates[0].1, updates[0].2));
             }
@@ -626,7 +648,8 @@ mod tests {
 
         // Run for a while
         for _ in 0..100 {
-            let updates = executor.update(0.05, &sequences, &positions, &initials, &mut game_context);
+            let updates =
+                executor.update(0.05, &sequences, &positions, &initials, &mut game_context);
             for (id, pos, rot) in updates {
                 positions.insert(id, (pos, rot));
             }
@@ -642,14 +665,12 @@ mod tests {
         let sequence = KeyframeSequence {
             name: "pivot_test".to_string(),
             target_ids: vec!["flipper".to_string()],
-            keyframes: vec![
-                Keyframe::PivotRotate {
-                    pivot: [0.0, 0.0],  // Pivot at origin
-                    angle: 90.0,         // Rotate 90 degrees
-                    duration: 1.0,
-                    easing: EasingType::Linear,
-                },
-            ],
+            keyframes: vec![Keyframe::PivotRotate {
+                pivot: [0.0, 0.0], // Pivot at origin
+                angle: 90.0,       // Rotate 90 degrees
+                duration: 1.0,
+                easing: EasingType::Linear,
+            }],
             autoplay: true,
         };
 
@@ -666,7 +687,8 @@ mod tests {
 
         // Run animation to completion
         for _ in 0..10 {
-            let updates = executor.update(0.1, &sequences, &positions, &initials, &mut game_context);
+            let updates =
+                executor.update(0.1, &sequences, &positions, &initials, &mut game_context);
             for (id, pos, rot) in updates {
                 positions.insert(id, (pos, rot));
             }
@@ -675,8 +697,15 @@ mod tests {
         // After 90 degree rotation around origin, (1.0, 0) should be at approximately (0, 1.0)
         let (pos, rot) = positions.get("flipper").unwrap();
         assert!(pos[0].abs() < 0.01, "X should be near 0, got {}", pos[0]);
-        assert!((pos[1] - 1.0).abs() < 0.01, "Y should be near 1.0, got {}", pos[1]);
-        assert!((*rot - std::f32::consts::FRAC_PI_2).abs() < 0.01, "Rotation should be 90 degrees");
+        assert!(
+            (pos[1] - 1.0).abs() < 0.01,
+            "Y should be near 1.0, got {}",
+            pos[1]
+        );
+        assert!(
+            (*rot - std::f32::consts::FRAC_PI_2).abs() < 0.01,
+            "Rotation should be 90 degrees"
+        );
     }
 
     #[test]
@@ -687,7 +716,9 @@ mod tests {
             target_ids: vec!["obj1".to_string()],
             keyframes: vec![
                 Keyframe::LoopStart { count: Some(3) },
-                Keyframe::Delay { duration: NumberOrExpr::Expr("random(0.1, 0.2)".to_string()) },
+                Keyframe::Delay {
+                    duration: NumberOrExpr::Expr("random(0.1, 0.2)".to_string()),
+                },
                 Keyframe::Apply {
                     translation: Some([10.0, 0.0]),
                     rotation: None,
@@ -707,7 +738,8 @@ mod tests {
 
         // Run for a while - the test just verifies it doesn't crash
         for _ in 0..100 {
-            let updates = executor.update(0.05, &sequences, &positions, &initials, &mut game_context);
+            let updates =
+                executor.update(0.05, &sequences, &positions, &initials, &mut game_context);
             for (id, pos, rot) in updates {
                 positions.insert(id, (pos, rot));
             }

@@ -5,9 +5,9 @@
 //! - `MarbleGamePlugin` / `MarbleEditorPlugin`: Legacy wrappers (deprecated)
 
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::*;
 
 use crate::bevy::events::*;
+use crate::bevy::rapier_plugin::{MarblePhysicsPlugin, PhysicsSet};
 use crate::bevy::resources::*;
 use crate::bevy::state_store::StateStores;
 use crate::bevy::systems;
@@ -77,7 +77,7 @@ impl Plugin for MarbleUnifiedPlugin {
         // Physics
         // ====================================================================
         app.insert_resource(Time::<Fixed>::from_seconds(PHYSICS_DT as f64));
-        app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default());
+        app.add_plugins(MarblePhysicsPlugin);
 
         // ====================================================================
         // Resources (all registered upfront, systems gated by run_if)
@@ -160,7 +160,7 @@ impl Plugin for MarbleUnifiedPlugin {
                 systems::apply_keyframe_updates,
             )
                 .chain()
-                .before(PhysicsSet::SyncBackend),
+                .before(PhysicsSet::SyncToRapier),
         );
 
         // Post-physics (FixedUpdate)
@@ -172,7 +172,7 @@ impl Plugin for MarbleUnifiedPlugin {
                 systems::check_game_over,
             )
                 .chain()
-                .after(PhysicsSet::Writeback),
+                .after(PhysicsSet::SyncFromRapier),
         );
 
         // Command processing and event handlers (always active)
@@ -213,12 +213,9 @@ impl Plugin for MarbleUnifiedPlugin {
             // Frame hash + desync detection (Game mode, FixedUpdate after physics)
             app.add_systems(
                 FixedUpdate,
-                (
-                    p2p_sync::broadcast_frame_hash,
-                    p2p_sync::check_desync,
-                )
+                (p2p_sync::broadcast_frame_hash, p2p_sync::check_desync)
                     .chain()
-                    .after(PhysicsSet::Writeback)
+                    .after(PhysicsSet::SyncFromRapier)
                     .run_if(in_state(AppMode::Game)),
             );
 
@@ -248,15 +245,11 @@ impl Plugin for MarbleUnifiedPlugin {
         // Rendering systems (Game | Editor)
         // ====================================================================
 
-        let in_game_or_editor =
-            in_state(AppMode::Game).or(in_state(AppMode::Editor));
+        let in_game_or_editor = in_state(AppMode::Game).or(in_state(AppMode::Editor));
 
         app.add_systems(
             Update,
-            (
-                systems::render_map_objects,
-                systems::render_marbles,
-            )
+            (systems::render_map_objects, systems::render_marbles)
                 .run_if(in_game_or_editor.clone()),
         );
 
@@ -281,15 +274,13 @@ impl Plugin for MarbleUnifiedPlugin {
 
         app.add_systems(
             Update,
-            systems::handle_editor_camera_input
-                .run_if(in_state(AppMode::Editor)),
+            systems::handle_editor_camera_input.run_if(in_state(AppMode::Editor)),
         );
 
         // Camera smoothing (Game | Editor)
         app.add_systems(
             Update,
-            systems::apply_camera_smoothing
-                .run_if(in_game_or_editor.clone()),
+            systems::apply_camera_smoothing.run_if(in_game_or_editor.clone()),
         );
 
         // ====================================================================
@@ -393,13 +384,11 @@ impl Plugin for MarbleUnifiedPlugin {
 
         app.add_systems(
             Update,
-            systems::handle_preview_sequence
-                .run_if(in_state(AppMode::Editor)),
+            systems::handle_preview_sequence.run_if(in_state(AppMode::Editor)),
         );
         app.add_systems(
             Update,
-            systems::update_preview_transforms
-                .run_if(in_state(EditorState::Preview)),
+            systems::update_preview_transforms.run_if(in_state(EditorState::Preview)),
         );
         app.add_systems(OnExit(EditorState::Preview), systems::on_exit_preview);
 
@@ -473,6 +462,7 @@ fn cleanup_game_mode(
     mut initial_transforms: ResMut<InitialTransforms>,
     mut keyframe_executors: ResMut<KeyframeExecutors>,
     mut game_state: ResMut<MarbleGameState>,
+    mut physics: ResMut<crate::bevy::rapier_plugin::PhysicsWorldRes>,
 ) {
     tracing::info!("[marble] cleanup_game_mode");
 
@@ -492,6 +482,7 @@ fn cleanup_game_mode(
     game_state.players.clear();
     game_state.arrival_order.clear();
     game_state.frame = 0;
+    physics.world.reset();
 }
 
 /// Cleanup when exiting Editor mode.
@@ -510,6 +501,7 @@ fn cleanup_editor_mode(
     mut editor_state: ResMut<systems::EditorStateRes>,
     mut grid_mesh_state: ResMut<systems::GridMeshState>,
     mut grid_label_state: ResMut<systems::GridLabelState>,
+    mut physics: ResMut<crate::bevy::rapier_plugin::PhysicsWorldRes>,
 ) {
     tracing::info!("[marble] cleanup_editor_mode");
 
@@ -535,6 +527,7 @@ fn cleanup_editor_mode(
     *editor_state = systems::EditorStateRes::default();
     *grid_mesh_state = systems::GridMeshState::default();
     *grid_label_state = systems::GridLabelState::default();
+    physics.world.reset();
 }
 
 // ============================================================================

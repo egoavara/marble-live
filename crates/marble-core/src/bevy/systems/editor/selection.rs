@@ -1,9 +1,9 @@
 //! Selection handling systems for the editor.
 
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::Sensor;
 
 use super::{EditorStateRes, SelectObjectEvent, UpdateObjectEvent};
+use crate::bevy::rapier_plugin::{PhysicsCollider, PhysicsWorldRes, Sensor};
 use crate::bevy::systems::map_loader::{create_obstacle_collider, create_trigger_collider};
 use crate::bevy::{GuidelineMarker, MapConfig, VectorFieldZone};
 use crate::dsl::GameContext;
@@ -28,7 +28,7 @@ pub fn handle_selection_events(
 ///
 /// Updates both MapConfig and entity transforms when objects change.
 /// For guidelines, also updates the GuidelineMarker component.
-/// For obstacles and triggers, also updates the Collider component.
+/// For obstacles and triggers, also updates the physics collider.
 pub fn handle_object_updates(
     mut commands: Commands,
     mut map_config: Option<ResMut<MapConfig>>,
@@ -37,6 +37,8 @@ pub fn handle_object_updates(
     mut transforms: Query<&mut Transform>,
     mut guideline_markers: Query<&mut GuidelineMarker>,
     mut vector_field_zones: Query<&mut VectorFieldZone>,
+    colliders: Query<&PhysicsCollider>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     let Some(ref mut config) = map_config else {
         return;
@@ -54,9 +56,7 @@ pub fn handle_object_updates(
         let entity = object_map.get_by_index(event.index);
 
         // Fallback: try to find by ID if index lookup fails
-        let entity = entity.or_else(|| {
-            event.object.id.as_ref().and_then(|id| object_map.get(id))
-        });
+        let entity = entity.or_else(|| event.object.id.as_ref().and_then(|id| object_map.get(id)));
 
         let Some(entity) = entity else {
             tracing::warn!(
@@ -77,15 +77,39 @@ pub fn handle_object_updates(
             transform.rotation = Quat::from_rotation_z(rot);
         }
 
-        // Update Collider for physics objects
+        // Update physics collider for physics objects
         match event.object.role {
             ObjectRole::Obstacle => {
-                let (_, _, collider) = create_obstacle_collider(&shape);
-                commands.entity(entity).insert(collider);
+                let (pos, rot, new_shape) = create_obstacle_collider(&shape);
+                // Remove old collider and add new one
+                if let Ok(old_collider) = colliders.get(entity) {
+                    physics.world.remove_static_collider(old_collider.0);
+                    let collider = rapier2d::prelude::ColliderBuilder::new(new_shape)
+                        .translation(rapier2d::prelude::Vector::new(pos.x, pos.y))
+                        .rotation(rot)
+                        .friction(0.3)
+                        .restitution(0.5)
+                        .build();
+                    let new_handle = physics.world.add_static_collider(collider);
+                    commands.entity(entity).insert(PhysicsCollider(new_handle));
+                }
             }
             ObjectRole::Trigger => {
-                let (_, _, collider) = create_trigger_collider(&shape);
-                commands.entity(entity).insert((collider, Sensor));
+                let (pos, rot, new_shape) = create_trigger_collider(&shape);
+                if let Ok(old_collider) = colliders.get(entity) {
+                    physics.world.remove_static_collider(old_collider.0);
+                    let collider = rapier2d::prelude::ColliderBuilder::new(new_shape)
+                        .translation(rapier2d::prelude::Vector::new(pos.x, pos.y))
+                        .rotation(rot)
+                        .sensor(true)
+                        .active_events(rapier2d::prelude::ActiveEvents::COLLISION_EVENTS)
+                        .user_data(entity.to_bits() as u128)
+                        .build();
+                    let new_handle = physics.world.add_static_collider(collider);
+                    commands
+                        .entity(entity)
+                        .insert((PhysicsCollider(new_handle), Sensor));
+                }
             }
             _ => {} // Spawner, VectorField, Guideline don't have physics colliders
         }

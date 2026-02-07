@@ -5,7 +5,9 @@
 //! This crate is WASM-only. Use `trunk build` or `cargo check --target wasm32-unknown-unknown`.
 
 #[cfg(not(target_arch = "wasm32"))]
-compile_error!("marble-client only supports wasm32 target. Use: cargo check -p marble-client --target wasm32-unknown-unknown");
+compile_error!(
+    "marble-client only supports wasm32 target. Use: cargo check -p marble-client --target wasm32-unknown-unknown"
+);
 
 mod app;
 mod camera;
@@ -42,9 +44,7 @@ fn main() {
     // NOTE: performance_layer() removed - it records ALL tracing events to
     // browser's Performance API, causing memory leak (Bevy generates hundreds
     // of spans per frame). Use Chrome DevTools Performance tab instead.
-    tracing_subscriber::registry()
-        .with(fmt_layer)
-        .init();
+    tracing_subscriber::registry().with(fmt_layer).init();
 
     yew::Renderer::<App>::new().render();
 }

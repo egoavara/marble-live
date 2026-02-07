@@ -3,7 +3,7 @@
 use yew::prelude::*;
 
 use crate::components::{GameView, Layout};
-use crate::hooks::{use_join_room, JoinRoomState, PlayerInfo};
+use crate::hooks::{JoinRoomState, PlayerInfo, use_join_room};
 
 /// Props for the PlayPage component.
 #[derive(Properties, PartialEq)]
@@ -48,7 +48,10 @@ pub fn play_page(props: &PlayPageProps) -> Html {
                 </div>
             }
         }
-        JoinRoomState::Joined { signaling_url, is_host } => {
+        JoinRoomState::Joined {
+            signaling_url,
+            is_host,
+        } => {
             html! {
                 <>
                     <GameView

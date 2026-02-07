@@ -1,6 +1,6 @@
 use yew::Callback;
 
-pub fn async_callback<Deps, F, Fut, E>(deps: Deps,f: F) -> Callback<E>
+pub fn async_callback<Deps, F, Fut, E>(deps: Deps, f: F) -> Callback<E>
 where
     Deps: Clone + 'static,
     F: Fn(Deps) -> Fut + 'static,

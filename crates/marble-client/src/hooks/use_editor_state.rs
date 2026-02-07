@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
 use marble_core::dsl::BoolOrExpr;
+use marble_core::dsl::{NumberOrExpr, Vec2OrExpr};
 use marble_core::map::{
     Keyframe, KeyframeSequence, MapMeta, MapObject, ObjectProperties, ObjectRole, RouletteConfig,
     Shape, VectorFieldFalloff, VectorFieldProperties,
@@ -121,7 +121,10 @@ pub fn update_shape_cache(cache: &mut ShapeCache, shape: &Shape) {
         Shape::Rect { size, rotation, .. } => {
             let s = get_vec2_static_internal(size).unwrap_or([1.0, 0.5]);
             let r = get_number_static_internal(rotation).unwrap_or(0.0);
-            cache.rect = Some(RectCache { size: s, rotation: r });
+            cache.rect = Some(RectCache {
+                size: s,
+                rotation: r,
+            });
         }
         Shape::Bezier {
             start,
@@ -190,11 +193,7 @@ pub fn create_shape_from_cache(
             })
         }
         "circle" => {
-            let radius = cache
-                .circle
-                .as_ref()
-                .map(|c| c.radius)
-                .unwrap_or(0.3);
+            let radius = cache.circle.as_ref().map(|c| c.radius).unwrap_or(0.3);
 
             Some(Shape::Circle {
                 center: Vec2OrExpr::Static(center),
@@ -230,14 +229,8 @@ pub fn create_shape_from_cache(
 
             let cos_a = angle.cos();
             let sin_a = angle.sin();
-            let start = [
-                center[0] - half_span * cos_a,
-                center[1] - half_span * sin_a,
-            ];
-            let end = [
-                center[0] + half_span * cos_a,
-                center[1] + half_span * sin_a,
-            ];
+            let start = [center[0] - half_span * cos_a, center[1] - half_span * sin_a];
+            let end = [center[0] + half_span * cos_a, center[1] + half_span * sin_a];
             let control1 = [
                 center[0] + control1_offset[0],
                 center[1] + control1_offset[1],
@@ -846,17 +839,20 @@ pub fn use_editor_state() -> EditorStateHandle {
     let bevy_objects_version = crate::hooks::get_editor_state_version();
     {
         let state = state.clone();
-        use_effect_with((bevy_objects.clone(), bevy_objects_version), move |(bevy_objs, version)| {
-            // Skip sync if Bevy hasn't loaded yet (version 0)
-            // This prevents race condition where Yew overwrites localStorage data
-            // with empty array before Bevy finishes loading
-            if *version == 0 {
-                return;
-            }
-            // Dispatch to reducer - duplicate check is done inside reducer
-            // to avoid closure capturing stale state
-            state.dispatch(EditorAction::SyncObjectsFromBevy(bevy_objs.clone()));
-        });
+        use_effect_with(
+            (bevy_objects.clone(), bevy_objects_version),
+            move |(bevy_objs, version)| {
+                // Skip sync if Bevy hasn't loaded yet (version 0)
+                // This prevents race condition where Yew overwrites localStorage data
+                // with empty array before Bevy finishes loading
+                if *version == 0 {
+                    return;
+                }
+                // Dispatch to reducer - duplicate check is done inside reducer
+                // to avoid closure capturing stale state
+                state.dispatch(EditorAction::SyncObjectsFromBevy(bevy_objs.clone()));
+            },
+        );
     }
 
     // Poll Bevy for selection updates (Bevy -> Yew sync)
@@ -875,14 +871,17 @@ pub fn use_editor_state() -> EditorStateHandle {
     let bevy_keyframes_version = crate::hooks::get_editor_keyframes_version();
     {
         let state = state.clone();
-        use_effect_with((bevy_keyframes.clone(), bevy_keyframes_version), move |(bevy_kfs, version)| {
-            // Skip sync if Bevy hasn't loaded yet (version 0)
-            if *version == 0 {
-                return;
-            }
-            // Dispatch to reducer - duplicate check is done inside reducer
-            state.dispatch(EditorAction::SyncKeyframesFromBevy(bevy_kfs.clone()));
-        });
+        use_effect_with(
+            (bevy_keyframes.clone(), bevy_keyframes_version),
+            move |(bevy_kfs, version)| {
+                // Skip sync if Bevy hasn't loaded yet (version 0)
+                if *version == 0 {
+                    return;
+                }
+                // Dispatch to reducer - duplicate check is done inside reducer
+                state.dispatch(EditorAction::SyncKeyframesFromBevy(bevy_kfs.clone()));
+            },
+        );
     }
 
     let on_new = {
@@ -900,10 +899,7 @@ pub fn use_editor_state() -> EditorStateHandle {
             };
             // Bevy에 load_map 명령 전송
             if let Ok(config_json) = serde_json::to_string(&config) {
-                let cmd = format!(
-                    r#"{{"type":"load_map","config":{}}}"#,
-                    config_json
-                );
+                let cmd = format!(r#"{{"type":"load_map","config":{}}}"#, config_json);
                 if let Err(e) = crate::hooks::send_command(&cmd) {
                     tracing::warn!("Failed to sync new map to Bevy: {:?}", e);
                 }
@@ -917,10 +913,7 @@ pub fn use_editor_state() -> EditorStateHandle {
         Callback::from(move |config: RouletteConfig| {
             // Bevy에 load_map 명령 전송
             if let Ok(config_json) = serde_json::to_string(&config) {
-                let cmd = format!(
-                    r#"{{"type":"load_map","config":{}}}"#,
-                    config_json
-                );
+                let cmd = format!(r#"{{"type":"load_map","config":{}}}"#, config_json);
                 if let Err(e) = crate::hooks::send_command(&cmd) {
                     tracing::warn!("Failed to sync load_map to Bevy: {:?}", e);
                 }
@@ -957,10 +950,7 @@ pub fn use_editor_state() -> EditorStateHandle {
         Callback::from(move |object: MapObject| {
             // Sync to Bevy
             if let Ok(object_json) = serde_json::to_string(&object) {
-                let cmd = format!(
-                    r#"{{"type":"add_object","object":{}}}"#,
-                    object_json
-                );
+                let cmd = format!(r#"{{"type":"add_object","object":{}}}"#, object_json);
                 if let Err(e) = crate::hooks::send_command(&cmd) {
                     tracing::warn!("Failed to sync add to Bevy: {:?}", e);
                 }
@@ -973,10 +963,7 @@ pub fn use_editor_state() -> EditorStateHandle {
         let state = state.clone();
         Callback::from(move |index: usize| {
             // Sync to Bevy
-            let cmd = format!(
-                r#"{{"type":"delete_object","index":{}}}"#,
-                index
-            );
+            let cmd = format!(r#"{{"type":"delete_object","index":{}}}"#, index);
             if let Err(e) = crate::hooks::send_command(&cmd) {
                 tracing::warn!("Failed to sync delete to Bevy: {:?}", e);
             }
@@ -1023,10 +1010,7 @@ pub fn use_editor_state() -> EditorStateHandle {
                 let mut new_obj = obj.clone();
                 move_object_center(&mut new_obj, x, y);
                 if let Ok(object_json) = serde_json::to_string(&new_obj) {
-                    let cmd = format!(
-                        r#"{{"type":"add_object","object":{}}}"#,
-                        object_json
-                    );
+                    let cmd = format!(r#"{{"type":"add_object","object":{}}}"#, object_json);
                     if let Err(e) = crate::hooks::send_command(&cmd) {
                         tracing::warn!("Failed to sync paste to Bevy: {:?}", e);
                     }

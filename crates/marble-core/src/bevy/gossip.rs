@@ -88,11 +88,7 @@ impl GossipHandler {
     /// Process an incoming message and determine relay targets.
     /// Returns (should_process, relay_targets).
     #[cfg(target_arch = "wasm32")]
-    pub fn handle_incoming(
-        &mut self,
-        msg: &P2pMessage,
-        from_peer: PeerId,
-    ) -> (bool, Vec<PeerId>) {
+    pub fn handle_incoming(&mut self, msg: &P2pMessage, from_peer: PeerId) -> (bool, Vec<PeerId>) {
         // Check for duplicate
         if self.is_seen(&msg.message_id) {
             return (false, vec![]);

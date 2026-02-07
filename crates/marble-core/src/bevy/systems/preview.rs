@@ -192,11 +192,8 @@ pub fn update_preview_transforms(
     // Fast-forward each executor to the selected keyframe
     // and apply the calculated state immediately
     for executor in &mut keyframe_executors.executors {
-        let state = executor.fast_forward_to(
-            keyframe_index,
-            &config.0.keyframes,
-            &initial_transforms_map,
-        );
+        let state =
+            executor.fast_forward_to(keyframe_index, &config.0.keyframes, &initial_transforms_map);
 
         // Apply the fast-forwarded state immediately (one-time)
         // and queue updates for the animation system to continue from

@@ -4,7 +4,10 @@ use marble_core::map::{KeyframeSequence, MapObject, ObjectRole, Shape};
 use yew::prelude::*;
 
 use super::sequence_list::SequenceList;
-use crate::hooks::{create_default_guideline, create_default_obstacle, create_default_spawner, create_default_trigger, create_default_vector_field};
+use crate::hooks::{
+    create_default_guideline, create_default_obstacle, create_default_spawner,
+    create_default_trigger, create_default_vector_field,
+};
 
 /// Tab selection for the object list panel.
 #[derive(Clone, Copy, PartialEq, Eq)]

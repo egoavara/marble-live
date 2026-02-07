@@ -9,13 +9,11 @@ use web_sys::MouseEvent;
 use yew::prelude::*;
 
 use super::peer_list::ArrivalInfo;
-use super::reaction_panel::{get_reaction_emoji, REACTION_COOLDOWN_MS};
+use super::reaction_panel::{REACTION_COOLDOWN_MS, get_reaction_emoji};
 use super::{ChatPanel, PeerList, ReactionDisplay};
 use crate::hooks::{
-    send_command, use_bevy, use_bevy_game, use_bevy_players,
-    use_config_secret, use_config_username,
-    use_p2p_room_with_credentials, P2pRoomConfig,
-    PlayerInfo,
+    P2pRoomConfig, PlayerInfo, send_command, use_bevy, use_bevy_game, use_bevy_players,
+    use_config_secret, use_config_username, use_p2p_room_with_credentials,
 };
 
 /// Canvas ID for the game view (uses the global canvas from App.rs).
@@ -76,14 +74,14 @@ struct GameViewInnerProps {
 
 /// Predefined colors for players.
 const PLAYER_COLORS: [[u8; 4]; 8] = [
-    [255, 0, 0, 255],     // Red
-    [0, 0, 255, 255],     // Blue
-    [0, 255, 0, 255],     // Green
-    [255, 128, 0, 255],   // Orange
-    [128, 0, 255, 255],   // Purple
-    [255, 0, 128, 255],   // Pink
-    [0, 255, 255, 255],   // Cyan
-    [255, 255, 0, 255],   // Yellow
+    [255, 0, 0, 255],   // Red
+    [0, 0, 255, 255],   // Blue
+    [0, 255, 0, 255],   // Green
+    [255, 128, 0, 255], // Orange
+    [128, 0, 255, 255], // Purple
+    [255, 0, 128, 255], // Pink
+    [0, 255, 255, 255], // Cyan
+    [255, 255, 0, 255], // Yellow
 ];
 
 /// Inner component that uses Bevy context and P2P hooks.
@@ -116,8 +114,10 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
     let peers = p2p.peers();
     let connection_state = p2p.state();
     let messages = p2p.messages();
-    let is_connected =
-        matches!(connection_state, crate::services::p2p::P2pConnectionState::Connected);
+    let is_connected = matches!(
+        connection_state,
+        crate::services::p2p::P2pConnectionState::Connected
+    );
 
     // Game phase state - start in lobby
     let game_phase = use_state(|| GamePhase::InLobby);
@@ -329,18 +329,21 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
     let reaction_disabled = *cooldown_active;
 
     // Build arrival info from Bevy state
-    let arrival_info: Vec<ArrivalInfo> = bevy_players.iter().map(|player: &PlayerInfo| {
-        let arrival_order = bevy_arrival_order
-            .iter()
-            .position(|&id| id == player.id)
-            .map(|pos| (pos + 1) as u32);
-        ArrivalInfo {
-            player_id: player.name.clone(),
-            rank: player.rank,
-            arrival_order,
-            live_rank: player.live_rank,
-        }
-    }).collect();
+    let arrival_info: Vec<ArrivalInfo> = bevy_players
+        .iter()
+        .map(|player: &PlayerInfo| {
+            let arrival_order = bevy_arrival_order
+                .iter()
+                .position(|&id| id == player.id)
+                .map(|pos| (pos + 1) as u32);
+            ArrivalInfo {
+                player_id: player.name.clone(),
+                rank: player.rank,
+                arrival_order,
+                live_rank: player.live_rank,
+            }
+        })
+        .collect();
 
     let gamerule = bevy_game_state.gamerule.clone();
 
@@ -370,7 +373,9 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
             });
         } else {
             // Find and show host peer first
-            if let Some(host_peer) = host_peer_id.and_then(|hid| sorted_peers.iter().find(|p| p.peer_id == hid)) {
+            if let Some(host_peer) =
+                host_peer_id.and_then(|hid| sorted_peers.iter().find(|p| p.peer_id == hid))
+            {
                 let host_name = host_peer.player_id.as_deref().unwrap_or("???");
                 items.push(html! {
                     <div class="lobby-player-item host">

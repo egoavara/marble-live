@@ -138,7 +138,8 @@ mod tests {
             selector.update_quality("p2", "peer2", 50, 0.0, true);
         }
 
-        let bridges = selector.select_bridges(&["p1".to_string(), "p2".to_string(), "p3".to_string()]);
+        let bridges =
+            selector.select_bridges(&["p1".to_string(), "p2".to_string(), "p3".to_string()]);
         assert_eq!(bridges.len(), 2);
         // p2 should be first due to best RTT and stability
         assert!(bridges.contains(&"p2".to_string()));

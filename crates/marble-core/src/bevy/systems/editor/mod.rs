@@ -246,12 +246,12 @@ impl GizmoColors {
     pub const LOCAL_X_AXIS: Color = Color::srgb(0.7, 0.1, 0.1);
     pub const LOCAL_Y_AXIS: Color = Color::srgb(0.1, 0.7, 0.1);
     // Keyframe gizmo colors
-    pub const KEYFRAME_PIVOT: Color = Color::srgb(0.9, 0.4, 0.9);      // Magenta
-    pub const KEYFRAME_TRANSLATE: Color = Color::srgb(0.3, 0.8, 0.3);  // Green
-    pub const KEYFRAME_ROTATE: Color = Color::srgb(0.3, 0.5, 0.9);     // Blue
+    pub const KEYFRAME_PIVOT: Color = Color::srgb(0.9, 0.4, 0.9); // Magenta
+    pub const KEYFRAME_TRANSLATE: Color = Color::srgb(0.3, 0.8, 0.3); // Green
+    pub const KEYFRAME_ROTATE: Color = Color::srgb(0.3, 0.5, 0.9); // Blue
     // Guideline gizmo colors
-    pub const GUIDELINE: Color = Color::srgba(0.0, 0.8, 0.8, 0.9);     // Cyan
-    pub const GUIDELINE_ENDPOINT: Color = Color::srgb(0.0, 0.6, 0.6);  // Darker cyan
+    pub const GUIDELINE: Color = Color::srgba(0.0, 0.8, 0.8, 0.9); // Cyan
+    pub const GUIDELINE_ENDPOINT: Color = Color::srgb(0.0, 0.6, 0.6); // Darker cyan
     // Distance line color
     pub const DISTANCE_LINE: Color = Color::srgba(0.8, 0.8, 0.0, 0.5); // Yellow, semi-transparent
 }

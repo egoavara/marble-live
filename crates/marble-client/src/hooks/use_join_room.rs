@@ -13,7 +13,10 @@ pub enum JoinRoomState {
     Idle,
     Joining,
     /// Successfully joined the room. Server is idempotent, so this works even if already in room.
-    Joined { signaling_url: String, is_host: bool },
+    Joined {
+        signaling_url: String,
+        is_host: bool,
+    },
     Error(String),
 }
 
@@ -71,22 +74,24 @@ pub fn use_join_room(room_id: &str) -> UseStateHandle<JoinRoomState> {
                             room_id: room_id.clone(),
                         };
 
-                        let player_result = client.borrow_mut().get_room_player(player_request).await;
+                        let player_result =
+                            client.borrow_mut().get_room_player(player_request).await;
 
                         let is_host = match player_result {
-                            Ok(player_response) => {
-                                player_response
-                                    .into_inner()
-                                    .players
-                                    .iter()
-                                    .find(|p| p.id == player_id)
-                                    .map(|p| p.is_host)
-                                    .unwrap_or(false)
-                            }
+                            Ok(player_response) => player_response
+                                .into_inner()
+                                .players
+                                .iter()
+                                .find(|p| p.id == player_id)
+                                .map(|p| p.is_host)
+                                .unwrap_or(false),
                             Err(_) => false,
                         };
 
-                        state.set(JoinRoomState::Joined { signaling_url, is_host });
+                        state.set(JoinRoomState::Joined {
+                            signaling_url,
+                            is_host,
+                        });
                     }
                     Err(e) => {
                         state.set(JoinRoomState::Error(e.message().to_string()));

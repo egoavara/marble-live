@@ -107,11 +107,6 @@ bevy = { version = "0.18", default-features = false, features = [
     "webgpu",
 ] }
 
-# Bevy Rapier2D Physics (bevy 0.18 compatible fork)
-bevy_rapier2d = { git = "https://github.com/Buncys/bevy_rapier", branch = "bevy-0.18.0", features = [
-    "enhanced-determinism",
-    "serde-serialize",
-] }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

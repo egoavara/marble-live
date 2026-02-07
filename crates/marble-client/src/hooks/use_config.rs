@@ -18,7 +18,7 @@ pub enum ConfigSecret {
     Anonymous(String),
 }
 impl ConfigSecret {
-    pub fn to_string(&self) -> String{
+    pub fn to_string(&self) -> String {
         match self {
             ConfigSecret::Anonymous(s) => format!("anon:{}", s),
         }

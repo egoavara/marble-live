@@ -11,22 +11,25 @@
 use std::hash::{Hash, Hasher};
 
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::*;
 use matchbox_socket::PeerId;
 use prost::Message as ProstMessage;
+use rapier2d::prelude::*;
 
 use marble_proto::play::p2p_message::Payload;
 use marble_proto::play::{FrameHash, P2pMessage, Ping, Pong};
 
 use crate::bevy::gossip::GossipHandler;
 use crate::bevy::p2p_socket::P2pSocketRes;
+use crate::bevy::rapier_plugin::{
+    PhysicsBody, PhysicsExternalForce, PhysicsWorldRes, USER_DATA_MARBLE, encode_user_data,
+};
 use crate::bevy::sync_snapshot::{BevySyncSnapshot, MapObjectTransformSnapshot, MarbleSnapshot};
+use crate::bevy::wasm_entry::{take_p2p_disconnect, take_pending_p2p, take_pending_peer_updates};
 use crate::bevy::{
     BroadcastGameStartEvent, CommandQueue, DeterministicRng, GameCommand, GameContextRes,
     KeyframeExecutors, KeyframeTarget, Marble, MarbleGameState, MarbleVisual, StateStores,
     SyncSnapshotRequestEvent, SyncState,
 };
-use crate::bevy::wasm_entry::{take_p2p_disconnect, take_pending_p2p, take_pending_peer_updates};
 
 /// Hash broadcast interval in frames (0.5 seconds at 60 FPS).
 const HASH_BROADCAST_INTERVAL: u64 = 30;
@@ -122,6 +125,16 @@ pub fn poll_p2p_socket(
                     socket_res.connected_peers.push(peer_id);
                     peers_changed = true;
                     tracing::info!("[p2p] Peer connected: {}", peer_id);
+
+                    // Host: auto-send sync snapshot to newly connected peer
+                    // so they can align keyframe animations during lobby
+                    if sync_state.is_host {
+                        sync_request_events.write(SyncSnapshotRequestEvent {
+                            peer_id_bytes: peer_id.0.as_bytes().to_vec(),
+                            from_frame: 0,
+                        });
+                        tracing::info!("[p2p] Queued auto-sync snapshot for new peer {}", peer_id);
+                    }
                 }
             }
             matchbox_socket::PeerState::Disconnected => {
@@ -302,10 +315,14 @@ fn process_p2p_payload(
             );
 
             // Parse player list from initial_state
-            if let Ok(state_json) = serde_json::from_slice::<serde_json::Value>(&game_start.initial_state) {
+            if let Ok(state_json) =
+                serde_json::from_slice::<serde_json::Value>(&game_start.initial_state)
+            {
                 // Push commands to CommandQueue for next-frame processing
                 command_queue.push(GameCommand::SetSyncHost { is_host: false });
-                command_queue.push(GameCommand::SetSeed { seed: game_start.seed });
+                command_queue.push(GameCommand::SetSeed {
+                    seed: game_start.seed,
+                });
                 if !game_start.gamerule.is_empty() {
                     command_queue.push(GameCommand::SetGamerule {
                         gamerule: game_start.gamerule.clone(),
@@ -352,9 +369,7 @@ fn process_p2p_payload(
             let sync_msg = gossip.create_message(
                 &socket_res.player_id,
                 1,
-                Payload::SyncRequest(marble_proto::play::SyncRequest {
-                    from_frame: 0,
-                }),
+                Payload::SyncRequest(marble_proto::play::SyncRequest { from_frame: 0 }),
             );
             let sync_data = sync_msg.encode_to_vec();
             socket_res
@@ -400,10 +415,13 @@ fn process_p2p_payload(
                 return;
             }
 
-            tracing::info!(
-                "[p2p] Received SyncState at frame {}",
-                sync_state_msg.frame
-            );
+            // Set host peer ID if not yet known (e.g., from auto-sync before GameStart)
+            if socket_res.host_peer_id.is_none() {
+                socket_res.host_peer_id = Some(peer_id);
+                tracing::info!("[p2p] Set host_peer_id from SyncState: {}", peer_id);
+            }
+
+            tracing::info!("[p2p] Received SyncState at frame {}", sync_state_msg.frame);
 
             // Store pending snapshot for apply_sync_snapshot system
             sync_state.pending_snapshot = Some(sync_state_msg.state.clone());
@@ -467,29 +485,18 @@ fn process_p2p_payload(
 
 /// Computes a deterministic hash of the current game state.
 ///
-/// Includes both marble state and map object transforms (keyframe-animated).
-fn compute_bevy_hash(
-    frame: u64,
-    marbles: &[(u32, Vec2, f32, Vec2, f32)], // (owner_id, pos, rot, linvel, angvel)
-    map_objects: &[(String, Vec2, f32)],       // (object_id, pos, rot)
-) -> u64 {
-    let mut sorted_marbles: Vec<_> = marbles.to_vec();
-    sorted_marbles.sort_by_key(|m| m.0);
+/// Uses the PhysicsWorld's own hash computation for body state,
+/// plus map object transforms for keyframe-animated objects.
+fn compute_bevy_hash(physics: &PhysicsWorldRes, map_objects: &[(String, Vec2, f32)]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
 
+    // Use PhysicsWorld's deterministic hash (includes frame, all body positions/velocities)
+    physics.world.compute_hash().hash(&mut hasher);
+
+    // Also hash map object transforms
     let mut sorted_objects: Vec<_> = map_objects.to_vec();
     sorted_objects.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    frame.hash(&mut hasher);
-    for (id, pos, rot, vel, angvel) in &sorted_marbles {
-        id.hash(&mut hasher);
-        pos.x.to_bits().hash(&mut hasher);
-        pos.y.to_bits().hash(&mut hasher);
-        rot.to_bits().hash(&mut hasher);
-        vel.x.to_bits().hash(&mut hasher);
-        vel.y.to_bits().hash(&mut hasher);
-        angvel.to_bits().hash(&mut hasher);
-    }
     for (id, pos, rot) in &sorted_objects {
         id.hash(&mut hasher);
         pos.x.to_bits().hash(&mut hasher);
@@ -497,25 +504,6 @@ fn compute_bevy_hash(
         rot.to_bits().hash(&mut hasher);
     }
     hasher.finish()
-}
-
-/// Collects marble data for hashing.
-fn collect_marble_data(
-    marbles: &Query<(&Marble, &Transform, &Velocity)>,
-) -> Vec<(u32, Vec2, f32, Vec2, f32)> {
-    marbles
-        .iter()
-        .filter(|(m, _, _)| !m.eliminated)
-        .map(|(m, t, v)| {
-            (
-                m.owner_id,
-                t.translation.truncate(),
-                t.rotation.to_euler(EulerRot::ZYX).0,
-                v.linvel,
-                v.angvel,
-            )
-        })
-        .collect()
 }
 
 /// Collects keyframe-animated map object transforms for hashing.
@@ -546,7 +534,7 @@ pub fn broadcast_frame_hash(
     mut gossip: Option<ResMut<GossipHandler>>,
     sync_state: Res<SyncState>,
     game_state: Res<MarbleGameState>,
-    marbles: Query<(&Marble, &Transform, &Velocity)>,
+    physics: Res<PhysicsWorldRes>,
     keyframe_targets: Query<(&KeyframeTarget, &Transform), Without<Marble>>,
 ) {
     if !sync_state.is_host {
@@ -561,15 +549,12 @@ pub fn broadcast_frame_hash(
     };
 
     // Only broadcast at intervals
-    if game_state.frame == 0
-        || game_state.frame % HASH_BROADCAST_INTERVAL != 0
-    {
+    if game_state.frame == 0 || game_state.frame % HASH_BROADCAST_INTERVAL != 0 {
         return;
     }
 
-    let marble_data = collect_marble_data(&marbles);
     let map_object_data = collect_map_object_data(&keyframe_targets);
-    let hash = compute_bevy_hash(game_state.frame, &marble_data, &map_object_data);
+    let hash = compute_bevy_hash(&physics, &map_object_data);
 
     let msg = gossip.create_message(
         &socket_res.player_id,
@@ -603,7 +588,7 @@ pub fn check_desync(
     mut gossip: Option<ResMut<GossipHandler>>,
     mut sync_state: ResMut<SyncState>,
     game_state: Res<MarbleGameState>,
-    marbles: Query<(&Marble, &Transform, &Velocity)>,
+    physics: Res<PhysicsWorldRes>,
     keyframe_targets: Query<(&KeyframeTarget, &Transform), Without<Marble>>,
 ) {
     if sync_state.is_host {
@@ -631,20 +616,19 @@ pub fn check_desync(
         return;
     }
 
-    let marble_data = collect_marble_data(&marbles);
     let map_object_data = collect_map_object_data(&keyframe_targets);
 
     let mut need_resync = false;
 
-    for (host_frame, host_hash) in to_check {
-        let local_hash = compute_bevy_hash(host_frame, &marble_data, &map_object_data);
+    for (_host_frame, host_hash) in to_check {
+        let local_hash = compute_bevy_hash(&physics, &map_object_data);
         if local_hash == host_hash {
             continue;
         }
 
         tracing::warn!(
             "[p2p] DESYNC at frame {}: host={:#x} local={:#x}",
-            host_frame,
+            current_frame,
             host_hash,
             local_hash
         );
@@ -698,6 +682,7 @@ pub fn check_desync(
 /// Handles sync snapshot requests from peers (host only).
 ///
 /// Creates a `BevySyncSnapshot` from current ECS state and sends it to the requesting peer.
+/// Now includes serialized PhysicsWorld for complete state restoration.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_sync_request(
     mut events: MessageReader<SyncSnapshotRequestEvent>,
@@ -707,7 +692,8 @@ pub fn handle_sync_request(
     sync_state: Res<SyncState>,
     rng: Res<DeterministicRng>,
     game_context: Res<GameContextRes>,
-    marbles: Query<(&Marble, &MarbleVisual, &Transform, &Velocity)>,
+    physics: Res<PhysicsWorldRes>,
+    marbles: Query<(&Marble, &MarbleVisual, &Transform, &PhysicsBody)>,
     keyframe_targets: Query<(&KeyframeTarget, &Transform), Without<Marble>>,
     keyframe_executors: Res<KeyframeExecutors>,
 ) {
@@ -727,21 +713,30 @@ pub fn handle_sync_request(
     };
 
     for event in events.read() {
-        // Create snapshot
+        // Create marble snapshots (reading velocity from physics world)
         let marble_snapshots: Vec<MarbleSnapshot> = marbles
             .iter()
-            .map(|(marble, visual, transform, velocity)| MarbleSnapshot {
-                owner_id: marble.owner_id,
-                eliminated: marble.eliminated,
-                color: visual.color,
-                radius: visual.radius,
-                position: [
-                    transform.translation.x,
-                    transform.translation.y,
-                ],
-                rotation: transform.rotation.to_euler(EulerRot::ZYX).0,
-                linear_velocity: [velocity.linvel.x, velocity.linvel.y],
-                angular_velocity: velocity.angvel,
+            .map(|(marble, visual, transform, body)| {
+                let (linvel, angvel) = physics
+                    .world
+                    .get_rigid_body(body.0)
+                    .map(|b| {
+                        let lv = b.linvel();
+                        let av = b.angvel();
+                        ([lv.x, lv.y], av)
+                    })
+                    .unwrap_or(([0.0, 0.0], 0.0));
+
+                MarbleSnapshot {
+                    owner_id: marble.owner_id,
+                    eliminated: marble.eliminated,
+                    color: visual.color,
+                    radius: visual.radius,
+                    position: [transform.translation.x, transform.translation.y],
+                    rotation: transform.rotation.to_euler(EulerRot::ZYX).0,
+                    linear_velocity: linvel,
+                    angular_velocity: angvel,
+                }
             })
             .collect();
 
@@ -754,6 +749,13 @@ pub fn handle_sync_request(
                 rotation: t.rotation.to_euler(EulerRot::ZYX).0,
             })
             .collect();
+
+        // Serialize the entire PhysicsWorld for complete state restoration
+        let physics_world_bytes = postcard::to_allocvec(&physics.world).unwrap_or_else(|e| {
+            tracing::error!("[p2p] Failed to serialize PhysicsWorld: {}", e);
+            Vec::new()
+        });
+        let physics_world_bytes_len = physics_world_bytes.len();
 
         let snapshot = BevySyncSnapshot {
             frame: game_state.frame,
@@ -768,6 +770,7 @@ pub fn handle_sync_request(
             keyframe_executors: keyframe_executors.executors.clone(),
             activated_keyframes: keyframe_executors.activated.clone(),
             map_object_transforms,
+            physics_world_bytes,
         };
 
         match snapshot.to_bytes() {
@@ -795,9 +798,10 @@ pub fn handle_sync_request(
                         .send(data.into_boxed_slice(), target_peer);
 
                     tracing::info!(
-                        "[p2p] Sent sync snapshot to peer {} at frame {}",
+                        "[p2p] Sent sync snapshot to peer {} at frame {} (physics_world: {} bytes)",
                         target_peer,
-                        game_state.frame
+                        game_state.frame,
+                        physics_world_bytes_len
                     );
                 }
             }
@@ -810,7 +814,8 @@ pub fn handle_sync_request(
 
 /// Applies a pending sync snapshot (peer only).
 ///
-/// Despawns all existing marbles and respawns them with the snapshot's state.
+/// Now uses PhysicsWorld deserialization for complete state restoration,
+/// preserving all Rapier internal state (NarrowPhase, warm-starting, etc.).
 #[allow(clippy::too_many_arguments)]
 pub fn apply_sync_snapshot(
     mut commands: Commands,
@@ -819,7 +824,9 @@ pub fn apply_sync_snapshot(
     mut game_context: ResMut<GameContextRes>,
     mut sync_state: ResMut<SyncState>,
     mut keyframe_executors: ResMut<KeyframeExecutors>,
+    mut physics: ResMut<PhysicsWorldRes>,
     existing_marbles: Query<Entity, With<Marble>>,
+    mut marble_bodies: Query<(&Marble, &mut PhysicsBody)>,
     mut keyframe_targets: Query<(&KeyframeTarget, &mut Transform), Without<Marble>>,
 ) {
     let Some(snapshot_bytes) = sync_state.pending_snapshot.take() else {
@@ -839,27 +846,78 @@ pub fn apply_sync_snapshot(
     };
 
     tracing::info!(
-        "[p2p] Applying sync snapshot: frame={}, {} players, {} marbles, {} executors, {} map_objects",
+        "[p2p] Applying sync snapshot: frame={}, {} players, {} marbles, {} executors, {} map_objects, physics_world={} bytes",
         snapshot.frame,
         snapshot.players.len(),
         snapshot.marbles.len(),
         snapshot.keyframe_executors.len(),
-        snapshot.map_object_transforms.len()
+        snapshot.map_object_transforms.len(),
+        snapshot.physics_world_bytes.len()
     );
 
-    // 1. Despawn all existing marbles
+    // 1. Try to restore PhysicsWorld from serialized bytes
+    if !snapshot.physics_world_bytes.is_empty() {
+        match postcard::from_bytes::<crate::physics::PhysicsWorld>(&snapshot.physics_world_bytes) {
+            Ok(restored_world) => {
+                tracing::info!(
+                    "[p2p] Restored PhysicsWorld: frame={}, {} bodies, {} colliders",
+                    restored_world.frame,
+                    restored_world.rigid_body_set.len(),
+                    restored_world.collider_set.len()
+                );
+
+                // Replace the entire physics world
+                physics.world = restored_world;
+
+                // Rebuild entity mappings: update PhysicsBody handles for existing marbles
+                // by matching user_data (which stores Entity bits)
+                for (marble, mut body_comp) in marble_bodies.iter_mut() {
+                    // Find the matching body in the restored world
+                    let mut found = false;
+                    for (handle, body) in physics.world.rigid_body_set.iter() {
+                        // Check if this body belongs to this marble entity
+                        // We match by checking if it's a dynamic body (marble)
+                        // and checking user_data against entity bits
+                        if body.is_dynamic() && body.user_data != 0 {
+                            let stored_entity = Entity::from_bits(body.user_data as u64);
+                            // This won't match because the entity was from the host.
+                            // Instead, we need to update user_data to point to our entities.
+                            let _ = stored_entity;
+                        }
+                        let _ = handle;
+                    }
+
+                    if !found {
+                        let _ = marble;
+                    }
+                }
+
+                // Since entity handles from host differ from ours, we need to
+                // despawn existing marbles and respawn them with correct mapping.
+                // But first update the body user_data to match our entities.
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[p2p] Failed to deserialize PhysicsWorld, falling back to marble-level sync: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    // 2. Despawn all existing marbles (they'll be respawned with correct physics handles)
     for entity in existing_marbles.iter() {
         commands.entity(entity).despawn();
     }
 
-    // 2. Restore game state
+    // 3. Restore game state
     game_state.players = snapshot.players;
     game_state.arrival_order = snapshot.arrival_order;
     game_state.frame = snapshot.frame;
     game_state.rng_seed = snapshot.rng_seed;
     game_state.selected_gamerule = snapshot.selected_gamerule;
 
-    // 3. Restore RNG and GameContext with full internal state
+    // 4. Restore RNG and GameContext with full internal state
     if let Some(det_rng) = snapshot.det_rng {
         rng.rng = det_rng;
     } else {
@@ -873,17 +931,18 @@ pub fn apply_sync_snapshot(
     }
     game_context.update(snapshot.game_ctx_time, snapshot.frame);
 
-    // 4. Restore keyframe executor state
+    // 5. Restore keyframe executor state (always restore activation state)
+    keyframe_executors.activated = snapshot.activated_keyframes;
     if !snapshot.keyframe_executors.is_empty() {
         keyframe_executors.executors = snapshot.keyframe_executors;
-        keyframe_executors.activated = snapshot.activated_keyframes;
-        tracing::info!(
-            "[p2p] Restored {} keyframe executors",
-            keyframe_executors.executors.len()
-        );
     }
+    tracing::info!(
+        "[p2p] Restored keyframe state: {} executors, activated={:?}",
+        keyframe_executors.executors.len(),
+        keyframe_executors.activated
+    );
 
-    // 5. Restore map object transforms from snapshot
+    // 6. Restore map object transforms from snapshot
     if !snapshot.map_object_transforms.is_empty() {
         for obj_snap in &snapshot.map_object_transforms {
             for (kt, mut transform) in keyframe_targets.iter_mut() {
@@ -900,47 +959,118 @@ pub fn apply_sync_snapshot(
         );
     }
 
-    // 6. Respawn marbles from snapshot
+    // 7. Respawn marbles from snapshot, creating new physics bodies in the restored world
+    //    If physics_world_bytes was restored, we need to find matching bodies.
+    //    If not, we create new bodies.
+    let has_restored_world = !snapshot.physics_world_bytes.is_empty();
+
     for marble_snap in &snapshot.marbles {
         let mut transform = Transform::from_translation(
             Vec2::new(marble_snap.position[0], marble_snap.position[1]).extend(0.0),
         );
-        transform.rotation =
-            Quat::from_rotation_z(marble_snap.rotation);
+        transform.rotation = Quat::from_rotation_z(marble_snap.rotation);
 
-        commands.spawn((
-            Marble {
-                owner_id: marble_snap.owner_id,
-                eliminated: marble_snap.eliminated,
-            },
-            MarbleVisual {
-                color: marble_snap.color,
-                radius: marble_snap.radius,
-            },
-            transform,
-            RigidBody::Dynamic,
-            Collider::ball(marble_snap.radius),
-            Restitution::coefficient(0.7),
-            Friction::coefficient(0.3),
-            Damping {
-                linear_damping: 0.5,
-                angular_damping: 0.5,
-            },
-            Velocity {
-                linvel: Vec2::new(
-                    marble_snap.linear_velocity[0],
-                    marble_snap.linear_velocity[1],
-                ),
-                angvel: marble_snap.angular_velocity,
-            },
-            ExternalForce::default(),
-            Ccd::enabled(),
-            ActiveEvents::COLLISION_EVENTS,
-        ));
+        let entity = commands
+            .spawn((
+                Marble {
+                    owner_id: marble_snap.owner_id,
+                    eliminated: marble_snap.eliminated,
+                },
+                MarbleVisual {
+                    color: marble_snap.color,
+                    radius: marble_snap.radius,
+                },
+                transform,
+                PhysicsExternalForce::default(),
+            ))
+            .id();
+
+        if has_restored_world {
+            // Find the matching dynamic body by position (approximate match)
+            let mut best_handle = None;
+            let mut best_dist = f32::MAX;
+
+            for (handle, body) in physics.world.rigid_body_set.iter() {
+                if !body.is_dynamic() {
+                    continue;
+                }
+                let pos = body.translation();
+                let dx = pos.x - marble_snap.position[0];
+                let dy = pos.y - marble_snap.position[1];
+                let dist = dx * dx + dy * dy;
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_handle = Some(handle);
+                }
+            }
+
+            if let Some(handle) = best_handle {
+                // Collect collider handles first to avoid borrow conflict
+                let collider_handles: Vec<ColliderHandle> = physics
+                    .world
+                    .rigid_body_set
+                    .get(handle)
+                    .map(|b| b.colliders().to_vec())
+                    .unwrap_or_default();
+
+                // Update the body's user_data to point to the new entity
+                if let Some(body) = physics.world.rigid_body_set.get_mut(handle) {
+                    body.user_data = entity.to_bits() as u128;
+                }
+                // Also update collider user_data
+                for collider_handle in collider_handles {
+                    if let Some(collider) = physics.world.collider_set.get_mut(collider_handle) {
+                        collider.user_data = entity.to_bits() as u128;
+                    }
+                }
+                commands.entity(entity).insert(PhysicsBody(handle));
+            } else {
+                // Fallback: create a new body
+                let body_handle = create_marble_body(&mut physics.world, entity, marble_snap);
+                commands.entity(entity).insert(PhysicsBody(body_handle));
+            }
+        } else {
+            // No restored world, create new physics body
+            let body_handle = create_marble_body(&mut physics.world, entity, marble_snap);
+            commands.entity(entity).insert(PhysicsBody(body_handle));
+        }
     }
 
-    // 7. Clear pending hashes after snapshot restore
+    // 8. Clear pending hashes after snapshot restore
     sync_state.pending_hashes.clear();
+}
+
+/// Creates a new marble body in the physics world.
+fn create_marble_body(
+    world: &mut crate::physics::PhysicsWorld,
+    entity: Entity,
+    snap: &MarbleSnapshot,
+) -> RigidBodyHandle {
+    let body = RigidBodyBuilder::dynamic()
+        .translation(Vector::new(snap.position[0], snap.position[1]))
+        .rotation(snap.rotation)
+        .linvel(Vector::new(
+            snap.linear_velocity[0],
+            snap.linear_velocity[1],
+        ))
+        .angvel(snap.angular_velocity)
+        .ccd_enabled(true)
+        .linear_damping(0.5)
+        .angular_damping(0.5)
+        .user_data(entity.to_bits() as u128)
+        .build();
+    let handle = world.add_rigid_body(body);
+
+    let collider = ColliderBuilder::ball(snap.radius)
+        .restitution(0.7)
+        .friction(0.3)
+        .density(1.0)
+        .active_events(ActiveEvents::COLLISION_EVENTS)
+        .user_data(entity.to_bits() as u128)
+        .build();
+    world.add_collider(collider, handle);
+
+    handle
 }
 
 // ============================================================================

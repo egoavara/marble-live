@@ -130,11 +130,7 @@ impl PhysicsWorld {
     }
 
     /// Adds a collider attached to a rigid body.
-    pub fn add_collider(
-        &mut self,
-        collider: Collider,
-        parent: RigidBodyHandle,
-    ) -> ColliderHandle {
+    pub fn add_collider(&mut self, collider: Collider, parent: RigidBodyHandle) -> ColliderHandle {
         self.collider_set
             .insert_with_parent(collider, parent, &mut self.rigid_body_set)
     }
@@ -297,6 +293,81 @@ impl PhysicsWorld {
             body.set_enabled(enabled);
         }
     }
+
+    /// Advances the physics simulation by one step, collecting collision events.
+    ///
+    /// Returns a list of raw Rapier collision events. The caller is responsible
+    /// for mapping ColliderHandles to Entities.
+    pub fn step_with_events(&mut self) -> Vec<CollisionEvent> {
+        use std::sync::Mutex;
+
+        let raw_events = Mutex::new(Vec::new());
+
+        struct Collector<'a> {
+            events: &'a Mutex<Vec<CollisionEvent>>,
+        }
+
+        // SAFETY: EventHandler requires Send + Sync. Mutex satisfies both.
+        // In practice this runs single-threaded (especially on WASM).
+        impl EventHandler for Collector<'_> {
+            fn handle_collision_event(
+                &self,
+                _bodies: &RigidBodySet,
+                _colliders: &ColliderSet,
+                event: CollisionEvent,
+                _contact_pair: Option<&ContactPair>,
+            ) {
+                self.events.lock().unwrap().push(event);
+            }
+
+            fn handle_contact_force_event(
+                &self,
+                _dt: f32,
+                _bodies: &RigidBodySet,
+                _colliders: &ColliderSet,
+                _contact_pair: &ContactPair,
+                _total_force_magnitude: f32,
+            ) {
+            }
+        }
+
+        let collector = Collector {
+            events: &raw_events,
+        };
+
+        self.physics_pipeline.step(
+            self.gravity,
+            &self.integration_parameters,
+            &mut self.island_manager,
+            &mut self.broad_phase,
+            &mut self.narrow_phase,
+            &mut self.rigid_body_set,
+            &mut self.collider_set,
+            &mut self.impulse_joint_set,
+            &mut self.multibody_joint_set,
+            &mut self.ccd_solver,
+            &(),
+            &collector,
+        );
+        self.frame += 1;
+
+        raw_events.into_inner().unwrap()
+    }
+
+    /// Removes a static collider (one without a parent body).
+    pub fn remove_static_collider(&mut self, handle: ColliderHandle) {
+        self.collider_set.remove(
+            handle,
+            &mut self.island_manager,
+            &mut self.rigid_body_set,
+            true,
+        );
+    }
+
+    /// Gets a mutable reference to a collider.
+    pub fn get_collider_mut(&mut self, handle: ColliderHandle) -> Option<&mut Collider> {
+        self.collider_set.get_mut(handle)
+    }
 }
 
 /// Hashes a f32 value by converting to bits.
@@ -326,9 +397,7 @@ mod tests {
             .translation(Vector::new(100.0, 100.0))
             .build();
 
-        let collider = ColliderBuilder::ball(10.0)
-            .restitution(0.7)
-            .build();
+        let collider = ColliderBuilder::ball(10.0).restitution(0.7).build();
 
         let handle1 = world1.add_rigid_body(body.clone());
         world1.add_collider(collider.clone(), handle1);

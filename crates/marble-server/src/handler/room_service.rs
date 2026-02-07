@@ -97,12 +97,9 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
         let room_id = util::tonic_uuid!(&req.room_id)?;
         let player_auth = util::tonic_required!(req.player)?;
 
-        let (newly_started, started_at) = self.database.start_game(
-            &room_id,
-            &player_auth,
-            req.start_frame,
-            req.rng_seed,
-        )?;
+        let (newly_started, started_at) =
+            self.database
+                .start_game(&room_id, &player_auth, req.start_frame, req.rng_seed)?;
 
         if newly_started {
             tracing::info!(
@@ -248,9 +245,9 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
         let room_id = util::tonic_uuid!(&req.room_id)?;
         let player_auth = util::tonic_required!(req.player)?;
 
-        let new_topology = self
-            .database
-            .report_connection(&room_id, &player_auth.id, req.peer_statuses)?;
+        let new_topology =
+            self.database
+                .report_connection(&room_id, &player_auth.id, req.peer_statuses)?;
 
         Ok(Response::new(ReportConnectionResponse {
             topology_changed: new_topology.is_some(),
@@ -331,9 +328,9 @@ impl marble_proto::room::room_service_server::RoomService for RoomServiceImpl {
         let room_id = util::tonic_uuid!(&req.room_id)?;
         let player_auth = util::tonic_required!(req.player)?;
 
-        let peer_to_player = self
-            .database
-            .resolve_peer_ids(&room_id, &player_auth, &req.peer_ids)?;
+        let peer_to_player =
+            self.database
+                .resolve_peer_ids(&room_id, &player_auth, &req.peer_ids)?;
 
         Ok(Response::new(ResolvePeerIdsResponse { peer_to_player }))
     }

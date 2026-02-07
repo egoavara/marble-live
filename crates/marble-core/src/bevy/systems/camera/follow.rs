@@ -38,7 +38,10 @@ pub fn update_follow_target(
 /// Uses hysteresis to prevent rapid switching between marbles:
 /// - A new leader must be at least `leader_switch_margin` ahead
 /// - After switching, there's a cooldown period before another switch
-pub fn update_follow_leader(mut cameras: Query<&mut GameCamera, With<MainCamera>>, marbles: Query<(&Marble, &Transform)>) {
+pub fn update_follow_leader(
+    mut cameras: Query<&mut GameCamera, With<MainCamera>>,
+    marbles: Query<(&Marble, &Transform)>,
+) {
     for mut game_camera in cameras.iter_mut() {
         if game_camera.mode != CameraMode::FollowLeader {
             continue;

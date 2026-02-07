@@ -3,8 +3,8 @@
 //! Handles vector field forces and physics configuration.
 
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::*;
 
+use crate::bevy::rapier_plugin::PhysicsExternalForce;
 use crate::bevy::{GameContextRes, Marble, VectorFieldZone};
 use crate::map::{EvaluatedShape, VectorFieldFalloff};
 use crate::physics::PHYSICS_DT;
@@ -12,7 +12,7 @@ use crate::physics::PHYSICS_DT;
 /// System to apply vector field forces to all active marbles within field areas.
 pub fn apply_vector_field_forces(
     vector_fields: Query<&VectorFieldZone>,
-    mut marbles: Query<(&Marble, &mut ExternalForce, &Transform), Without<VectorFieldZone>>,
+    mut marbles: Query<(&Marble, &mut PhysicsExternalForce, &Transform), Without<VectorFieldZone>>,
     game_context: Res<GameContextRes>,
 ) {
     for field in vector_fields.iter() {
@@ -104,7 +104,7 @@ pub fn update_game_context(
 }
 
 /// System to clear external forces at the start of each physics step.
-pub fn clear_external_forces(mut forces: Query<&mut ExternalForce>) {
+pub fn clear_external_forces(mut forces: Query<&mut PhysicsExternalForce>) {
     for mut force in forces.iter_mut() {
         force.force = Vec2::ZERO;
         force.torque = 0.0;

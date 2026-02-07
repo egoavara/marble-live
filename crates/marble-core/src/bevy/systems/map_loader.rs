@@ -5,12 +5,16 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::*;
+use rapier2d::prelude::*;
 
+use crate::bevy::rapier_plugin::{
+    PhysicsBody, PhysicsCollider, PhysicsWorldRes, Sensor, USER_DATA_MAP_OBJECT, USER_DATA_TRIGGER,
+    encode_user_data,
+};
 use crate::bevy::{
-    AddObjectEvent, AnimatedObject, DeleteObjectEvent, GuidelineMarker,
-    InitialTransforms, KeyframeExecutors, KeyframeTarget, LoadMapEvent, MapConfig,
-    MapLoadedEvent, MapObjectMarker, ObjectEntityMap, SpawnerZone, TriggerZone, VectorFieldZone,
+    AddObjectEvent, AnimatedObject, DeleteObjectEvent, GuidelineMarker, InitialTransforms,
+    KeyframeExecutors, KeyframeTarget, LoadMapEvent, MapConfig, MapLoadedEvent, MapObjectMarker,
+    ObjectEntityMap, SpawnerZone, TriggerZone, VectorFieldZone,
 };
 use crate::dsl::GameContext;
 use crate::keyframe::KeyframeExecutor;
@@ -26,15 +30,20 @@ pub fn handle_load_map(
     mut keyframe_executors: ResMut<KeyframeExecutors>,
     existing_objects: Query<Entity, With<MapObjectMarker>>,
     app_mode: Res<State<crate::bevy::plugin::AppMode>>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for event in events.read() {
         // Clear existing map objects
         for entity in existing_objects.iter() {
+            // Remove physics bodies/colliders for existing entities
             commands.entity(entity).despawn();
         }
         object_map.clear();
         initial_transforms.clear();
         keyframe_executors.clear();
+
+        // Reset physics world for the new map
+        physics.world.reset();
 
         let config = &event.config;
         let ctx = GameContext::new(0.0, 0);
@@ -53,7 +62,15 @@ pub fn handle_load_map(
                     object_map.insert_at_index(obj_index, entity);
                 }
                 ObjectRole::Obstacle => {
-                    let entity = spawn_obstacle(&mut commands, obj, &shape, &ctx, is_animated);
+                    let entity = spawn_obstacle(
+                        &mut commands,
+                        &mut physics,
+                        obj,
+                        &shape,
+                        &ctx,
+                        is_animated,
+                        obj_index,
+                    );
                     object_map.insert_at_index(obj_index, entity);
 
                     if let Some(ref id) = obj.id {
@@ -75,7 +92,8 @@ pub fn handle_load_map(
                     }
                 }
                 ObjectRole::Trigger => {
-                    let entity = spawn_trigger(&mut commands, obj, &shape, trigger_index);
+                    let entity =
+                        spawn_trigger(&mut commands, &mut physics, obj, &shape, trigger_index);
                     object_map.insert_at_index(obj_index, entity);
 
                     if let Some(ref id) = obj.id {
@@ -162,76 +180,105 @@ pub fn handle_load_map(
 fn spawn_spawner(commands: &mut Commands, obj: &crate::map::MapObject) -> Entity {
     let spawn_props = obj.properties.spawn.as_ref();
 
-    commands.spawn((
-        MapObjectMarker {
-            object_id: obj.id.clone(),
-            role: ObjectRole::Spawner,
-        },
-        SpawnerZone {
-            mode: spawn_props
-                .map(|p| p.mode.clone())
-                .unwrap_or_else(|| "random".to_string()),
-            initial_force: spawn_props
-                .map(|p| p.initial_force.clone())
-                .unwrap_or_else(|| "random".to_string()),
-        },
-        Transform::default(),
-        Visibility::default(),
-    )).id()
+    commands
+        .spawn((
+            MapObjectMarker {
+                object_id: obj.id.clone(),
+                role: ObjectRole::Spawner,
+            },
+            SpawnerZone {
+                mode: spawn_props
+                    .map(|p| p.mode.clone())
+                    .unwrap_or_else(|| "random".to_string()),
+                initial_force: spawn_props
+                    .map(|p| p.initial_force.clone())
+                    .unwrap_or_else(|| "random".to_string()),
+            },
+            Transform::default(),
+            Visibility::default(),
+        ))
+        .id()
 }
 
 fn spawn_obstacle(
     commands: &mut Commands,
+    physics: &mut ResMut<PhysicsWorldRes>,
     obj: &crate::map::MapObject,
     shape: &EvaluatedShape,
     ctx: &GameContext,
     is_animated: bool,
+    obj_index: usize,
 ) -> Entity {
-    let (position, rotation, collider) = create_obstacle_collider(shape);
+    let (position, rotation, collider_shape) = create_obstacle_collider_shape(shape);
 
-    let mut entity_commands = commands.spawn((
-        MapObjectMarker {
-            object_id: obj.id.clone(),
-            role: ObjectRole::Obstacle,
-        },
-        Transform::from_translation(position.extend(0.0))
-            .with_rotation(Quat::from_rotation_z(rotation)),
-        collider,
-        Friction::coefficient(0.3),
-    ));
+    let restitution = if let Some(bumper) = &obj.properties.bumper {
+        let force = bumper.force.evaluate(ctx);
+        if is_animated {
+            0.6 + force * 0.4
+        } else {
+            0.6 + force * 0.4
+        }
+    } else if is_animated {
+        0.6
+    } else {
+        0.5
+    };
+
+    let entity = commands
+        .spawn((
+            MapObjectMarker {
+                object_id: obj.id.clone(),
+                role: ObjectRole::Obstacle,
+            },
+            Transform::from_translation(position.extend(0.0))
+                .with_rotation(Quat::from_rotation_z(rotation)),
+        ))
+        .id();
 
     if is_animated {
-        entity_commands.insert((
-            RigidBody::KinematicPositionBased,
+        // Kinematic body for animated obstacles
+        let body = RigidBodyBuilder::kinematic_position_based()
+            .translation(Vector::new(position.x, position.y))
+            .rotation(rotation)
+            .user_data(entity.to_bits() as u128)
+            .build();
+        let body_handle = physics.world.add_rigid_body(body);
+
+        let collider = ColliderBuilder::new(collider_shape)
+            .friction(0.3)
+            .restitution(restitution)
+            .user_data(encode_user_data(USER_DATA_MAP_OBJECT, obj_index as u64))
+            .build();
+        physics.world.add_collider(collider, body_handle);
+
+        commands.entity(entity).insert((
+            PhysicsBody(body_handle),
             AnimatedObject {
                 initial_position: position,
                 initial_rotation: rotation,
             },
         ));
-        // Set appropriate restitution
-        let restitution = if let Some(bumper) = &obj.properties.bumper {
-            let force = bumper.force.evaluate(ctx);
-            0.6 + force * 0.4
-        } else {
-            0.6
-        };
-        entity_commands.insert(Restitution::coefficient(restitution));
     } else {
-        // Static collider
-        let restitution = if let Some(bumper) = &obj.properties.bumper {
-            let force = bumper.force.evaluate(ctx);
-            0.6 + force * 0.4
-        } else {
-            0.5
-        };
-        entity_commands.insert(Restitution::coefficient(restitution));
+        // Static collider (no body needed)
+        let collider = ColliderBuilder::new(collider_shape)
+            .translation(Vector::new(position.x, position.y))
+            .rotation(rotation)
+            .friction(0.3)
+            .restitution(restitution)
+            .user_data(encode_user_data(USER_DATA_MAP_OBJECT, obj_index as u64))
+            .build();
+        let collider_handle = physics.world.add_static_collider(collider);
+        commands
+            .entity(entity)
+            .insert(PhysicsCollider(collider_handle));
     }
 
-    entity_commands.id()
+    entity
 }
 
 fn spawn_trigger(
     commands: &mut Commands,
+    physics: &mut ResMut<PhysicsWorldRes>,
     obj: &crate::map::MapObject,
     shape: &EvaluatedShape,
     trigger_index: usize,
@@ -244,10 +291,10 @@ fn spawn_trigger(
         _ => (Vec2::ZERO, 0.0),
     };
 
-    let collider = match shape {
-        EvaluatedShape::Circle { radius, .. } => Collider::ball(*radius),
-        EvaluatedShape::Rect { size, .. } => Collider::cuboid(size[0] / 2.0, size[1] / 2.0),
-        _ => Collider::ball(0.1),
+    let collider_shape = match shape {
+        EvaluatedShape::Circle { radius, .. } => SharedShape::ball(*radius),
+        EvaluatedShape::Rect { size, .. } => SharedShape::cuboid(size[0] / 2.0, size[1] / 2.0),
+        _ => SharedShape::ball(0.1),
     };
 
     let action = obj
@@ -257,7 +304,7 @@ fn spawn_trigger(
         .map(|t| t.action.clone())
         .unwrap_or_else(|| "gamerule".to_string());
 
-    commands
+    let entity = commands
         .spawn((
             MapObjectMarker {
                 object_id: obj.id.clone(),
@@ -269,14 +316,28 @@ fn spawn_trigger(
             },
             Transform::from_translation(position.extend(0.0))
                 .with_rotation(Quat::from_rotation_z(rotation)),
-            collider,
             Sensor,
         ))
-        .id()
+        .id();
+
+    // Add sensor collider to physics world
+    let collider = ColliderBuilder::new(collider_shape)
+        .translation(Vector::new(position.x, position.y))
+        .rotation(rotation)
+        .sensor(true)
+        .active_events(ActiveEvents::COLLISION_EVENTS)
+        .user_data(entity.to_bits() as u128)
+        .build();
+    let collider_handle = physics.world.add_static_collider(collider);
+    commands
+        .entity(entity)
+        .insert(PhysicsCollider(collider_handle));
+
+    entity
 }
 
-/// Creates an obstacle collider from an evaluated shape.
-pub fn create_obstacle_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider) {
+/// Creates a Rapier SharedShape from an evaluated shape.
+fn create_obstacle_collider_shape(shape: &EvaluatedShape) -> (Vec2, f32, SharedShape) {
     match shape {
         EvaluatedShape::Line { start, end } => {
             let mid = Vec2::new((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0);
@@ -285,11 +346,13 @@ pub fn create_obstacle_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider)
             let length = (dx * dx + dy * dy).sqrt();
             let angle = dy.atan2(dx);
 
-            (mid, angle, Collider::cuboid(length / 2.0, 0.02))
+            (mid, angle, SharedShape::cuboid(length / 2.0, 0.02))
         }
-        EvaluatedShape::Circle { center, radius } => {
-            (Vec2::new(center[0], center[1]), 0.0, Collider::ball(*radius))
-        }
+        EvaluatedShape::Circle { center, radius } => (
+            Vec2::new(center[0], center[1]),
+            0.0,
+            SharedShape::ball(*radius),
+        ),
         EvaluatedShape::Rect {
             center,
             size,
@@ -299,36 +362,46 @@ pub fn create_obstacle_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider)
             (
                 Vec2::new(center[0], center[1]),
                 rotation_rad,
-                Collider::cuboid(size[0] / 2.0, size[1] / 2.0),
+                SharedShape::cuboid(size[0] / 2.0, size[1] / 2.0),
             )
         }
         EvaluatedShape::Bezier { .. } => {
             // Convert bezier to polyline
+            // SharedShape::polyline expects Vec<parry2d::math::Vector> which is glam::Vec2
             let points = shape.bezier_to_points().unwrap_or_default();
-            let vertices: Vec<_> = points.iter().map(|p| Vect::new(p[0], p[1])).collect();
+            let vertices: Vec<rapier2d::prelude::Vector> = points
+                .iter()
+                .map(|p| rapier2d::prelude::Vector::new(p[0], p[1]))
+                .collect();
 
             if vertices.len() >= 2 {
-                let indices: Vec<[u32; 2]> = (0..vertices.len() as u32 - 1)
-                    .map(|i| [i, i + 1])
-                    .collect();
+                let indices: Vec<[u32; 2]> =
+                    (0..vertices.len() as u32 - 1).map(|i| [i, i + 1]).collect();
                 (
                     Vec2::ZERO,
                     0.0,
-                    Collider::polyline(vertices, Some(indices)),
+                    SharedShape::polyline(vertices, Some(indices)),
                 )
             } else {
-                (Vec2::ZERO, 0.0, Collider::ball(0.1))
+                (Vec2::ZERO, 0.0, SharedShape::ball(0.1))
             }
         }
     }
 }
 
-/// Creates a trigger collider from an evaluated shape.
-pub fn create_trigger_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider) {
+/// Creates an obstacle collider info from an evaluated shape (for editor updates).
+pub fn create_obstacle_collider(shape: &EvaluatedShape) -> (Vec2, f32, SharedShape) {
+    create_obstacle_collider_shape(shape)
+}
+
+/// Creates a trigger collider info from an evaluated shape (for editor updates).
+pub fn create_trigger_collider(shape: &EvaluatedShape) -> (Vec2, f32, SharedShape) {
     match shape {
-        EvaluatedShape::Circle { center, radius } => {
-            (Vec2::new(center[0], center[1]), 0.0, Collider::ball(*radius))
-        }
+        EvaluatedShape::Circle { center, radius } => (
+            Vec2::new(center[0], center[1]),
+            0.0,
+            SharedShape::ball(*radius),
+        ),
         EvaluatedShape::Rect {
             center,
             size,
@@ -336,9 +409,9 @@ pub fn create_trigger_collider(shape: &EvaluatedShape) -> (Vec2, f32, Collider) 
         } => (
             Vec2::new(center[0], center[1]),
             rotation.to_radians(),
-            Collider::cuboid(size[0] / 2.0, size[1] / 2.0),
+            SharedShape::cuboid(size[0] / 2.0, size[1] / 2.0),
         ),
-        _ => (Vec2::ZERO, 0.0, Collider::ball(0.1)),
+        _ => (Vec2::ZERO, 0.0, SharedShape::ball(0.1)),
     }
 }
 
@@ -386,6 +459,7 @@ pub fn handle_add_object(
     map_config: Option<Res<MapConfig>>,
     mut object_map: ResMut<ObjectEntityMap>,
     mut initial_transforms: ResMut<InitialTransforms>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for event in events.read() {
         let obj = &event.object;
@@ -407,7 +481,15 @@ pub fn handle_add_object(
             }
             ObjectRole::Obstacle => {
                 let shape = obj.shape.evaluate(&ctx);
-                let entity = spawn_obstacle(&mut commands, obj, &shape, &ctx, is_animated);
+                let entity = spawn_obstacle(
+                    &mut commands,
+                    &mut physics,
+                    obj,
+                    &shape,
+                    &ctx,
+                    is_animated,
+                    obj_index,
+                );
                 object_map.insert_at_index(obj_index, entity);
 
                 if let Some(ref id) = obj.id {
@@ -432,7 +514,7 @@ pub fn handle_add_object(
                 let shape = obj.shape.evaluate(&ctx);
                 // Use a placeholder trigger index (this is for editor preview only)
                 let trigger_index = 999;
-                let entity = spawn_trigger(&mut commands, obj, &shape, trigger_index);
+                let entity = spawn_trigger(&mut commands, &mut physics, obj, &shape, trigger_index);
                 object_map.insert_at_index(obj_index, entity);
 
                 if let Some(ref id) = obj.id {
@@ -459,7 +541,11 @@ pub fn handle_add_object(
             }
         }
 
-        tracing::info!("[map_loader] Added object at index {}: {:?}", obj_index, obj.id);
+        tracing::info!(
+            "[map_loader] Added object at index {}: {:?}",
+            obj_index,
+            obj.id
+        );
     }
 }
 
@@ -469,6 +555,9 @@ pub fn handle_delete_object(
     mut events: MessageReader<DeleteObjectEvent>,
     map_config: Option<Res<MapConfig>>,
     mut object_map: ResMut<ObjectEntityMap>,
+    bodies: Query<&PhysicsBody>,
+    colliders: Query<&PhysicsCollider>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for event in events.read() {
         let index = event.index;
@@ -487,6 +576,13 @@ pub fn handle_delete_object(
 
         // Get entity by index and despawn
         if let Some(entity) = object_map.get_by_index(index) {
+            // Remove from physics world
+            if let Ok(body) = bodies.get(entity) {
+                physics.world.remove_rigid_body(body.0);
+            }
+            if let Ok(collider) = colliders.get(entity) {
+                physics.world.remove_static_collider(collider.0);
+            }
             commands.entity(entity).despawn();
             tracing::info!("[map_loader] Despawned entity at index {}", index);
         }
@@ -525,7 +621,9 @@ fn spawn_guideline(
             Vec2::ZERO,
             Vec2::new(0.0, 10.0),
         ),
-        EvaluatedShape::Rect { center, rotation, .. } => (
+        EvaluatedShape::Rect {
+            center, rotation, ..
+        } => (
             Vec2::new(center[0], center[1]),
             rotation.to_radians(),
             Vec2::ZERO,
@@ -605,9 +703,7 @@ fn spawn_vector_field(
     let enabled = vf_props
         .map(|p| p.enabled.clone())
         .unwrap_or_else(|| BoolOrExpr::Bool(true));
-    let falloff = vf_props
-        .map(|p| p.falloff)
-        .unwrap_or_default();
+    let falloff = vf_props.map(|p| p.falloff).unwrap_or_default();
 
     commands
         .spawn((

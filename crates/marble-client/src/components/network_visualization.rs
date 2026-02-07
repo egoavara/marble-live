@@ -4,10 +4,10 @@
 //! Supports pan (drag) and zoom (scroll) interactions without triggering React re-renders.
 //! Fetches topology data directly from the server using GetRoomTopology API.
 
-use std::collections::HashMap;
 use marble_proto::room::{GetRoomTopologyRequest, PlayerAuth};
-use wasm_bindgen::prelude::*;
+use std::collections::HashMap;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use yew::prelude::*;
@@ -158,7 +158,8 @@ fn calculate_layout(network_info: &HashMap<u32, PeerNetworkInfo>) -> NetworkLayo
     let max_peers_in_group = groups.values().map(|g| g.len()).max().unwrap_or(1).max(1);
 
     // Calculate cluster radius based on peer count
-    let min_cluster_radius = (max_peers_in_group as f64 * node_total) / (2.0 * std::f64::consts::PI);
+    let min_cluster_radius =
+        (max_peers_in_group as f64 * node_total) / (2.0 * std::f64::consts::PI);
     let cluster_radius = min_cluster_radius.max(80.0);
 
     // Dynamic sizing
@@ -307,9 +308,9 @@ fn calculate_layout(network_info: &HashMap<u32, PeerNetworkInfo>) -> NetworkLayo
                     continue;
                 }
 
-                let other_has_peers = groups.get(other_group_id).map_or(false, |peers| {
-                    peers.iter().any(|p| p.is_connected)
-                });
+                let other_has_peers = groups
+                    .get(other_group_id)
+                    .map_or(false, |peers| peers.iter().any(|p| p.is_connected));
 
                 if other_has_peers {
                     let other_center_x = group_spacing * (other_idx as f64 + 1.0);
@@ -386,8 +387,12 @@ fn render_canvas(
         } else {
             format!("{} peers", group.peer_count)
         };
-        ctx.fill_text(&info_text, group.center_x, group.center_y - group.radius - 10.0)
-            .ok();
+        ctx.fill_text(
+            &info_text,
+            group.center_x,
+            group.center_y - group.radius - 10.0,
+        )
+        .ok();
     }
 
     // Draw inter-group lines first (behind)
@@ -426,8 +431,14 @@ fn render_canvas(
         // Bridge indicator (outer golden ring)
         if node.is_bridge {
             ctx.begin_path();
-            ctx.arc(node.x, node.y, node_radius + 6.0, 0.0, 2.0 * std::f64::consts::PI)
-                .ok();
+            ctx.arc(
+                node.x,
+                node.y,
+                node_radius + 6.0,
+                0.0,
+                2.0 * std::f64::consts::PI,
+            )
+            .ok();
             ctx.set_stroke_style_str("#ffd43b");
             ctx.set_line_width(3.0);
             ctx.stroke();
@@ -435,8 +446,14 @@ fn render_canvas(
 
         // Connection status ring
         ctx.begin_path();
-        ctx.arc(node.x, node.y, node_radius + 2.0, 0.0, 2.0 * std::f64::consts::PI)
-            .ok();
+        ctx.arc(
+            node.x,
+            node.y,
+            node_radius + 2.0,
+            0.0,
+            2.0 * std::f64::consts::PI,
+        )
+        .ok();
         ctx.set_stroke_style_str(if node.is_connected { "#69db7c" } else { "#666" });
         ctx.set_line_width(2.0);
         ctx.stroke();
@@ -574,61 +591,58 @@ pub fn network_visualization(props: &NetworkVisualizationProps) -> Html {
         let loading_state = loading_state.clone();
         let has_loaded_once = has_loaded_once.clone();
 
-        use_effect_with(
-            (room_id.clone(), combined_trigger),
-            move |(room_id, _)| {
-                let room_id = room_id.clone();
-                if room_id.is_empty() {
-                    loading_state.set(LoadingState::Idle);
-                    network_info.set(HashMap::new());
-                    return;
-                }
+        use_effect_with((room_id.clone(), combined_trigger), move |(room_id, _)| {
+            let room_id = room_id.clone();
+            if room_id.is_empty() {
+                loading_state.set(LoadingState::Idle);
+                network_info.set(HashMap::new());
+                return;
+            }
 
-                loading_state.set(LoadingState::Loading);
+            loading_state.set(LoadingState::Loading);
 
-                spawn_local(async move {
-                    let req = GetRoomTopologyRequest {
-                        room_id: room_id.clone(),
-                        player_auth: Some(PlayerAuth {
-                            id: player_id,
-                            secret: player_secret,
-                        }),
-                    };
+            spawn_local(async move {
+                let req = GetRoomTopologyRequest {
+                    room_id: room_id.clone(),
+                    player_auth: Some(PlayerAuth {
+                        id: player_id,
+                        secret: player_secret,
+                    }),
+                };
 
-                    match grpc.borrow_mut().get_room_topology(req).await {
-                        Ok(resp) => {
-                            let resp = resp.into_inner();
-                            let mut map = HashMap::new();
+                match grpc.borrow_mut().get_room_topology(req).await {
+                    Ok(resp) => {
+                        let resp = resp.into_inner();
+                        let mut map = HashMap::new();
 
-                            for (idx, player_info) in resp.players.iter().enumerate() {
-                                if let Some(topology) = &player_info.topology {
-                                    let peer_info = PeerNetworkInfo {
-                                        instance_id: idx as u32,
-                                        player_id: player_info.player_id.clone(),
-                                        mesh_group: Some(topology.mesh_group),
-                                        is_bridge: topology.is_bridge,
-                                        connected_peers: topology
-                                            .connect_to
-                                            .iter()
-                                            .map(|c| c.player_id.clone())
-                                            .collect(),
-                                        is_connected: player_info.is_connected,
-                                    };
-                                    map.insert(idx as u32, peer_info);
-                                }
+                        for (idx, player_info) in resp.players.iter().enumerate() {
+                            if let Some(topology) = &player_info.topology {
+                                let peer_info = PeerNetworkInfo {
+                                    instance_id: idx as u32,
+                                    player_id: player_info.player_id.clone(),
+                                    mesh_group: Some(topology.mesh_group),
+                                    is_bridge: topology.is_bridge,
+                                    connected_peers: topology
+                                        .connect_to
+                                        .iter()
+                                        .map(|c| c.player_id.clone())
+                                        .collect(),
+                                    is_connected: player_info.is_connected,
+                                };
+                                map.insert(idx as u32, peer_info);
                             }
+                        }
 
-                            network_info.set(map);
-                            loading_state.set(LoadingState::Loaded);
-                            has_loaded_once.set(true);
-                        }
-                        Err(e) => {
-                            loading_state.set(LoadingState::Error(e.to_string()));
-                        }
+                        network_info.set(map);
+                        loading_state.set(LoadingState::Loaded);
+                        has_loaded_once.set(true);
                     }
-                });
-            },
-        );
+                    Err(e) => {
+                        loading_state.set(LoadingState::Error(e.to_string()));
+                    }
+                }
+            });
+        });
     }
 
     // Auto-refresh effect
@@ -647,9 +661,12 @@ pub fn network_visualization(props: &NetworkVisualizationProps) -> Html {
                         let interval_ms = *auto_refresh_ms;
                         let trigger = internal_refresh_trigger.clone();
 
-                        Some(gloo::timers::callback::Interval::new(interval_ms, move || {
-                            trigger.set(*trigger + 1);
-                        }))
+                        Some(gloo::timers::callback::Interval::new(
+                            interval_ms,
+                            move || {
+                                trigger.set(*trigger + 1);
+                            },
+                        ))
                     };
 
                 // Return cleanup closure

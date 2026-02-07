@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use parking_lot::Mutex;
-use rand_chacha::ChaCha8Rng;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 use crate::dsl::GameContext;
 use crate::game::Player;
@@ -226,7 +226,10 @@ impl ObjectEntityMap {
 
     /// Get entity by index
     pub fn get_by_index(&self, index: usize) -> Option<Entity> {
-        self.by_index.get(index).copied().filter(|e| *e != Entity::PLACEHOLDER)
+        self.by_index
+            .get(index)
+            .copied()
+            .filter(|e| *e != Entity::PLACEHOLDER)
     }
 
     /// Remove entity at index (shifts subsequent indices)
@@ -364,7 +367,10 @@ pub enum GameCommand {
     /// Select a keyframe in the editor.
     SelectKeyframe { index: Option<usize> },
     /// Update a map object.
-    UpdateObject { index: usize, object: crate::map::MapObject },
+    UpdateObject {
+        index: usize,
+        object: crate::map::MapObject,
+    },
     /// Add a new map object.
     AddObject { object: crate::map::MapObject },
     /// Delete a map object.

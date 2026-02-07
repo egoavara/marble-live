@@ -486,9 +486,7 @@ pub enum LiveRankingConfig {
     #[default]
     YPosition,
     /// Distance to a specific object (closer = higher rank)
-    Distance {
-        target_id: String,
-    },
+    Distance { target_id: String },
 }
 
 /// Map metadata.
@@ -590,19 +588,18 @@ impl RouletteConfig {
                     max_x = max_x.max(center[0] + radius);
                     max_y = max_y.max(center[1] + radius);
                 }
-                EvaluatedShape::Rect { center, size, rotation } => {
+                EvaluatedShape::Rect {
+                    center,
+                    size,
+                    rotation,
+                } => {
                     // For rotated rectangles, compute all 4 corners
                     let (sin, cos) = rotation.to_radians().sin_cos();
                     let hw = size[0] / 2.0;
                     let hh = size[1] / 2.0;
 
                     // Corners relative to center (before rotation)
-                    let corners = [
-                        (-hw, -hh),
-                        (hw, -hh),
-                        (hw, hh),
-                        (-hw, hh),
-                    ];
+                    let corners = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)];
 
                     for (dx, dy) in corners {
                         // Rotate corner
@@ -656,7 +653,11 @@ impl RouletteConfig {
     }
 
     /// Checks if an object should be created as a kinematic body.
-    fn is_animatable(&self, obj: &MapObject, keyframe_targets: &std::collections::HashSet<String>) -> bool {
+    fn is_animatable(
+        &self,
+        obj: &MapObject,
+        keyframe_targets: &std::collections::HashSet<String>,
+    ) -> bool {
         // Has roll property
         if obj.properties.roll.is_some() {
             return true;
@@ -693,14 +694,22 @@ impl RouletteConfig {
                     if is_animated {
                         // Create as kinematic body
                         if let Some(id) = &obj.id {
-                            let (body_handle, collider_handle, initial_pos, initial_rot) =
-                                self.create_kinematic_obstacle(world, &shape, &obj.properties, &ctx, Some(id));
+                            let (body_handle, collider_handle, initial_pos, initial_rot) = self
+                                .create_kinematic_obstacle(
+                                    world,
+                                    &shape,
+                                    &obj.properties,
+                                    &ctx,
+                                    Some(id),
+                                );
                             kinematic_bodies.insert(id.clone(), body_handle);
-                            kinematic_initial_transforms.insert(id.clone(), (initial_pos, initial_rot));
+                            kinematic_initial_transforms
+                                .insert(id.clone(), (initial_pos, initial_rot));
                             object_handles.insert(id.clone(), collider_handle);
                         }
                     } else {
-                        let handle = self.create_obstacle_collider(world, &shape, &obj.properties, &ctx);
+                        let handle =
+                            self.create_obstacle_collider(world, &shape, &obj.properties, &ctx);
                         if let Some(id) = &obj.id {
                             object_handles.insert(id.clone(), handle);
                         }
@@ -710,7 +719,9 @@ impl RouletteConfig {
                     let handle = self.create_trigger_collider(world, &shape);
                     trigger_handles.push(handle);
                     // Get trigger action (default to "gamerule" if not specified)
-                    let action = obj.properties.trigger
+                    let action = obj
+                        .properties
+                        .trigger
                         .as_ref()
                         .map(|t| t.action.clone())
                         .unwrap_or_else(|| "gamerule".to_string());
@@ -811,15 +822,11 @@ impl RouletteConfig {
             EvaluatedShape::Bezier { .. } => {
                 // Convert bezier to polyline
                 let points = shape.bezier_to_points().unwrap();
-                let vertices: Vec<_> = points
-                    .iter()
-                    .map(|p| Vector::new(p[0], p[1]))
-                    .collect();
+                let vertices: Vec<_> = points.iter().map(|p| Vector::new(p[0], p[1])).collect();
 
                 // Create indices for consecutive line segments
-                let indices: Vec<[u32; 2]> = (0..vertices.len() as u32 - 1)
-                    .map(|i| [i, i + 1])
-                    .collect();
+                let indices: Vec<[u32; 2]> =
+                    (0..vertices.len() as u32 - 1).map(|i| [i, i + 1]).collect();
 
                 // Use polyline with border radius for thickness
                 ColliderBuilder::polyline(vertices, Some(indices))
@@ -900,7 +907,11 @@ impl RouletteConfig {
         (body_handle, collider_handle, position, rotation_rad)
     }
 
-    fn create_trigger_collider(&self, world: &mut PhysicsWorld, shape: &EvaluatedShape) -> ColliderHandle {
+    fn create_trigger_collider(
+        &self,
+        world: &mut PhysicsWorld,
+        shape: &EvaluatedShape,
+    ) -> ColliderHandle {
         let collider = match shape {
             EvaluatedShape::Circle { center, radius } => ColliderBuilder::ball(*radius)
                 .translation(Vector::new(center[0], center[1]))
@@ -985,13 +996,16 @@ impl RouletteConfig {
             .iter()
             .filter(|obj| obj.role == ObjectRole::VectorField)
             .filter_map(|obj| {
-                obj.properties.vector_field.as_ref().map(|vf| VectorFieldData {
-                    shape: obj.shape.clone(),
-                    direction: vf.direction.clone(),
-                    magnitude: vf.magnitude.clone(),
-                    enabled: vf.enabled.clone(),
-                    falloff: vf.falloff,
-                })
+                obj.properties
+                    .vector_field
+                    .as_ref()
+                    .map(|vf| VectorFieldData {
+                        shape: obj.shape.clone(),
+                        direction: vf.direction.clone(),
+                        magnitude: vf.magnitude.clone(),
+                        enabled: vf.enabled.clone(),
+                        falloff: vf.falloff,
+                    })
             })
             .collect()
     }
@@ -1002,7 +1016,10 @@ impl RouletteConfig {
     pub fn find_kinematic_handles(
         &self,
         world: &PhysicsWorld,
-    ) -> (HashMap<String, RigidBodyHandle>, HashMap<String, ([f32; 2], f32)>) {
+    ) -> (
+        HashMap<String, RigidBodyHandle>,
+        HashMap<String, ([f32; 2], f32)>,
+    ) {
         let ctx = GameContext::new(0.0, 0);
         let keyframe_targets = self.collect_keyframe_target_ids();
 
@@ -1027,9 +1044,9 @@ impl RouletteConfig {
             let shape = obj.shape.evaluate(&ctx);
             let (initial_x, initial_y, initial_rot) = match shape {
                 EvaluatedShape::Circle { center, .. } => (center[0], center[1], 0.0),
-                EvaluatedShape::Rect { center, rotation, .. } => {
-                    (center[0], center[1], rotation.to_radians())
-                }
+                EvaluatedShape::Rect {
+                    center, rotation, ..
+                } => (center[0], center[1], rotation.to_radians()),
                 EvaluatedShape::Line { start, end } => {
                     let mid_x = f32::midpoint(start[0], end[0]);
                     let mid_y = f32::midpoint(start[1], end[1]);
@@ -1044,7 +1061,8 @@ impl RouletteConfig {
             // Find kinematic body by ID stored in user_data
             if let Some(handle) = world.find_kinematic_by_id(id) {
                 kinematic_bodies.insert(id.clone(), handle);
-                kinematic_initial_transforms.insert(id.clone(), ([initial_x, initial_y], initial_rot));
+                kinematic_initial_transforms
+                    .insert(id.clone(), ([initial_x, initial_y], initial_rot));
             }
         }
 

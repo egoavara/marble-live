@@ -485,7 +485,12 @@ impl EditorStore {
         *self.version.write() += 1;
     }
 
-    pub fn update_all(&self, summary: EditorStateSummary, objects: Vec<MapObject>, keyframes: Vec<KeyframeSequence>) {
+    pub fn update_all(
+        &self,
+        summary: EditorStateSummary,
+        objects: Vec<MapObject>,
+        keyframes: Vec<KeyframeSequence>,
+    ) {
         *self.summary.write() = summary;
         *self.objects.write() = objects;
         *self.keyframes.write() = keyframes;

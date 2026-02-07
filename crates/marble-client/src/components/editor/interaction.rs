@@ -37,15 +37,23 @@ pub enum GizmoHandle {
 
 impl GizmoHandle {
     pub fn is_move(&self) -> bool {
-        matches!(self, GizmoHandle::MoveX | GizmoHandle::MoveY | GizmoHandle::MoveFree)
+        matches!(
+            self,
+            GizmoHandle::MoveX | GizmoHandle::MoveY | GizmoHandle::MoveFree
+        )
     }
 
     pub fn is_scale(&self) -> bool {
-        matches!(self,
-            GizmoHandle::ScaleTopLeft | GizmoHandle::ScaleTopRight |
-            GizmoHandle::ScaleBottomRight | GizmoHandle::ScaleBottomLeft |
-            GizmoHandle::ScaleTop | GizmoHandle::ScaleRight |
-            GizmoHandle::ScaleBottom | GizmoHandle::ScaleLeft
+        matches!(
+            self,
+            GizmoHandle::ScaleTopLeft
+                | GizmoHandle::ScaleTopRight
+                | GizmoHandle::ScaleBottomRight
+                | GizmoHandle::ScaleBottomLeft
+                | GizmoHandle::ScaleTop
+                | GizmoHandle::ScaleRight
+                | GizmoHandle::ScaleBottom
+                | GizmoHandle::ScaleLeft
         )
     }
 
@@ -54,15 +62,19 @@ impl GizmoHandle {
     }
 
     pub fn is_bezier(&self) -> bool {
-        matches!(self,
-            GizmoHandle::BezierStart | GizmoHandle::BezierControl1 |
-            GizmoHandle::BezierControl2 | GizmoHandle::BezierEnd |
-            GizmoHandle::BezierMoveFree
+        matches!(
+            self,
+            GizmoHandle::BezierStart
+                | GizmoHandle::BezierControl1
+                | GizmoHandle::BezierControl2
+                | GizmoHandle::BezierEnd
+                | GizmoHandle::BezierMoveFree
         )
     }
 
     pub fn is_line(&self) -> bool {
-        matches!(self,
+        matches!(
+            self,
             GizmoHandle::LineStart | GizmoHandle::LineEnd | GizmoHandle::LineMoveFree
         )
     }
@@ -196,7 +208,12 @@ impl EditorInteractionState {
         self.pan_start_camera_center = None;
     }
 
-    pub fn start_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: ObjectTransform) {
+    pub fn start_drag(
+        &mut self,
+        handle: GizmoHandle,
+        world_pos: (f32, f32),
+        transform: ObjectTransform,
+    ) {
         self.active_handle = Some(handle);
         self.drag_start_world = Some(world_pos);
         self.original_transform = Some(transform);
@@ -206,7 +223,12 @@ impl EditorInteractionState {
         self.original_ghost_transform = None;
     }
 
-    pub fn start_bezier_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: BezierTransform) {
+    pub fn start_bezier_drag(
+        &mut self,
+        handle: GizmoHandle,
+        world_pos: (f32, f32),
+        transform: BezierTransform,
+    ) {
         self.active_handle = Some(handle);
         self.drag_start_world = Some(world_pos);
         self.original_transform = None;
@@ -216,7 +238,12 @@ impl EditorInteractionState {
         self.original_ghost_transform = None;
     }
 
-    pub fn start_line_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: LineTransform) {
+    pub fn start_line_drag(
+        &mut self,
+        handle: GizmoHandle,
+        world_pos: (f32, f32),
+        transform: LineTransform,
+    ) {
         self.active_handle = Some(handle);
         self.drag_start_world = Some(world_pos);
         self.original_transform = None;
@@ -226,7 +253,12 @@ impl EditorInteractionState {
         self.original_ghost_transform = None;
     }
 
-    pub fn start_pivot_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: PivotTransform) {
+    pub fn start_pivot_drag(
+        &mut self,
+        handle: GizmoHandle,
+        world_pos: (f32, f32),
+        transform: PivotTransform,
+    ) {
         self.active_handle = Some(handle);
         self.drag_start_world = Some(world_pos);
         self.original_transform = None;
@@ -236,7 +268,12 @@ impl EditorInteractionState {
         self.original_ghost_transform = None;
     }
 
-    pub fn start_ghost_drag(&mut self, handle: GizmoHandle, world_pos: (f32, f32), transform: GhostTransform) {
+    pub fn start_ghost_drag(
+        &mut self,
+        handle: GizmoHandle,
+        world_pos: (f32, f32),
+        transform: GhostTransform,
+    ) {
         self.active_handle = Some(handle);
         self.drag_start_world = Some(world_pos);
         self.original_transform = None;

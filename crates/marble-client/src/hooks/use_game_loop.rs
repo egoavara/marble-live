@@ -7,8 +7,8 @@ use marble_core::{GameState, PlayerId, RouletteConfig, SyncSnapshot};
 use marble_proto::room::room_service_client::RoomServiceClient;
 use marble_proto::room::{PlayerAuth, ReportArrivalRequest, StartGameRequest};
 use tonic_web_wasm_client::Client;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 // use web_sys::HtmlCanvasElement; // Removed - Bevy handles canvas
 use yew::prelude::*;
@@ -105,7 +105,9 @@ impl GameLoopHandle {
 
         // Broadcast game start via Bevy's P2P system
         drop(game);
-        if let Err(e) = marble_core::bevy::wasm_entry::send_command(r#"{"type":"broadcast_game_start"}"#) {
+        if let Err(e) =
+            marble_core::bevy::wasm_entry::send_command(r#"{"type":"broadcast_game_start"}"#)
+        {
             tracing::error!("Failed to broadcast game start: {:?}", e);
         }
         self.loop_state.set(GameLoopState::Running);
@@ -134,7 +136,11 @@ impl GameLoopHandle {
                 drop(game);
 
                 self.loop_state.set(GameLoopState::Running);
-                tracing::info!(seed = seed, gamerule = gamerule, "Game initialized from host state");
+                tracing::info!(
+                    seed = seed,
+                    gamerule = gamerule,
+                    "Game initialized from host state"
+                );
             }
             Err(e) => {
                 tracing::error!(error = %e, "Failed to initialize game from host state");
@@ -203,7 +209,9 @@ impl GameLoopHandle {
 
         // Broadcast updated state to peers via Bevy's P2P system
         drop(game);
-        if let Err(e) = marble_core::bevy::wasm_entry::send_command(r#"{"type":"broadcast_game_start"}"#) {
+        if let Err(e) =
+            marble_core::bevy::wasm_entry::send_command(r#"{"type":"broadcast_game_start"}"#)
+        {
             tracing::error!("Failed to broadcast game start: {:?}", e);
         }
         {

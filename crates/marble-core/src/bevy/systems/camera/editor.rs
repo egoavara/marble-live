@@ -78,9 +78,10 @@ fn handle_pan_input(
 
     // Continue drag
     if mouse_button.pressed(MouseButton::Middle) && input_state.is_dragging {
-        if let (Some(start_screen), Some(start_camera)) =
-            (input_state.drag_start_screen, input_state.drag_start_camera_pos)
-        {
+        if let (Some(start_screen), Some(start_camera)) = (
+            input_state.drag_start_screen,
+            input_state.drag_start_camera_pos,
+        ) {
             // Calculate delta in screen space
             let screen_delta = cursor_position - start_screen;
 
@@ -150,15 +151,21 @@ fn handle_zoom_input(
         // World origin depends on camera position
         let screen_center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
         let cursor_offset_screen = cursor_position - screen_center;
-        let cursor_offset_world = Vec2::new(cursor_offset_screen.x * scale, -cursor_offset_screen.y * scale);
-        let cursor_world_before = Vec2::new(transform.translation.x, transform.translation.y) + cursor_offset_world;
+        let cursor_offset_world = Vec2::new(
+            cursor_offset_screen.x * scale,
+            -cursor_offset_screen.y * scale,
+        );
+        let cursor_world_before =
+            Vec2::new(transform.translation.x, transform.translation.y) + cursor_offset_world;
 
         // Calculate new scale
         let new_scale = 1.0 / new_zoom;
 
         // Calculate where cursor would be in world after zoom
-        let cursor_offset_world_after =
-            Vec2::new(cursor_offset_screen.x * new_scale, -cursor_offset_screen.y * new_scale);
+        let cursor_offset_world_after = Vec2::new(
+            cursor_offset_screen.x * new_scale,
+            -cursor_offset_screen.y * new_scale,
+        );
 
         // Adjust camera position so cursor stays at the same world position
         let new_camera_pos = cursor_world_before - cursor_offset_world_after;

@@ -303,8 +303,12 @@ impl P2pRoomHandle {
                     tracing::info!(peer_id = %my_peer_id, "Registering peer_id with server");
 
                     // Call RegisterPeerId gRPC
-                    let Some(window) = web_sys::window() else { return; };
-                    let Ok(origin) = window.location().origin() else { return; };
+                    let Some(window) = web_sys::window() else {
+                        return;
+                    };
+                    let Ok(origin) = window.location().origin() else {
+                        return;
+                    };
                     let client = Client::new(format!("{}/grpc", origin));
                     let mut grpc = RoomServiceClient::new(client);
 
@@ -401,12 +405,7 @@ impl P2pRoomHandle {
 
                                 drop(inner_mut);
 
-                                resolve_peer_ids(
-                                    room_id,
-                                    player_id,
-                                    player_secret,
-                                    peer_ids,
-                                );
+                                resolve_peer_ids(room_id, player_id, player_secret, peer_ids);
                             } else {
                                 drop(inner_mut);
                             }
@@ -469,10 +468,7 @@ fn resolve_peer_ids(
 
                 for (peer_id_str, player_id) in resp.peer_to_player {
                     // Forward to Bevy so P2pSocketRes gets updated
-                    marble_core::bevy::wasm_entry::update_peer_player_id(
-                        &peer_id_str,
-                        &player_id,
-                    );
+                    marble_core::bevy::wasm_entry::update_peer_player_id(&peer_id_str, &player_id);
                 }
 
                 tracing::debug!(

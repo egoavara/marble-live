@@ -105,7 +105,8 @@ impl ConnectionReporter {
 
     /// Register a peer for tracking
     pub fn add_peer(&mut self, player_id: String, _peer_id: PeerId) {
-        self.measurements.insert(player_id, RttMeasurement::default());
+        self.measurements
+            .insert(player_id, RttMeasurement::default());
     }
 
     /// Remove a peer from tracking
@@ -121,7 +122,12 @@ impl ConnectionReporter {
     }
 
     /// Record pong received
-    pub fn on_pong_received(&mut self, player_id: &str, sent_timestamp: f64, received_timestamp: f64) {
+    pub fn on_pong_received(
+        &mut self,
+        player_id: &str,
+        sent_timestamp: f64,
+        received_timestamp: f64,
+    ) {
         if let Some(measurement) = self.measurements.get_mut(player_id) {
             measurement.record_pong(sent_timestamp, received_timestamp);
         }

@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use cel::{Context, Program, Value};
 use rand::Rng;
-use rand_chacha::ChaCha8Rng;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 /// Error type for CEL expression evaluation.
@@ -233,7 +233,10 @@ impl GameContext {
 
         // Create game object with time and frame
         let mut game_map: HashMap<Arc<String>, Value> = HashMap::new();
-        game_map.insert(Arc::new("time".to_string()), Value::Float(f64::from(self.time)));
+        game_map.insert(
+            Arc::new("time".to_string()),
+            Value::Float(f64::from(self.time)),
+        );
         game_map.insert(Arc::new("frame".to_string()), Value::Int(self.frame as i64));
 
         ctx.add_variable("game", Value::Map(game_map.into())).ok();
@@ -252,9 +255,8 @@ impl GameContext {
             }
 
             // Compile and cache
-            let program = Arc::new(
-                Program::compile(expr).map_err(|e| DslError::Compile(format!("{e:?}")))?,
-            );
+            let program =
+                Arc::new(Program::compile(expr).map_err(|e| DslError::Compile(format!("{e:?}")))?);
             cache.write().insert(expr.to_string(), Arc::clone(&program));
             Ok(program)
         } else {
@@ -511,7 +513,9 @@ mod tests {
     #[test]
     fn test_eval_vec2_with_expressions() {
         let ctx = GameContext::new(5.0, 100);
-        let result = ctx.eval_vec2("[game.time * 2.0, game.frame / 10.0]").unwrap();
+        let result = ctx
+            .eval_vec2("[game.time * 2.0, game.frame / 10.0]")
+            .unwrap();
         assert!((result[0] - 10.0).abs() < f32::EPSILON);
         assert!((result[1] - 10.0).abs() < f32::EPSILON);
     }

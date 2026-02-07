@@ -5,8 +5,8 @@
 use yew::prelude::*;
 
 use crate::hooks::{
-    use_bevy, use_bevy_game, use_bevy_players, BevyContext, BevyProvider, GameStateSummary,
-    PlayerInfo,
+    BevyContext, BevyProvider, GameStateSummary, PlayerInfo, use_bevy, use_bevy_game,
+    use_bevy_players,
 };
 
 /// Canvas ID for the game.
@@ -57,7 +57,10 @@ fn marble_game_inner(props: &MarbleGameInnerProps) -> Html {
                 // Sort players by arrival order
                 let mut sorted_players = players.clone();
                 sorted_players.sort_by_key(|p| {
-                    order.iter().position(|&id| id == p.id).unwrap_or(usize::MAX)
+                    order
+                        .iter()
+                        .position(|&id| id == p.id)
+                        .unwrap_or(usize::MAX)
                 });
                 on_game_end.emit(sorted_players);
             }

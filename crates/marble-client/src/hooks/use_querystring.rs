@@ -52,7 +52,8 @@ where
             };
 
             let history = window.history().expect("no history");
-            let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&new_url));
+            let _ =
+                history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&new_url));
 
             || ()
         });

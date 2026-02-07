@@ -147,10 +147,9 @@ impl CameraState {
                     map_center
                 }
             }
-            CameraMode::FollowLeader => {
-                self.get_leader_position_with_hysteresis(game_state)
-                    .unwrap_or(map_center)
-            }
+            CameraMode::FollowLeader => self
+                .get_leader_position_with_hysteresis(game_state)
+                .unwrap_or(map_center),
         };
 
         // Calculate zoom based on mode

@@ -3,8 +3,8 @@
 //! Handles trigger detection, arrival events, and game over conditions.
 
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::*;
 
+use crate::bevy::rapier_plugin::{CollisionEvent, PhysicsBody, PhysicsWorldRes};
 use crate::bevy::{GameOverEvent, Marble, MarbleArrivedEvent, MarbleGameState, TriggerZone};
 
 /// System to check for marble-trigger collisions.
@@ -25,7 +25,8 @@ pub fn check_trigger_arrivals(
             (marbles.get(*e1), triggers.get(*e2))
         {
             (entity, marble, trigger)
-        } else if let (Ok((entity, marble)), Ok((_, trigger))) = (marbles.get(*e2), triggers.get(*e1))
+        } else if let (Ok((entity, marble)), Ok((_, trigger))) =
+            (marbles.get(*e2), triggers.get(*e1))
         {
             (entity, marble, trigger)
         } else {
@@ -60,9 +61,15 @@ pub fn handle_marble_arrivals(
     mut commands: Commands,
     mut events: MessageReader<MarbleArrivedEvent>,
     mut marbles: Query<&mut Marble>,
+    bodies: Query<&PhysicsBody>,
+    mut physics: ResMut<PhysicsWorldRes>,
 ) {
     for event in events.read() {
         if event.trigger_action == "gamerule" {
+            // Remove from physics world first
+            if let Ok(body) = bodies.get(event.marble_entity) {
+                physics.world.remove_rigid_body(body.0);
+            }
             // Remove marble entirely
             commands.entity(event.marble_entity).despawn();
         } else {
@@ -70,11 +77,11 @@ pub fn handle_marble_arrivals(
             if let Ok(mut marble) = marbles.get_mut(event.marble_entity) {
                 marble.eliminated = true;
             }
-            // Disable physics by removing components
-            commands
-                .entity(event.marble_entity)
-                .remove::<RigidBody>()
-                .remove::<Collider>();
+            // Remove from physics by removing the body
+            if let Ok(body) = bodies.get(event.marble_entity) {
+                physics.world.remove_rigid_body(body.0);
+            }
+            commands.entity(event.marble_entity).remove::<PhysicsBody>();
         }
     }
 }

@@ -274,7 +274,9 @@ impl MarbleManager {
 
     /// Gets a mutable marble by its collider handle.
     pub fn get_marble_by_collider_mut(&mut self, handle: ColliderHandle) -> Option<&mut Marble> {
-        self.marbles.iter_mut().find(|m| m.collider_handle == handle)
+        self.marbles
+            .iter_mut()
+            .find(|m| m.collider_handle == handle)
     }
 
     /// Gets a marble by its owner (player) ID.
@@ -364,7 +366,11 @@ impl MarbleManager {
     }
 
     /// Gets the position of a marble.
-    pub fn get_marble_position(&self, world: &PhysicsWorld, marble_id: MarbleId) -> Option<(f32, f32)> {
+    pub fn get_marble_position(
+        &self,
+        world: &PhysicsWorld,
+        marble_id: MarbleId,
+    ) -> Option<(f32, f32)> {
         self.get_marble(marble_id).and_then(|marble| {
             world.get_rigid_body(marble.body_handle).map(|body| {
                 let pos = body.translation();
@@ -374,7 +380,11 @@ impl MarbleManager {
     }
 
     /// Gets the velocity of a marble.
-    pub fn get_marble_velocity(&self, world: &PhysicsWorld, marble_id: MarbleId) -> Option<(f32, f32)> {
+    pub fn get_marble_velocity(
+        &self,
+        world: &PhysicsWorld,
+        marble_id: MarbleId,
+    ) -> Option<(f32, f32)> {
         self.get_marble(marble_id).and_then(|marble| {
             world.get_rigid_body(marble.body_handle).map(|body| {
                 let vel = body.linvel();

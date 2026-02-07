@@ -4,7 +4,7 @@ use marble_core::dsl::NumberOrExpr;
 use marble_core::map::{Keyframe, KeyframeSequence};
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
-use yew::{create_portal, Html};
+use yew::{Html, create_portal};
 use yew_icons::{Icon, IconData};
 
 /// Props for the TimelinePanel component.
@@ -58,7 +58,8 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
         use_effect_with((), move |_| {
             let doc = web_sys::window().unwrap().document().unwrap();
             let el = doc.create_element("div").unwrap();
-            el.set_attribute("class", "timeline-insert-menu-portal").ok();
+            el.set_attribute("class", "timeline-insert-menu-portal")
+                .ok();
             doc.body().unwrap().append_child(&el).ok();
             portal_host.set(Some(el.clone()));
             move || {
@@ -84,22 +85,41 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 };
                 ("loop-start", IconData::LUCIDE_REPEAT, label, false)
             }
-            Keyframe::LoopEnd => ("loop-end", IconData::LUCIDE_CORNER_DOWN_LEFT, String::new(), false),
-            Keyframe::Delay { duration } => {
-                match duration {
-                    NumberOrExpr::Number(n) => ("delay", IconData::LUCIDE_TIMER, format!("{:.1}s", n), false),
-                    NumberOrExpr::Expr(_) => ("delay cel-expr", IconData::LUCIDE_TIMER, String::new(), true),
+            Keyframe::LoopEnd => (
+                "loop-end",
+                IconData::LUCIDE_CORNER_DOWN_LEFT,
+                String::new(),
+                false,
+            ),
+            Keyframe::Delay { duration } => match duration {
+                NumberOrExpr::Number(n) => {
+                    ("delay", IconData::LUCIDE_TIMER, format!("{:.1}s", n), false)
                 }
-            }
-            Keyframe::Apply { duration, .. } => {
-                ("apply", IconData::LUCIDE_MOVE, format!("{:.1}s", duration), false)
-            }
-            Keyframe::PivotRotate { duration, .. } => {
-                ("pivot", IconData::LUCIDE_ROTATE_CW, format!("{:.1}s", duration), false)
-            }
-            Keyframe::ContinuousRotate { speed, .. } => {
-                ("continuous", IconData::LUCIDE_REFRESH_CW, format!("{:.0}°/s", speed), false)
-            }
+                NumberOrExpr::Expr(_) => (
+                    "delay cel-expr",
+                    IconData::LUCIDE_TIMER,
+                    String::new(),
+                    true,
+                ),
+            },
+            Keyframe::Apply { duration, .. } => (
+                "apply",
+                IconData::LUCIDE_MOVE,
+                format!("{:.1}s", duration),
+                false,
+            ),
+            Keyframe::PivotRotate { duration, .. } => (
+                "pivot",
+                IconData::LUCIDE_ROTATE_CW,
+                format!("{:.1}s", duration),
+                false,
+            ),
+            Keyframe::ContinuousRotate { speed, .. } => (
+                "continuous",
+                IconData::LUCIDE_REFRESH_CW,
+                format!("{:.0}°/s", speed),
+                false,
+            ),
         }
     }
 
@@ -150,7 +170,13 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     let close_insert_menu = {
         let insert_menu = insert_menu.clone();
         Callback::from(move |_: MouseEvent| {
-            web_sys::console::log_1(&format!("[insert-menu] close_insert_menu fired, current state: {:?}", *insert_menu).into());
+            web_sys::console::log_1(
+                &format!(
+                    "[insert-menu] close_insert_menu fired, current state: {:?}",
+                    *insert_menu
+                )
+                .into(),
+            );
             insert_menu.set(None);
         })
     };
@@ -183,7 +209,11 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
                 e.stop_propagation();
                 if let Some(target) = e.target() {
                     if let Some(el) = target.dyn_ref::<web_sys::Element>() {
-                        let btn = el.closest(".timeline-insert-btn").ok().flatten().unwrap_or_else(|| el.clone());
+                        let btn = el
+                            .closest(".timeline-insert-btn")
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| el.clone());
                         let rect = btn.get_bounding_client_rect();
                         // Viewport-relative coordinates (portal renders in document.body)
                         let x = rect.left() + rect.width() / 2.0;
@@ -208,7 +238,9 @@ pub fn timeline_panel(props: &TimelinePanelProps) -> Html {
     };
 
     // Render the insert menu via portal into document.body
-    let portal_menu = if let (Some(host), Some((_, menu_x, menu_y))) = ((*portal_host).clone(), *insert_menu) {
+    let portal_menu = if let (Some(host), Some((_, menu_x, menu_y))) =
+        ((*portal_host).clone(), *insert_menu)
+    {
         create_portal(
             html! {
                 <div

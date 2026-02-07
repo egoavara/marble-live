@@ -60,7 +60,15 @@ pub fn render_editor_gizmos(
         } => {
             let pos = Vec2::new(center[0], center[1]);
             let sz = Vec2::new(size[0], size[1]);
-            draw_standard_gizmo(&mut gizmos, pos, sz, rotation.to_radians(), zoom, hovered, active);
+            draw_standard_gizmo(
+                &mut gizmos,
+                pos,
+                sz,
+                rotation.to_radians(),
+                zoom,
+                hovered,
+                active,
+            );
         }
         EvaluatedShape::Line { start, end } => {
             let start_pos = Vec2::new(start[0], start[1]);
@@ -78,18 +86,36 @@ pub fn render_editor_gizmos(
             let ctrl1 = Vec2::new(control1[0], control1[1]);
             let ctrl2 = Vec2::new(control2[0], control2[1]);
             let end_pos = Vec2::new(end[0], end[1]);
-            draw_bezier_gizmo(&mut gizmos, start_pos, ctrl1, ctrl2, end_pos, zoom, hovered, active);
+            draw_bezier_gizmo(
+                &mut gizmos,
+                start_pos,
+                ctrl1,
+                ctrl2,
+                end_pos,
+                zoom,
+                hovered,
+                active,
+            );
         }
     }
 }
 
 /// Check if a handle is hovered or active.
-fn is_highlighted(handle: GizmoHandle, hovered: Option<GizmoHandle>, active: Option<GizmoHandle>) -> bool {
+fn is_highlighted(
+    handle: GizmoHandle,
+    hovered: Option<GizmoHandle>,
+    active: Option<GizmoHandle>,
+) -> bool {
     active == Some(handle) || hovered == Some(handle)
 }
 
 /// Get color for a handle (with hover/active highlighting).
-fn get_handle_color(base_color: Color, handle: GizmoHandle, hovered: Option<GizmoHandle>, active: Option<GizmoHandle>) -> Color {
+fn get_handle_color(
+    base_color: Color,
+    handle: GizmoHandle,
+    hovered: Option<GizmoHandle>,
+    active: Option<GizmoHandle>,
+) -> Color {
     if active == Some(handle) {
         // Active (dragging): bright yellow
         Color::srgb(1.0, 1.0, 0.2)
@@ -166,7 +192,11 @@ fn draw_circle_gizmo(
     let x_end = center + Vec2::new(arrow_length, 0.0);
     let x_highlighted = is_highlighted(GizmoHandle::MoveX, hovered, active);
     let x_color = get_handle_color(GizmoColors::X_AXIS, GizmoHandle::MoveX, hovered, active);
-    let x_handle_size = if x_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let x_handle_size = if x_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
 
     gizmos.line_2d(center, x_end, x_color);
     draw_arrow_head(gizmos, x_end, Vec2::X, x_handle_size, x_color);
@@ -175,7 +205,11 @@ fn draw_circle_gizmo(
     let y_end = center + Vec2::new(0.0, arrow_length);
     let y_highlighted = is_highlighted(GizmoHandle::MoveY, hovered, active);
     let y_color = get_handle_color(GizmoColors::Y_AXIS, GizmoHandle::MoveY, hovered, active);
-    let y_handle_size = if y_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let y_handle_size = if y_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
 
     gizmos.line_2d(center, y_end, y_color);
     draw_arrow_head(gizmos, y_end, Vec2::Y, y_handle_size, y_color);
@@ -183,7 +217,11 @@ fn draw_circle_gizmo(
     // Free move (center square)
     let free_highlighted = is_highlighted(GizmoHandle::MoveFree, hovered, active);
     let free_color = get_handle_color(GizmoColors::FREE, GizmoHandle::MoveFree, hovered, active);
-    let free_size = if free_highlighted { base_handle_size * 2.0 } else { base_handle_size * 1.5 };
+    let free_size = if free_highlighted {
+        base_handle_size * 2.0
+    } else {
+        base_handle_size * 1.5
+    };
     gizmos.rect_2d(
         Isometry2d::from_translation(center),
         Vec2::splat(free_size),
@@ -201,7 +239,11 @@ fn draw_circle_gizmo(
     for (pos, handle) in radius_handles {
         let highlighted = is_highlighted(handle, hovered, active);
         let color = get_handle_color(GizmoColors::SCALE, handle, hovered, active);
-        let size = if highlighted { base_handle_size * 1.3 } else { base_handle_size };
+        let size = if highlighted {
+            base_handle_size * 1.3
+        } else {
+            base_handle_size
+        };
         // Draw diamond shape for radius handles
         draw_diamond(gizmos, pos, size, color);
     }
@@ -244,7 +286,11 @@ fn draw_standard_gizmo(
     let x_end = center + Vec2::new(arrow_length, 0.0);
     let x_highlighted = is_highlighted(GizmoHandle::MoveX, hovered, active);
     let x_color = get_handle_color(GizmoColors::X_AXIS, GizmoHandle::MoveX, hovered, active);
-    let x_handle_size = if x_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let x_handle_size = if x_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
 
     gizmos.line_2d(center, x_end, x_color);
     draw_arrow_head(gizmos, x_end, Vec2::X, x_handle_size, x_color);
@@ -253,7 +299,11 @@ fn draw_standard_gizmo(
     let y_end = center + Vec2::new(0.0, arrow_length);
     let y_highlighted = is_highlighted(GizmoHandle::MoveY, hovered, active);
     let y_color = get_handle_color(GizmoColors::Y_AXIS, GizmoHandle::MoveY, hovered, active);
-    let y_handle_size = if y_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let y_handle_size = if y_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
 
     gizmos.line_2d(center, y_end, y_color);
     draw_arrow_head(gizmos, y_end, Vec2::Y, y_handle_size, y_color);
@@ -264,26 +314,60 @@ fn draw_standard_gizmo(
         // Local X axis - dashed line, rotated
         let local_x_end = center + rot * Vec2::new(local_arrow_length, 0.0);
         let local_x_highlighted = is_highlighted(GizmoHandle::LocalMoveX, hovered, active);
-        let local_x_color = get_handle_color(GizmoColors::LOCAL_X_AXIS, GizmoHandle::LocalMoveX, hovered, active);
-        let local_x_handle_size = if local_x_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+        let local_x_color = get_handle_color(
+            GizmoColors::LOCAL_X_AXIS,
+            GizmoHandle::LocalMoveX,
+            hovered,
+            active,
+        );
+        let local_x_handle_size = if local_x_highlighted {
+            base_handle_size * 1.3
+        } else {
+            base_handle_size
+        };
 
         draw_dashed_line(gizmos, center, local_x_end, local_x_color, 0.03);
-        draw_arrow_head(gizmos, local_x_end, rot * Vec2::X, local_x_handle_size * 0.8, local_x_color);
+        draw_arrow_head(
+            gizmos,
+            local_x_end,
+            rot * Vec2::X,
+            local_x_handle_size * 0.8,
+            local_x_color,
+        );
 
         // Local Y axis - dashed line, rotated
         let local_y_end = center + rot * Vec2::new(0.0, local_arrow_length);
         let local_y_highlighted = is_highlighted(GizmoHandle::LocalMoveY, hovered, active);
-        let local_y_color = get_handle_color(GizmoColors::LOCAL_Y_AXIS, GizmoHandle::LocalMoveY, hovered, active);
-        let local_y_handle_size = if local_y_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+        let local_y_color = get_handle_color(
+            GizmoColors::LOCAL_Y_AXIS,
+            GizmoHandle::LocalMoveY,
+            hovered,
+            active,
+        );
+        let local_y_handle_size = if local_y_highlighted {
+            base_handle_size * 1.3
+        } else {
+            base_handle_size
+        };
 
         draw_dashed_line(gizmos, center, local_y_end, local_y_color, 0.03);
-        draw_arrow_head(gizmos, local_y_end, rot * Vec2::Y, local_y_handle_size * 0.8, local_y_color);
+        draw_arrow_head(
+            gizmos,
+            local_y_end,
+            rot * Vec2::Y,
+            local_y_handle_size * 0.8,
+            local_y_color,
+        );
     }
 
     // Free move (center square)
     let free_highlighted = is_highlighted(GizmoHandle::MoveFree, hovered, active);
     let free_color = get_handle_color(GizmoColors::FREE, GizmoHandle::MoveFree, hovered, active);
-    let free_size = if free_highlighted { base_handle_size * 2.0 } else { base_handle_size * 1.5 };
+    let free_size = if free_highlighted {
+        base_handle_size * 2.0
+    } else {
+        base_handle_size * 1.5
+    };
     gizmos.rect_2d(
         Isometry2d::from_translation(center),
         Vec2::splat(free_size),
@@ -293,16 +377,32 @@ fn draw_standard_gizmo(
     // Scale handles (corners)
     let half = size / 2.0;
     let scale_handles = [
-        (center + rot * Vec2::new(-half.x, half.y), GizmoHandle::ScaleTopLeft),
-        (center + rot * Vec2::new(half.x, half.y), GizmoHandle::ScaleTopRight),
-        (center + rot * Vec2::new(-half.x, -half.y), GizmoHandle::ScaleBottomLeft),
-        (center + rot * Vec2::new(half.x, -half.y), GizmoHandle::ScaleBottomRight),
+        (
+            center + rot * Vec2::new(-half.x, half.y),
+            GizmoHandle::ScaleTopLeft,
+        ),
+        (
+            center + rot * Vec2::new(half.x, half.y),
+            GizmoHandle::ScaleTopRight,
+        ),
+        (
+            center + rot * Vec2::new(-half.x, -half.y),
+            GizmoHandle::ScaleBottomLeft,
+        ),
+        (
+            center + rot * Vec2::new(half.x, -half.y),
+            GizmoHandle::ScaleBottomRight,
+        ),
     ];
 
     for (corner, handle) in scale_handles {
         let highlighted = is_highlighted(handle, hovered, active);
         let color = get_handle_color(GizmoColors::SCALE, handle, hovered, active);
-        let size = if highlighted { base_handle_size * 1.3 } else { base_handle_size };
+        let size = if highlighted {
+            base_handle_size * 1.3
+        } else {
+            base_handle_size
+        };
         gizmos.rect_2d(
             Isometry2d::from_translation(corner),
             Vec2::splat(size),
@@ -373,29 +473,34 @@ fn draw_line_gizmo(
 
     // Start handle
     let start_highlighted = is_highlighted(GizmoHandle::LineStart, hovered, active);
-    let start_color = get_handle_color(GizmoColors::X_AXIS, GizmoHandle::LineStart, hovered, active);
-    let start_size = if start_highlighted { base_handle_size * 1.3 } else { base_handle_size };
-    gizmos.circle_2d(
-        Isometry2d::from_translation(start),
-        start_size,
-        start_color,
-    );
+    let start_color =
+        get_handle_color(GizmoColors::X_AXIS, GizmoHandle::LineStart, hovered, active);
+    let start_size = if start_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
+    gizmos.circle_2d(Isometry2d::from_translation(start), start_size, start_color);
 
     // End handle
     let end_highlighted = is_highlighted(GizmoHandle::LineEnd, hovered, active);
     let end_color = get_handle_color(GizmoColors::Y_AXIS, GizmoHandle::LineEnd, hovered, active);
-    let end_size = if end_highlighted { base_handle_size * 1.3 } else { base_handle_size };
-    gizmos.circle_2d(
-        Isometry2d::from_translation(end),
-        end_size,
-        end_color,
-    );
+    let end_size = if end_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
+    gizmos.circle_2d(Isometry2d::from_translation(end), end_size, end_color);
 
     // X axis arrow from center
     let x_end = line_center + Vec2::new(arrow_length, 0.0);
     let x_highlighted = is_highlighted(GizmoHandle::MoveX, hovered, active);
     let x_color = get_handle_color(GizmoColors::X_AXIS, GizmoHandle::MoveX, hovered, active);
-    let x_handle_size = if x_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let x_handle_size = if x_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
     gizmos.line_2d(line_center, x_end, x_color);
     draw_arrow_head(gizmos, x_end, Vec2::X, x_handle_size, x_color);
 
@@ -403,14 +508,22 @@ fn draw_line_gizmo(
     let y_end = line_center + Vec2::new(0.0, arrow_length);
     let y_highlighted = is_highlighted(GizmoHandle::MoveY, hovered, active);
     let y_color = get_handle_color(GizmoColors::Y_AXIS, GizmoHandle::MoveY, hovered, active);
-    let y_handle_size = if y_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let y_handle_size = if y_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
     gizmos.line_2d(line_center, y_end, y_color);
     draw_arrow_head(gizmos, y_end, Vec2::Y, y_handle_size, y_color);
 
     // Center (free move)
     let free_highlighted = is_highlighted(GizmoHandle::MoveFree, hovered, active);
     let free_color = get_handle_color(GizmoColors::FREE, GizmoHandle::MoveFree, hovered, active);
-    let free_size = if free_highlighted { base_handle_size * 2.0 } else { base_handle_size * 1.5 };
+    let free_size = if free_highlighted {
+        base_handle_size * 2.0
+    } else {
+        base_handle_size * 1.5
+    };
     gizmos.rect_2d(
         Isometry2d::from_translation(line_center),
         Vec2::splat(free_size),
@@ -439,18 +552,32 @@ fn draw_bezier_gizmo(
 
     // Start point
     let start_highlighted = is_highlighted(GizmoHandle::BezierStart, hovered, active);
-    let start_color = get_handle_color(GizmoColors::X_AXIS, GizmoHandle::BezierStart, hovered, active);
-    let start_size = if start_highlighted { base_handle_size * 1.3 } else { base_handle_size };
-    gizmos.circle_2d(
-        Isometry2d::from_translation(start),
-        start_size,
-        start_color,
+    let start_color = get_handle_color(
+        GizmoColors::X_AXIS,
+        GizmoHandle::BezierStart,
+        hovered,
+        active,
     );
+    let start_size = if start_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
+    gizmos.circle_2d(Isometry2d::from_translation(start), start_size, start_color);
 
     // Control point 1
     let ctrl1_highlighted = is_highlighted(GizmoHandle::BezierControl1, hovered, active);
-    let ctrl1_color = get_handle_color(GizmoColors::BEZIER_CONTROL, GizmoHandle::BezierControl1, hovered, active);
-    let ctrl1_size = if ctrl1_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let ctrl1_color = get_handle_color(
+        GizmoColors::BEZIER_CONTROL,
+        GizmoHandle::BezierControl1,
+        hovered,
+        active,
+    );
+    let ctrl1_size = if ctrl1_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
     gizmos.rect_2d(
         Isometry2d::from_translation(control1),
         Vec2::splat(ctrl1_size),
@@ -459,8 +586,17 @@ fn draw_bezier_gizmo(
 
     // Control point 2
     let ctrl2_highlighted = is_highlighted(GizmoHandle::BezierControl2, hovered, active);
-    let ctrl2_color = get_handle_color(GizmoColors::BEZIER_CONTROL, GizmoHandle::BezierControl2, hovered, active);
-    let ctrl2_size = if ctrl2_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let ctrl2_color = get_handle_color(
+        GizmoColors::BEZIER_CONTROL,
+        GizmoHandle::BezierControl2,
+        hovered,
+        active,
+    );
+    let ctrl2_size = if ctrl2_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
     gizmos.rect_2d(
         Isometry2d::from_translation(control2),
         Vec2::splat(ctrl2_size),
@@ -470,18 +606,22 @@ fn draw_bezier_gizmo(
     // End point
     let end_highlighted = is_highlighted(GizmoHandle::BezierEnd, hovered, active);
     let end_color = get_handle_color(GizmoColors::Y_AXIS, GizmoHandle::BezierEnd, hovered, active);
-    let end_size = if end_highlighted { base_handle_size * 1.3 } else { base_handle_size };
-    gizmos.circle_2d(
-        Isometry2d::from_translation(end),
-        end_size,
-        end_color,
-    );
+    let end_size = if end_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
+    gizmos.circle_2d(Isometry2d::from_translation(end), end_size, end_color);
 
     // X axis arrow from center
     let x_end = bezier_center + Vec2::new(arrow_length, 0.0);
     let x_highlighted = is_highlighted(GizmoHandle::MoveX, hovered, active);
     let x_color = get_handle_color(GizmoColors::X_AXIS, GizmoHandle::MoveX, hovered, active);
-    let x_handle_size = if x_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let x_handle_size = if x_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
     gizmos.line_2d(bezier_center, x_end, x_color);
     draw_arrow_head(gizmos, x_end, Vec2::X, x_handle_size, x_color);
 
@@ -489,14 +629,22 @@ fn draw_bezier_gizmo(
     let y_end = bezier_center + Vec2::new(0.0, arrow_length);
     let y_highlighted = is_highlighted(GizmoHandle::MoveY, hovered, active);
     let y_color = get_handle_color(GizmoColors::Y_AXIS, GizmoHandle::MoveY, hovered, active);
-    let y_handle_size = if y_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let y_handle_size = if y_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
     gizmos.line_2d(bezier_center, y_end, y_color);
     draw_arrow_head(gizmos, y_end, Vec2::Y, y_handle_size, y_color);
 
     // Center (free move)
     let free_highlighted = is_highlighted(GizmoHandle::MoveFree, hovered, active);
     let free_color = get_handle_color(GizmoColors::FREE, GizmoHandle::MoveFree, hovered, active);
-    let free_size = if free_highlighted { base_handle_size * 2.0 } else { base_handle_size * 1.5 };
+    let free_size = if free_highlighted {
+        base_handle_size * 2.0
+    } else {
+        base_handle_size * 1.5
+    };
     gizmos.rect_2d(
         Isometry2d::from_translation(bezier_center),
         Vec2::splat(free_size),
@@ -559,18 +707,19 @@ pub fn render_sequence_targets(
 
     // Highlight all objects that are targets of this sequence
     for target_id in &sequence.target_ids {
-        if let Some(obj) = map_config.0.objects.iter().find(|o| o.id.as_ref() == Some(target_id)) {
+        if let Some(obj) = map_config
+            .0
+            .objects
+            .iter()
+            .find(|o| o.id.as_ref() == Some(target_id))
+        {
             let shape = obj.shape.evaluate(&ctx);
             let color = Color::srgba(0.9, 0.6, 0.2, 0.5); // Orange highlight
 
             match &shape {
                 EvaluatedShape::Circle { center, radius } => {
                     let pos = Vec2::new(center[0], center[1]);
-                    gizmos.circle_2d(
-                        Isometry2d::from_translation(pos),
-                        *radius + 0.03,
-                        color,
-                    );
+                    gizmos.circle_2d(Isometry2d::from_translation(pos), *radius + 0.03, color);
                 }
                 EvaluatedShape::Rect {
                     center,
@@ -654,7 +803,10 @@ pub fn render_keyframe_gizmos(
         .target_ids
         .iter()
         .filter_map(|target_id| {
-            map_config.0.objects.iter()
+            map_config
+                .0
+                .objects
+                .iter()
                 .find(|o| o.id.as_ref() == Some(target_id))
                 .map(|obj| {
                     let shape = obj.shape.evaluate(&ctx);
@@ -668,17 +820,44 @@ pub fn render_keyframe_gizmos(
     }
 
     // Average center of all targets
-    let avg_center = target_centers.iter().fold(Vec2::ZERO, |acc, c| acc + *c) / target_centers.len() as f32;
+    let avg_center =
+        target_centers.iter().fold(Vec2::ZERO, |acc, c| acc + *c) / target_centers.len() as f32;
 
     let hovered = editor_state.hovered_handle;
     let active = editor_state.active_handle;
 
     match keyframe {
-        Keyframe::PivotRotate { pivot, pivot_mode, angle, .. } => {
-            draw_pivot_rotate_gizmo(&mut gizmos, *pivot, *pivot_mode, *angle, avg_center, zoom, hovered, active);
+        Keyframe::PivotRotate {
+            pivot,
+            pivot_mode,
+            angle,
+            ..
+        } => {
+            draw_pivot_rotate_gizmo(
+                &mut gizmos,
+                *pivot,
+                *pivot_mode,
+                *angle,
+                avg_center,
+                zoom,
+                hovered,
+                active,
+            );
         }
-        Keyframe::Apply { translation, rotation, .. } => {
-            draw_apply_gizmo(&mut gizmos, *translation, *rotation, avg_center, zoom, hovered, active);
+        Keyframe::Apply {
+            translation,
+            rotation,
+            ..
+        } => {
+            draw_apply_gizmo(
+                &mut gizmos,
+                *translation,
+                *rotation,
+                avg_center,
+                zoom,
+                hovered,
+                active,
+            );
         }
         Keyframe::ContinuousRotate { direction, .. } => {
             draw_continuous_rotate_gizmo(&mut gizmos, direction, avg_center, zoom);
@@ -726,8 +905,17 @@ fn draw_pivot_rotate_gizmo(
 
     // Draw pivot marker (diamond shape, draggable)
     let pivot_highlighted = is_highlighted(GizmoHandle::KeyframePivot, hovered, active);
-    let pivot_color = get_handle_color(GizmoColors::KEYFRAME_PIVOT, GizmoHandle::KeyframePivot, hovered, active);
-    let pivot_size = if pivot_highlighted { base_handle_size * 1.5 } else { base_handle_size * 1.2 };
+    let pivot_color = get_handle_color(
+        GizmoColors::KEYFRAME_PIVOT,
+        GizmoHandle::KeyframePivot,
+        hovered,
+        active,
+    );
+    let pivot_size = if pivot_highlighted {
+        base_handle_size * 1.5
+    } else {
+        base_handle_size * 1.2
+    };
     draw_diamond(gizmos, pivot_pos, pivot_size, pivot_color);
 
     // Draw a small filled circle at pivot center
@@ -744,16 +932,33 @@ fn draw_pivot_rotate_gizmo(
     // Draw rotation arc (from start_angle to end_angle, around pivot)
     let arc_radius = pivot_pos.distance(target_center).max(0.3);
     let angle_highlighted = is_highlighted(GizmoHandle::KeyframeAngle, hovered, active);
-    let arc_color = get_handle_color(GizmoColors::KEYFRAME_ROTATE, GizmoHandle::KeyframeAngle, hovered, active);
+    let arc_color = get_handle_color(
+        GizmoColors::KEYFRAME_ROTATE,
+        GizmoHandle::KeyframeAngle,
+        hovered,
+        active,
+    );
 
-    draw_rotation_arc(gizmos, pivot_pos, arc_radius, start_angle_rad, end_angle_rad, arc_color, angle_highlighted);
+    draw_rotation_arc(
+        gizmos,
+        pivot_pos,
+        arc_radius,
+        start_angle_rad,
+        end_angle_rad,
+        arc_color,
+        angle_highlighted,
+    );
 
     // Draw angle indicator arrow at end of arc
     let arc_end = pivot_pos + Vec2::new(end_angle_rad.cos(), end_angle_rad.sin()) * arc_radius;
     // Tangent direction depends on rotation direction (CW vs CCW)
     let tangent_dir = if angle >= 0.0 { 1.0 } else { -1.0 };
     let tangent = Vec2::new(-end_angle_rad.sin(), end_angle_rad.cos()) * tangent_dir;
-    let arrow_size = if angle_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let arrow_size = if angle_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
     draw_arrow_head(gizmos, arc_end, tangent, arrow_size, arc_color);
 }
 
@@ -777,8 +982,17 @@ fn draw_apply_gizmo(
     let x_dir = if trans[0] >= 0.0 { 1.0 } else { -1.0 };
     let x_end = target_center + Vec2::new(arrow_length * x_dir, 0.0);
     let x_highlighted = is_highlighted(GizmoHandle::KeyframeTranslateX, hovered, active);
-    let x_color = get_handle_color(GizmoColors::KEYFRAME_TRANSLATE, GizmoHandle::KeyframeTranslateX, hovered, active);
-    let x_handle_size = if x_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let x_color = get_handle_color(
+        GizmoColors::KEYFRAME_TRANSLATE,
+        GizmoHandle::KeyframeTranslateX,
+        hovered,
+        active,
+    );
+    let x_handle_size = if x_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
 
     gizmos.line_2d(target_center, x_end, x_color);
     draw_arrow_head(gizmos, x_end, Vec2::X * x_dir, x_handle_size, x_color);
@@ -787,16 +1001,34 @@ fn draw_apply_gizmo(
     let y_dir = if trans[1] >= 0.0 { 1.0 } else { -1.0 };
     let y_end = target_center + Vec2::new(0.0, arrow_length * y_dir);
     let y_highlighted = is_highlighted(GizmoHandle::KeyframeTranslateY, hovered, active);
-    let y_color = get_handle_color(GizmoColors::KEYFRAME_TRANSLATE, GizmoHandle::KeyframeTranslateY, hovered, active);
-    let y_handle_size = if y_highlighted { base_handle_size * 1.3 } else { base_handle_size };
+    let y_color = get_handle_color(
+        GizmoColors::KEYFRAME_TRANSLATE,
+        GizmoHandle::KeyframeTranslateY,
+        hovered,
+        active,
+    );
+    let y_handle_size = if y_highlighted {
+        base_handle_size * 1.3
+    } else {
+        base_handle_size
+    };
 
     gizmos.line_2d(target_center, y_end, y_color);
     draw_arrow_head(gizmos, y_end, Vec2::Y * y_dir, y_handle_size, y_color);
 
     // Free translation (center square)
     let free_highlighted = is_highlighted(GizmoHandle::KeyframeTranslateFree, hovered, active);
-    let free_color = get_handle_color(GizmoColors::KEYFRAME_TRANSLATE, GizmoHandle::KeyframeTranslateFree, hovered, active);
-    let free_size = if free_highlighted { base_handle_size * 2.0 } else { base_handle_size * 1.5 };
+    let free_color = get_handle_color(
+        GizmoColors::KEYFRAME_TRANSLATE,
+        GizmoHandle::KeyframeTranslateFree,
+        hovered,
+        active,
+    );
+    let free_size = if free_highlighted {
+        base_handle_size * 2.0
+    } else {
+        base_handle_size * 1.5
+    };
     gizmos.rect_2d(
         Isometry2d::from_translation(target_center),
         Vec2::splat(free_size),
@@ -821,9 +1053,22 @@ fn draw_apply_gizmo(
         if rot_deg.abs() > 0.001 {
             let arc_radius = 0.4;
             let angle_highlighted = is_highlighted(GizmoHandle::KeyframeAngle, hovered, active);
-            let arc_color = get_handle_color(GizmoColors::KEYFRAME_ROTATE, GizmoHandle::KeyframeAngle, hovered, active);
+            let arc_color = get_handle_color(
+                GizmoColors::KEYFRAME_ROTATE,
+                GizmoHandle::KeyframeAngle,
+                hovered,
+                active,
+            );
 
-            draw_rotation_arc(gizmos, target_center, arc_radius, 0.0, rot_deg.to_radians(), arc_color, angle_highlighted);
+            draw_rotation_arc(
+                gizmos,
+                target_center,
+                arc_radius,
+                0.0,
+                rot_deg.to_radians(),
+                arc_color,
+                angle_highlighted,
+            );
         }
     }
 }

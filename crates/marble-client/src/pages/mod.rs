@@ -15,5 +15,5 @@ pub use debug_p2p::DebugP2pPage;
 pub use editor::EditorPage;
 pub use home::HomePage;
 pub use not_found::NotFoundPage;
-pub use panic::{set_panic_hook, PanicPage};
+pub use panic::{PanicPage, set_panic_hook};
 pub use play::PlayPage;

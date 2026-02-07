@@ -4,6 +4,10 @@
 
 use bevy::prelude::*;
 
+use crate::bevy::plugin::AppMode;
+use crate::bevy::systems::editor::{
+    EditorStateRes, SelectObjectEvent, SnapConfig, UpdateObjectEvent,
+};
 use crate::bevy::{
     AddObjectEvent, AddPlayerEvent, BroadcastGameStartEvent, ClearMarblesEvent, CommandQueue,
     DeleteObjectEvent, DeterministicRng, GameCamera, GameCommand, GameContextRes, LoadMapEvent,
@@ -11,8 +15,6 @@ use crate::bevy::{
     ResetSimulationEvent, SpawnMarblesAtEvent, SpawnMarblesEvent, StartSimulationEvent,
     StopSimulationEvent, SyncState,
 };
-use crate::bevy::plugin::AppMode;
-use crate::bevy::systems::editor::{EditorStateRes, SelectObjectEvent, SnapConfig, UpdateObjectEvent};
 use crate::game::Player;
 
 /// System to process all commands from the external command queue.
@@ -54,15 +56,27 @@ pub fn process_commands(
                 clear_events.write(ClearMarblesEvent);
             }
             GameCommand::ClearPlayers => {
-                tracing::info!("[command] ClearPlayers (had {} players)", game_state.players.len());
+                tracing::info!(
+                    "[command] ClearPlayers (had {} players)",
+                    game_state.players.len()
+                );
                 game_state.players.clear();
                 game_state.arrival_order.clear();
                 game_state.frame = 0;
             }
             GameCommand::AddPlayer { name, color } => {
                 let id = game_state.players.len() as u32;
-                tracing::info!("[command] AddPlayer: {} (id={}, total={})", name, id, id + 1);
-                game_state.players.push(Player { id, name: name.clone(), color });
+                tracing::info!(
+                    "[command] AddPlayer: {} (id={}, total={})",
+                    name,
+                    id,
+                    id + 1
+                );
+                game_state.players.push(Player {
+                    id,
+                    name: name.clone(),
+                    color,
+                });
                 add_player_events.write(AddPlayerEvent { name, color });
             }
             GameCommand::RemovePlayer { player_id } => {
@@ -187,7 +201,10 @@ pub fn process_editor_commands(
                 } else {
                     0
                 };
-                add_object_events.write(AddObjectEvent { object, index: new_index });
+                add_object_events.write(AddObjectEvent {
+                    object,
+                    index: new_index,
+                });
             }
             GameCommand::DeleteObject { index } => {
                 tracing::info!("[command] DeleteObject index={}", index);

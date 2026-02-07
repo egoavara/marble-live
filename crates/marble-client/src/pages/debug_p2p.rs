@@ -114,7 +114,13 @@ pub fn debug_p2p_page() -> Html {
                         peer_configs.set(configs);
                         peer_id_counter.set(host_id + 1);
 
-                        web_sys::console::log_1(&format!("Room created: {} (host added as instance #{})", resp.room_id, host_id).into());
+                        web_sys::console::log_1(
+                            &format!(
+                                "Room created: {} (host added as instance #{})",
+                                resp.room_id, host_id
+                            )
+                            .into(),
+                        );
                     }
                     Err(e) => {
                         web_sys::console::error_1(&format!("Failed to create room: {e}").into());

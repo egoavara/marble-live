@@ -261,7 +261,10 @@ impl Room {
     }
 
     /// Resolve peer_ids to player_ids
-    pub fn resolve_peer_ids(&self, peer_ids: &[String]) -> std::collections::HashMap<String, String> {
+    pub fn resolve_peer_ids(
+        &self,
+        peer_ids: &[String],
+    ) -> std::collections::HashMap<String, String> {
         self.topology_manager.resolve_peer_ids(peer_ids)
     }
 
@@ -317,8 +320,14 @@ impl Room {
         }
 
         // Check if player already arrived
-        if self.game_results.iter().any(|r| r.player_id == arrived_player_id) {
-            return Err(RoomError::PlayerAlreadyArrived(arrived_player_id.to_string()));
+        if self
+            .game_results
+            .iter()
+            .any(|r| r.player_id == arrived_player_id)
+        {
+            return Err(RoomError::PlayerAlreadyArrived(
+                arrived_player_id.to_string(),
+            ));
         }
 
         // Add result

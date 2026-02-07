@@ -4,11 +4,11 @@
 
 use bevy::prelude::*;
 
+use crate::bevy::systems::editor::{EditorStateRes, SnapConfig};
 use crate::bevy::{
     EditorStateSummary, GameStateSummary, KeyframeExecutors, MapConfig, MapLoadedEvent, Marble,
     MarbleGameState, PlayerInfo, SnapConfigSummary, StateStores,
 };
-use crate::bevy::systems::editor::{EditorStateRes, SnapConfig};
 
 /// Resource to store calculated live rankings.
 #[derive(Resource, Default)]
@@ -168,7 +168,9 @@ pub fn sync_editor_to_stores(
     // 모든 실행 중인 executor의 상태를 맵으로 수집
     let executing_keyframes = keyframe_executors
         .map(|execs| {
-            execs.executors.iter()
+            execs
+                .executors
+                .iter()
                 .filter(|e| !e.is_finished())
                 .map(|e| (e.sequence_name().to_string(), e.current_index()))
                 .collect()

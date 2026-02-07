@@ -14,11 +14,11 @@ const DEFAULT_EMOJI: &str = "\u{1F44D}"; // 👍
 
 /// Supported reaction emojis with keyboard shortcuts
 pub const REACTIONS: &[(&str, &str)] = &[
-    ("1", "\u{1F44D}"),       // 👍
+    ("1", "\u{1F44D}"),        // 👍
     ("2", "\u{2764}\u{FE0F}"), // ❤️
-    ("3", "\u{1F602}"),       // 😂
-    ("4", "\u{1F389}"),       // 🎉
-    ("5", "\u{1F44F}"),       // 👏
+    ("3", "\u{1F602}"),        // 😂
+    ("4", "\u{1F389}"),        // 🎉
+    ("5", "\u{1F44F}"),        // 👏
 ];
 
 /// Props for the ReactionPanel component.
@@ -111,10 +111,7 @@ pub fn reaction_panel(props: &ReactionPanelProps) -> Html {
         })
     };
 
-    let panel_class = classes!(
-        "reaction-panel-inline",
-        expanded.then_some("expanded")
-    );
+    let panel_class = classes!("reaction-panel-inline", expanded.then_some("expanded"));
 
     html! {
         <div

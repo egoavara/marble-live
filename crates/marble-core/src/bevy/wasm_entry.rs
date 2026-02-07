@@ -2,17 +2,15 @@
 //!
 //! Provides JavaScript-callable functions to initialize and control the game.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bevy::prelude::*;
 use bevy::winit::{UpdateMode, WinitSettings};
 use matchbox_socket::WebRtcSocket;
 use wasm_bindgen::prelude::*;
 
-use crate::bevy::{
-    CameraMode, CommandQueue, GameCommand, MarbleUnifiedPlugin, StateStores,
-};
+use crate::bevy::{CameraMode, CommandQueue, GameCommand, MarbleUnifiedPlugin, StateStores};
 use crate::map::RouletteConfig;
 use crate::marble::Color;
 
@@ -67,8 +65,7 @@ unsafe impl Send for PendingP2pInit {}
 unsafe impl Sync for PendingP2pInit {}
 
 /// Global pending P2P init slot.
-static PENDING_P2P: parking_lot::Mutex<Option<PendingP2pInit>> =
-    parking_lot::Mutex::new(None);
+static PENDING_P2P: parking_lot::Mutex<Option<PendingP2pInit>> = parking_lot::Mutex::new(None);
 
 /// Atomic flag for P2P disconnect request.
 static P2P_DISCONNECT: AtomicBool = AtomicBool::new(false);
@@ -158,7 +155,10 @@ pub fn start_bevy_app(canvas_id: &str) -> Result<(), JsValue> {
     let command_queue = get_command_queue().clone();
     let state_stores = get_state_stores().clone();
 
-    tracing::info!("[marble] creating unified Bevy app for canvas: #{}", canvas_id);
+    tracing::info!(
+        "[marble] creating unified Bevy app for canvas: #{}",
+        canvas_id
+    );
 
     let mut app = App::new();
 
@@ -373,7 +373,8 @@ pub fn send_command(command_json: &str) -> Result<(), JsValue> {
         "remove_player" => {
             let player_id = value["player_id"]
                 .as_u64()
-                .ok_or_else(|| JsValue::from_str("Missing 'player_id' field"))? as u32;
+                .ok_or_else(|| JsValue::from_str("Missing 'player_id' field"))?
+                as u32;
 
             GameCommand::RemovePlayer { player_id }
         }
@@ -400,7 +401,8 @@ pub fn send_command(command_json: &str) -> Result<(), JsValue> {
         "update_object" => {
             let index = value["index"]
                 .as_u64()
-                .ok_or_else(|| JsValue::from_str("Missing 'index' field"))? as usize;
+                .ok_or_else(|| JsValue::from_str("Missing 'index' field"))?
+                as usize;
             let object: crate::map::MapObject = serde_json::from_value(value["object"].clone())
                 .map_err(|e| JsValue::from_str(&format!("Invalid object: {}", e)))?;
 
@@ -415,17 +417,20 @@ pub fn send_command(command_json: &str) -> Result<(), JsValue> {
         "delete_object" => {
             let index = value["index"]
                 .as_u64()
-                .ok_or_else(|| JsValue::from_str("Missing 'index' field"))? as usize;
+                .ok_or_else(|| JsValue::from_str("Missing 'index' field"))?
+                as usize;
 
             GameCommand::DeleteObject { index }
         }
         "update_keyframe" => {
             let sequence_index = value["sequence_index"]
                 .as_u64()
-                .ok_or_else(|| JsValue::from_str("Missing 'sequence_index' field"))? as usize;
+                .ok_or_else(|| JsValue::from_str("Missing 'sequence_index' field"))?
+                as usize;
             let keyframe_index = value["keyframe_index"]
                 .as_u64()
-                .ok_or_else(|| JsValue::from_str("Missing 'keyframe_index' field"))? as usize;
+                .ok_or_else(|| JsValue::from_str("Missing 'keyframe_index' field"))?
+                as usize;
             let keyframe: crate::map::Keyframe = serde_json::from_value(value["keyframe"].clone())
                 .map_err(|e| JsValue::from_str(&format!("Invalid keyframe: {}", e)))?;
 
@@ -466,10 +471,9 @@ pub fn send_command(command_json: &str) -> Result<(), JsValue> {
                 "follow_leader" => CameraMode::FollowLeader,
                 "editor" => CameraMode::Editor,
                 "follow_target" => {
-                    let player_id = value["player_id"]
-                        .as_u64()
-                        .ok_or_else(|| JsValue::from_str("Missing 'player_id' for follow_target mode"))?
-                        as u32;
+                    let player_id = value["player_id"].as_u64().ok_or_else(|| {
+                        JsValue::from_str("Missing 'player_id' for follow_target mode")
+                    })? as u32;
                     CameraMode::FollowTarget(player_id)
                 }
                 _ => {

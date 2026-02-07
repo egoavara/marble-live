@@ -5,9 +5,7 @@ use wasm_bindgen::JsCast;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
-use crate::hooks::{
-    init_game_mode, init_editor_mode, send_command, BevyProvider,
-};
+use crate::hooks::{BevyProvider, init_editor_mode, init_game_mode, send_command};
 use crate::pages::{
     DebugGrpcPage, DebugIndexPage, DebugP2pPage, EditorPage, HomePage, NotFoundPage, PanicPage,
     PlayPage,

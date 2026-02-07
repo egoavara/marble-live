@@ -124,10 +124,7 @@ pub fn reaction_display(props: &ReactionDisplayProps) -> Html {
     // 현재 시점에서 유효한 이모지만 렌더링
     let now = js_sys::Date::now();
     let emojis = emojis_ref.borrow();
-    let visible: Vec<_> = emojis
-        .iter()
-        .filter(|e| !e.is_expired(now))
-        .collect();
+    let visible: Vec<_> = emojis.iter().filter(|e| !e.is_expired(now)).collect();
 
     html! {
         <div class="reaction-display">

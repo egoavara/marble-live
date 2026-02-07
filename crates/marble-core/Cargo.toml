@@ -23,7 +23,6 @@ tracing.workspace = true
 
 # Bevy dependencies
 bevy.workspace = true
-bevy_rapier2d.workspace = true
 
 # P2P sync dependencies
 marble-proto.workspace = true
