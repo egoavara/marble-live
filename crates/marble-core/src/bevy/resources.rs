@@ -419,6 +419,8 @@ pub enum GameCommand {
     SendReaction { emoji: String },
     /// Send a ping to all peers.
     SendPing,
+    /// Send a ping to a specific peer (for liveness check).
+    SendPingTo { peer_id: String },
 }
 
 impl GameCommand {
@@ -445,7 +447,10 @@ impl GameCommand {
     pub fn is_p2p_send_command(&self) -> bool {
         matches!(
             self,
-            Self::SendChat { .. } | Self::SendReaction { .. } | Self::SendPing
+            Self::SendChat { .. }
+                | Self::SendReaction { .. }
+                | Self::SendPing
+                | Self::SendPingTo { .. }
         )
     }
 }

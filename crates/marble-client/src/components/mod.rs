@@ -20,6 +20,7 @@ mod logo_expandable;
 mod meatball;
 mod modal;
 pub mod network_visualization;
+pub mod peer_manager;
 pub mod peer_instance_card;
 mod peer_list;
 mod room_service;

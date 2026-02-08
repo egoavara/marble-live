@@ -534,6 +534,13 @@ pub fn send_command(command_json: &str) -> Result<(), JsValue> {
             GameCommand::SendReaction { emoji }
         }
         "send_ping" => GameCommand::SendPing,
+        "send_ping_to" => {
+            let peer_id = value["peer_id"]
+                .as_str()
+                .ok_or_else(|| JsValue::from_str("Missing 'peer_id' field"))?
+                .to_string();
+            GameCommand::SendPingTo { peer_id }
+        }
 
         _ => {
             return Err(JsValue::from_str(&format!(
@@ -667,6 +674,24 @@ pub fn get_game_state() -> JsValue {
 #[wasm_bindgen]
 pub fn get_game_version() -> u64 {
     get_state_stores().game.get_version()
+}
+
+// ============================================================================
+// Pong Store Getters (for PeerManager liveness checks)
+// ============================================================================
+
+/// Get and consume all recorded pongs (peer_id → timestamp).
+#[wasm_bindgen]
+pub fn get_pongs() -> JsValue {
+    let stores = get_state_stores();
+    let pongs = stores.pongs.take_pongs();
+    serde_wasm_bindgen::to_value(&pongs).unwrap_or(JsValue::NULL)
+}
+
+/// Get pong store version (for change detection).
+#[wasm_bindgen]
+pub fn get_pongs_version() -> u64 {
+    get_state_stores().pongs.get_version()
 }
 
 // ============================================================================

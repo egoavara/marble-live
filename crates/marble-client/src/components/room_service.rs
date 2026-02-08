@@ -10,9 +10,11 @@ use std::rc::Rc;
 use gloo::timers::callback::Interval;
 use marble_proto::room::room_service_client::RoomServiceClient;
 use marble_proto::room::{
-    CreateRoomRequest, JoinRoomRequest, PlayerResult, RegisterPeerIdRequest,
-    ReportArrivalRequest, ResolvePeerIdsRequest, StartGameRequest,
+    CreateRoomRequest, GetRoomUsersRequest, JoinRoomRequest, PlayerResult, RegisterPeerIdRequest,
+    ReportArrivalRequest, ResolvePeerIdsRequest, RoomUser, StartGameRequest,
 };
+
+use super::peer_manager::PeerManager;
 use marble_proto::user::user_service_client::UserServiceClient;
 use marble_proto::user::{login_request, AnonymousLogin, GetUsersRequest, LoginRequest, UserInfo};
 use tonic_web_wasm_client::Client;
@@ -60,21 +62,23 @@ struct RoomServiceInner {
     // Room lifecycle
     room_state: RoomState,
 
-    // peer_id → player_id cache (Yew-side, no Bevy round-trip)
-    peer_cache: HashMap<String, String>,
-    resolve_in_flight: bool,
-
-    // user_id → display_name cache
-    display_name_cache: HashMap<String, String>,
-    get_users_in_flight: bool,
+    // Peer management (replaces peer_cache, display_name_cache, resolve_in_flight, etc.)
+    peer_manager: PeerManager,
 
     // RegisterPeerId state
     peer_registered: bool,
     peer_register_confirmed: bool,
     register_in_flight: bool,
 
+    // In-flight flags for async operations
+    resolve_in_flight: bool,
+    get_users_in_flight: bool,
+    get_room_users_in_flight: bool,
+
     // Bevy polling state
     last_peers_version: u64,
+    last_pongs_version: u64,
+    last_room_users_poll_ms: f64,
 
     // Server game state (from JoinRoom / ReportArrival responses)
     server_room_state: Option<i32>,  // proto RoomState (1=WAITING, 2=PLAYING, 3=ENDED)
@@ -95,14 +99,16 @@ impl RoomServiceInner {
             login_salt: String::new(),
             login_fingerprint: String::new(),
             room_state: RoomState::Idle,
-            peer_cache: HashMap::new(),
-            resolve_in_flight: false,
-            display_name_cache: HashMap::new(),
-            get_users_in_flight: false,
+            peer_manager: PeerManager::new(),
             peer_registered: false,
             peer_register_confirmed: false,
             register_in_flight: false,
+            resolve_in_flight: false,
+            get_users_in_flight: false,
+            get_room_users_in_flight: false,
             last_peers_version: 0,
+            last_pongs_version: 0,
+            last_room_users_poll_ms: 0.0,
             server_room_state: None,
             server_game_results: Vec::new(),
             server_game_ended: false,
@@ -267,9 +273,13 @@ impl RoomServiceHandle {
                 inner_mut.peer_registered = false;
                 inner_mut.peer_register_confirmed = false;
                 inner_mut.register_in_flight = false;
-                inner_mut.peer_cache.clear();
+                inner_mut.peer_manager.reset();
+                inner_mut.resolve_in_flight = false;
                 inner_mut.get_users_in_flight = false;
+                inner_mut.get_room_users_in_flight = false;
                 inner_mut.last_peers_version = 0;
+                inner_mut.last_pongs_version = 0;
+                inner_mut.last_room_users_poll_ms = 0.0;
                 inner_mut.server_room_state = Some(server_state);
                 inner_mut.server_game_results = game_results;
                 inner_mut.server_game_ended = game_ended;
@@ -375,13 +385,16 @@ impl RoomServiceHandle {
     pub fn leave(&self) {
         let mut inner = self.inner.borrow_mut();
         inner.room_state = RoomState::Idle;
-        inner.peer_cache.clear();
+        inner.peer_manager.reset();
         inner.get_users_in_flight = false;
+        inner.get_room_users_in_flight = false;
         inner.peer_registered = false;
         inner.peer_register_confirmed = false;
         inner.register_in_flight = false;
         inner.resolve_in_flight = false;
         inner.last_peers_version = 0;
+        inner.last_pongs_version = 0;
+        inner.last_room_users_poll_ms = 0.0;
         inner.server_room_state = None;
         inner.server_game_results = Vec::new();
         inner.server_game_ended = false;
@@ -393,7 +406,7 @@ impl RoomServiceHandle {
     // Peer resolution (synchronous, cache-based)
     // =======================================================================
 
-    /// Resolve a peer_id to a player name. Returns `None` if not yet cached.
+    /// Resolve a peer_id to a user_id. Returns `None` if not yet resolved.
     pub fn player_name(&self, peer_id: &str) -> Option<String> {
         let inner = self.inner.borrow();
         // Check if it's our own peer_id
@@ -401,24 +414,29 @@ impl RoomServiceHandle {
         if !my_peer_id.is_empty() && my_peer_id == peer_id {
             return Some(inner.player_id.clone());
         }
-        inner.peer_cache.get(peer_id).cloned()
+        inner.peer_manager.peer_to_user(peer_id)
     }
 
-    /// Resolve a peer_id to a player name, falling back to a short peer prefix.
+    /// Resolve a peer_id to a user_id, falling back to a short peer prefix.
     pub fn player_name_or_fallback(&self, peer_id: &str) -> String {
         self.player_name(peer_id)
             .unwrap_or_else(|| format!("Peer-{}", &peer_id[..peer_id.len().min(8)]))
     }
 
-    /// Resolve a user_id to a display name from cache.
+    /// Resolve a user_id to a display name via PeerManager.
     pub fn display_name(&self, user_id: &str) -> Option<String> {
-        self.inner.borrow().display_name_cache.get(user_id).cloned()
+        self.inner.borrow().peer_manager.display_name(user_id)
     }
 
     /// Resolve a user_id to a display name, falling back to "User-{8chars}".
     pub fn display_name_or_fallback(&self, user_id: &str) -> String {
         self.display_name(user_id)
             .unwrap_or_else(|| format!("User-{}", &user_id[..user_id.len().min(8)]))
+    }
+
+    /// Get the authoritative room users (from GetRoomUsers RPC).
+    pub fn room_users(&self) -> HashMap<String, super::peer_manager::UserPresence> {
+        self.inner.borrow().peer_manager.room_users().clone()
     }
 
     // =======================================================================
@@ -757,7 +775,7 @@ async fn relogin(inner: &Rc<RefCell<RoomServiceInner>>) -> Option<String> {
             inner_mut.auth_token = Some(token.clone());
             inner_mut.player_id = user_id.clone();
             if !dn.is_empty() {
-                inner_mut.display_name_cache.insert(user_id, dn);
+                inner_mut.peer_manager.set_display_name(&user_id, dn);
             }
             // Update Yew hook → triggers localStorage persistence
             if let Some(ref setter) = inner_mut.auth_token_setter {
@@ -954,7 +972,7 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                         inner_mut.player_id = user_id.clone();
                         // Cache own display name so lobby shows it immediately
                         if !dn.is_empty() {
-                            inner_mut.display_name_cache.insert(user_id, dn);
+                            inner_mut.peer_manager.set_display_name(&user_id, dn);
                         }
                     }
                     Err(e) => {
@@ -998,7 +1016,9 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                     return;
                 }
 
-                // --- RegisterPeerId (등록 + 검증) ---
+                // =============================================================
+                // Task 1: RegisterPeerId (200ms, until confirmed)
+                // =============================================================
                 let peer_register_confirmed = inner.borrow().peer_register_confirmed;
                 let register_in_flight = inner.borrow().register_in_flight;
 
@@ -1010,7 +1030,6 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                         let room_id = room_id.clone();
 
                         spawn_local(async move {
-                            // 1) RegisterPeerId 호출
                             let registered = register_peer_id_grpc(
                                 &room_id,
                                 &my_peer_id,
@@ -1022,14 +1041,12 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                                 return;
                             }
 
-                            // 2) ResolvePeerIds로 자신의 peer_id 검증
                             if let Some(resolved) = resolve_peer_ids_grpc(
                                 &room_id,
                                 &[my_peer_id.clone()],
                                 &inner_c,
                             ).await {
                                 if resolved.contains_key(&my_peer_id) {
-                                    // 서버에 매핑 확인됨 → 완료
                                     let mut inner_mut = inner_c.borrow_mut();
                                     inner_mut.peer_registered = true;
                                     inner_mut.peer_register_confirmed = true;
@@ -1042,19 +1059,19 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                                 }
                             }
 
-                            // 검증 실패 → 다음 틱에 재시도
                             inner_c.borrow_mut().register_in_flight = false;
                             tracing::debug!("RoomService: peer_id registration not yet confirmed, will retry");
                         });
                     }
                 }
 
-                // --- ResolvePeerIds ---
+                // =============================================================
+                // Task 2: Peer change detection (200ms)
+                // =============================================================
                 let current_peers_version = marble_core::bevy::wasm_entry::get_peers_version();
                 let last_version = inner.borrow().last_peers_version;
-                let resolve_in_flight = inner.borrow().resolve_in_flight;
 
-                if current_peers_version != last_version || !resolve_in_flight {
+                if current_peers_version != last_version {
                     inner.borrow_mut().last_peers_version = current_peers_version;
 
                     let peers_js = marble_core::bevy::wasm_entry::get_peers();
@@ -1062,75 +1079,136 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                         Vec<marble_core::bevy::state_store::PeerInfo>,
                     >(peers_js)
                     {
-                        let unresolved: Vec<String> = {
-                            let inner_ref = inner.borrow();
-                            bevy_peers
-                                .iter()
-                                .filter(|bp| {
-                                    // Not in cache and not self
-                                    let my_peer =
-                                        marble_core::bevy::wasm_entry::get_my_peer_id();
-                                    bp.peer_id != my_peer
-                                        && !inner_ref.peer_cache.contains_key(&bp.peer_id)
-                                })
-                                .map(|bp| bp.peer_id.clone())
-                                .collect()
-                        };
+                        let my_peer_id = marble_core::bevy::wasm_entry::get_my_peer_id();
+                        let mut inner_mut = inner.borrow_mut();
 
-                        if !unresolved.is_empty() && !resolve_in_flight {
-                            inner.borrow_mut().resolve_in_flight = true;
-                            let inner_c = inner.clone();
-                            let room_id = room_id.clone();
+                        // Detect new connections
+                        let current_peer_ids: Vec<String> = bevy_peers
+                            .iter()
+                            .filter(|bp| bp.peer_id != my_peer_id)
+                            .map(|bp| bp.peer_id.clone())
+                            .collect();
 
-                            spawn_local(async move {
-                                if let Some(resolved) = resolve_peer_ids_grpc(
-                                    &room_id,
-                                    &unresolved,
-                                    &inner_c,
-                                )
-                                .await
-                                {
-                                    let mut inner_mut = inner_c.borrow_mut();
-                                    for (peer_id, user_id) in &resolved {
-                                        inner_mut
-                                            .peer_cache
-                                            .insert(peer_id.clone(), user_id.clone());
-                                        // Also update Bevy's state store
-                                        marble_core::bevy::wasm_entry::update_peer_player_id(
-                                            peer_id, user_id,
-                                        );
-                                    }
-                                    if !resolved.is_empty() {
-                                        inner_mut.bump_version();
-                                    }
-                                }
-                                inner_c.borrow_mut().resolve_in_flight = false;
-                            });
+                        // Track which peers are still connected
+                        let existing_peers = inner_mut.peer_manager.all_peer_ids();
+
+                        // Add new peers
+                        for pid in &current_peer_ids {
+                            inner_mut.peer_manager.on_peer_connected(pid);
+                        }
+
+                        // Remove disconnected peers
+                        for pid in &existing_peers {
+                            if !current_peer_ids.contains(pid) {
+                                inner_mut.peer_manager.on_peer_disconnected(pid);
+                            }
                         }
                     }
                 }
 
-                // --- GetUsers (display name resolution) ---
+                // =============================================================
+                // Task 3: ResolvePeerIds (200ms, for unresolved peers)
+                // =============================================================
+                let resolve_in_flight = inner.borrow().resolve_in_flight;
+                if !resolve_in_flight {
+                    let unresolved = inner.borrow().peer_manager.unresolved_peer_ids();
+
+                    if !unresolved.is_empty() {
+                        inner.borrow_mut().resolve_in_flight = true;
+                        let inner_c = inner.clone();
+                        let room_id = room_id.clone();
+
+                        spawn_local(async move {
+                            if let Some(resolved) = resolve_peer_ids_grpc(
+                                &room_id,
+                                &unresolved,
+                                &inner_c,
+                            ).await {
+                                let mut inner_mut = inner_c.borrow_mut();
+                                for (peer_id, user_id) in &resolved {
+                                    inner_mut.peer_manager.on_peer_resolved(peer_id, user_id);
+                                    // Also update Bevy's state store
+                                    marble_core::bevy::wasm_entry::update_peer_player_id(
+                                        peer_id, user_id,
+                                    );
+                                }
+
+                                // Check for unresolved peers that failed
+                                for pid in &unresolved {
+                                    if !resolved.contains_key(pid) {
+                                        let needs_ping = inner_mut.peer_manager.on_resolve_failed(pid);
+                                        if needs_ping {
+                                            // Send targeted ping for liveness check
+                                            let cmd_json = format!(
+                                                r#"{{"type":"send_ping_to","peer_id":"{}"}}"#,
+                                                pid
+                                            );
+                                            let _ = marble_core::bevy::wasm_entry::send_command(&cmd_json);
+                                            let now = js_sys::Date::now();
+                                            inner_mut.peer_manager.on_ping_sent(pid, now);
+                                            tracing::debug!(
+                                                peer_id = %pid,
+                                                "PeerManager: resolve failed, sent liveness ping"
+                                            );
+                                        }
+                                    }
+                                }
+
+                                if !resolved.is_empty() {
+                                    inner_mut.bump_version();
+                                }
+                            }
+                            inner_c.borrow_mut().resolve_in_flight = false;
+                        });
+                    }
+                }
+
+                // =============================================================
+                // Task 4: GetRoomUsers (every ~2 seconds)
+                // =============================================================
+                let now_ms = js_sys::Date::now();
+                let get_room_users_in_flight = inner.borrow().get_room_users_in_flight;
+                let last_poll = inner.borrow().last_room_users_poll_ms;
+
+                if !get_room_users_in_flight && (now_ms - last_poll >= 2000.0) {
+                    inner.borrow_mut().get_room_users_in_flight = true;
+                    inner.borrow_mut().last_room_users_poll_ms = now_ms;
+                    let inner_c = inner.clone();
+                    let room_id = room_id.clone();
+
+                    spawn_local(async move {
+                        if let Some(room_users) = get_room_users_grpc(&room_id, &inner_c).await {
+                            let user_ids: Vec<String> = room_users
+                                .iter()
+                                .map(|u| u.user_id.clone())
+                                .collect();
+                            let mut inner_mut = inner_c.borrow_mut();
+                            inner_mut.peer_manager.update_room_users(user_ids);
+                            inner_mut.bump_version();
+                        }
+                        inner_c.borrow_mut().get_room_users_in_flight = false;
+                    });
+                }
+
+                // =============================================================
+                // Task 5: GetUsers — display name resolution (200ms)
+                // =============================================================
                 let get_users_in_flight = inner.borrow().get_users_in_flight;
                 if !get_users_in_flight {
                     let unresolved_user_ids: Vec<String> = {
                         let inner_ref = inner.borrow();
-                        let mut ids: Vec<String> = inner_ref
-                            .peer_cache
-                            .values()
-                            .filter(|user_id| !inner_ref.display_name_cache.contains_key(user_id.as_str()))
-                            .cloned()
-                            .collect();
+                        let mut ids = inner_ref.peer_manager.unresolved_user_ids();
                         // Also include self if not yet cached
                         if !inner_ref.player_id.is_empty()
-                            && !inner_ref.display_name_cache.contains_key(&inner_ref.player_id)
+                            && inner_ref.peer_manager.display_name(&inner_ref.player_id).is_none()
+                            && !ids.contains(&inner_ref.player_id)
                         {
                             ids.push(inner_ref.player_id.clone());
                         }
                         // Also include user_ids from server game results
                         for result in &inner_ref.server_game_results {
                             if !result.user_id.is_empty()
-                                && !inner_ref.display_name_cache.contains_key(&result.user_id)
+                                && inner_ref.peer_manager.display_name(&result.user_id).is_none()
                                 && !ids.contains(&result.user_id)
                             {
                                 ids.push(result.user_id.clone());
@@ -1148,13 +1226,49 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                                 let mut inner_mut = inner_c.borrow_mut();
                                 for user in users {
                                     inner_mut
-                                        .display_name_cache
-                                        .insert(user.user_id.clone(), user.display_name.clone());
+                                        .peer_manager
+                                        .set_display_name(&user.user_id, user.display_name.clone());
                                 }
                                 inner_mut.bump_version();
                             }
                             inner_c.borrow_mut().get_users_in_flight = false;
                         });
+                    }
+                }
+
+                // =============================================================
+                // Task 6: Pong collection (200ms)
+                // =============================================================
+                let current_pongs_version = marble_core::bevy::wasm_entry::get_pongs_version();
+                let last_pongs_version = inner.borrow().last_pongs_version;
+
+                if current_pongs_version != last_pongs_version {
+                    inner.borrow_mut().last_pongs_version = current_pongs_version;
+
+                    let pongs_js = marble_core::bevy::wasm_entry::get_pongs();
+                    if let Ok(pongs) = serde_wasm_bindgen::from_value::<HashMap<String, f64>>(pongs_js) {
+                        let mut inner_mut = inner.borrow_mut();
+                        for (peer_id, _timestamp) in pongs {
+                            inner_mut.peer_manager.on_pong_received(&peer_id);
+                            tracing::debug!(
+                                peer_id = %peer_id,
+                                "PeerManager: pong received, resetting to Resolving"
+                            );
+                        }
+                    }
+                }
+
+                // =============================================================
+                // Task 7: Stale detection (200ms)
+                // =============================================================
+                {
+                    let now = js_sys::Date::now();
+                    let stale_peers = inner.borrow_mut().peer_manager.check_ping_timeouts(now);
+                    for pid in &stale_peers {
+                        tracing::warn!(
+                            peer_id = %pid,
+                            "PeerManager: peer marked as Stale (ping timeout)"
+                        );
                     }
                 }
             });
@@ -1312,6 +1426,59 @@ async fn resolve_peer_ids_grpc(
         }
         Err(e) => {
             tracing::warn!(error = %e, "RoomService: ResolvePeerIds failed");
+            None
+        }
+    }
+}
+
+async fn get_room_users_grpc(
+    room_id: &str,
+    inner: &Rc<RefCell<RoomServiceInner>>,
+) -> Option<Vec<RoomUser>> {
+    let Some(mut grpc) = create_grpc_client() else {
+        return None;
+    };
+
+    let mut token = inner.borrow().auth_token.clone();
+    let req = attach_auth(
+        GetRoomUsersRequest {
+            room_id: room_id.to_string(),
+        },
+        &token,
+    );
+
+    match grpc.get_room_users(req).await {
+        Ok(resp) => {
+            let users = resp.into_inner().users;
+            tracing::debug!(
+                count = users.len(),
+                "RoomService: fetched room users"
+            );
+            Some(users)
+        }
+        Err(e) if is_unauthenticated(&e) => {
+            tracing::info!("RoomService: GetRoomUsers auth failed, attempting re-login");
+            if let Some(new_token) = relogin(inner).await {
+                token = Some(new_token);
+                let req = attach_auth(
+                    GetRoomUsersRequest {
+                        room_id: room_id.to_string(),
+                    },
+                    &token,
+                );
+                match grpc.get_room_users(req).await {
+                    Ok(resp) => Some(resp.into_inner().users),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "RoomService: GetRoomUsers failed after re-login");
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "RoomService: GetRoomUsers failed");
             None
         }
     }

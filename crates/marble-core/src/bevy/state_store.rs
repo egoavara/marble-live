@@ -511,6 +511,38 @@ impl EditorStore {
     }
 }
 
+/// Store for pong responses from P2P peers (Bevy → Yew).
+///
+/// Bevy records pongs when received; Yew consumes them via `take_pongs()`.
+#[derive(Debug, Default)]
+pub struct PongStore {
+    pongs: RwLock<HashMap<String, f64>>,
+    version: RwLock<u64>,
+}
+
+impl PongStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a pong from a peer (called by Bevy P2P system).
+    pub fn record_pong(&self, peer_id: String, timestamp: f64) {
+        self.pongs.write().insert(peer_id, timestamp);
+        *self.version.write() += 1;
+    }
+
+    /// Consume all recorded pongs (called by Yew polling loop).
+    pub fn take_pongs(&self) -> HashMap<String, f64> {
+        let mut pongs = self.pongs.write();
+        let taken = pongs.drain().collect();
+        taken
+    }
+
+    pub fn get_version(&self) -> u64 {
+        *self.version.read()
+    }
+}
+
 /// Store for snap configuration.
 #[derive(Debug, Default)]
 pub struct SnapConfigStore {
@@ -552,6 +584,7 @@ pub struct StateStores {
     pub game: Arc<GameStateStore>,
     pub editor: Arc<EditorStore>,
     pub snap_config: Arc<SnapConfigStore>,
+    pub pongs: Arc<PongStore>,
 }
 
 impl StateStores {
@@ -565,6 +598,7 @@ impl StateStores {
             game: Arc::new(GameStateStore::new()),
             editor: Arc::new(EditorStore::new()),
             snap_config: Arc::new(SnapConfigStore::new()),
+            pongs: Arc::new(PongStore::new()),
         }
     }
 
@@ -589,6 +623,9 @@ impl StateStores {
 
         // Reset game state
         self.game.update(GameStateSummary::default());
+
+        // Clear pong store
+        self.pongs.take_pongs();
     }
 }
 

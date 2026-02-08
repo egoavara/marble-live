@@ -276,6 +276,25 @@ pub fn poll_p2p_socket(
                         .send(data.clone().into_boxed_slice(), peer);
                 }
             }
+            GameCommand::SendPingTo { peer_id } => {
+                if let Ok(uuid) = uuid::Uuid::parse_str(&peer_id) {
+                    let target = PeerId::from(uuid);
+                    let msg = gossip.create_message(
+                        &socket_res.player_id,
+                        1,
+                        Payload::Ping(Ping {
+                            timestamp: js_sys::Date::now(),
+                        }),
+                    );
+                    let data = msg.encode_to_vec();
+                    socket_res
+                        .socket
+                        .0
+                        .channel_mut(0)
+                        .send(data.into_boxed_slice(), target);
+                    tracing::debug!("[p2p] Sent targeted ping to {}", peer_id);
+                }
+            }
             _ => {}
         }
     }
@@ -467,6 +486,10 @@ fn process_p2p_payload(
             let now = js_sys::Date::now();
             let rtt = (now - pong.timestamp) as u32;
             tracing::debug!("[p2p] RTT to {}: {}ms", peer_id, rtt);
+            // Record pong in PongStore for Yew to consume
+            state_stores
+                .pongs
+                .record_pong(peer_id.to_string(), pong.timestamp);
         }
 
         _ => {
