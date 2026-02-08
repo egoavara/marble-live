@@ -100,3 +100,35 @@ pub fn check_game_over(
         game_over_events.write(GameOverEvent);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::bevy::test_utils::TestApp;
+    use crate::bevy::MarbleGameState;
+    use crate::marble::Color;
+
+    #[test]
+    fn test_game_state_tracks_players() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+
+        app.add_player("Alice", Color::new(255, 0, 0, 255));
+        app.add_player("Bob", Color::new(0, 0, 255, 255));
+
+        let state = app.world().resource::<MarbleGameState>();
+        assert_eq!(state.players.len(), 2);
+        assert_eq!(state.players[0].name, "Alice");
+        assert_eq!(state.players[1].name, "Bob");
+    }
+
+    #[test]
+    fn test_game_state_empty_initially() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+
+        let state = app.world().resource::<MarbleGameState>();
+        assert!(state.players.is_empty());
+        assert!(state.arrival_order.is_empty());
+        assert_eq!(state.frame, 0);
+    }
+}

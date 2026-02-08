@@ -314,3 +314,135 @@ fn calculate_ranking_score(pos: Vec2, config: Option<&MapConfig>) -> f32 {
         None => pos.y,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::bevy::test_utils::TestApp;
+    use crate::bevy::Marble;
+    use crate::marble::Color;
+    use crate::map::*;
+
+    fn spawner_map() -> RouletteConfig {
+        RouletteConfig {
+            meta: MapMeta {
+                name: "spawn_test".to_string(),
+                gamerule: vec![],
+                live_ranking: LiveRankingConfig::default(),
+            },
+            objects: vec![
+                MapObject {
+                    id: Some("spawner".to_string()),
+                    role: ObjectRole::Spawner,
+                    shape: Shape::Rect {
+                        center: crate::dsl::Vec2OrExpr::Static([0.0, 5.0]),
+                        size: crate::dsl::Vec2OrExpr::Static([3.0, 0.5]),
+                        rotation: crate::dsl::NumberOrExpr::Number(0.0),
+                    },
+                    properties: ObjectProperties {
+                        spawn: Some(SpawnProperties::default()),
+                        ..Default::default()
+                    },
+                },
+                // Floor obstacle
+                MapObject {
+                    id: Some("floor".to_string()),
+                    role: ObjectRole::Obstacle,
+                    shape: Shape::Rect {
+                        center: crate::dsl::Vec2OrExpr::Static([0.0, -10.0]),
+                        size: crate::dsl::Vec2OrExpr::Static([20.0, 0.5]),
+                        rotation: crate::dsl::NumberOrExpr::Number(0.0),
+                    },
+                    properties: ObjectProperties::default(),
+                },
+            ],
+            keyframes: vec![],
+        }
+    }
+
+    #[test]
+    fn test_spawn_marbles_creates_entities() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+        app.load_map(spawner_map());
+
+        app.add_player("Alice", Color::new(255, 0, 0, 255));
+        app.add_player("Bob", Color::new(0, 0, 255, 255));
+        app.spawn_marbles();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<Marble>>();
+        let marbles: Vec<_> = query.iter(app.world()).collect();
+        assert_eq!(marbles.len(), 2, "Expected one marble per player");
+    }
+
+    #[test]
+    fn test_marble_falls_under_gravity() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+        app.load_map(spawner_map());
+
+        app.add_player("Alice", Color::new(255, 0, 0, 255));
+        app.spawn_marbles();
+
+        // Record initial Y position
+        let initial_y = {
+            let mut query = app
+                .world_mut()
+                .query::<(&Marble, &bevy::prelude::Transform)>();
+            let (_marble, transform) = query
+                .iter(app.world())
+                .next()
+                .expect("Expected a marble");
+            transform.translation.y
+        };
+
+        // Advance physics for ~1 second (60 steps at 60Hz)
+        app.step_physics(60);
+
+        // Check that marble has fallen
+        let final_y = {
+            let mut query = app
+                .world_mut()
+                .query::<(&Marble, &bevy::prelude::Transform)>();
+            let (_marble, transform) = query
+                .iter(app.world())
+                .next()
+                .expect("Marble should still exist");
+            transform.translation.y
+        };
+
+        assert!(
+            final_y < initial_y,
+            "Marble should have fallen: initial_y={initial_y}, final_y={final_y}"
+        );
+    }
+
+    #[test]
+    fn test_clear_marbles_removes_entities() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+        app.load_map(spawner_map());
+
+        app.add_player("Alice", Color::new(255, 0, 0, 255));
+        app.spawn_marbles();
+
+        // Verify marble exists
+        let mut query = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<Marble>>();
+        let count = query.iter(app.world()).count();
+        assert_eq!(count, 1);
+
+        // Clear marbles
+        app.push_command(crate::bevy::GameCommand::ClearMarbles);
+        app.update();
+
+        // Verify marble is gone
+        let mut query = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<Marble>>();
+        let count = query.iter(app.world()).count();
+        assert_eq!(count, 0, "Marbles should be cleared");
+    }
+}

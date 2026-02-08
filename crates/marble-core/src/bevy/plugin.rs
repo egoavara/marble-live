@@ -1,8 +1,8 @@
 //! Bevy plugins for the marble game.
 //!
 //! Provides:
-//! - `MarbleUnifiedPlugin`: Single plugin with dynamic mode switching via `AppMode` state
-//! - `MarbleGamePlugin` / `MarbleEditorPlugin`: Legacy wrappers (deprecated)
+//! - `MarbleHeadlessPlugin`: Logic-only plugin (no rendering/window dependencies) for headless testing
+//! - `MarbleUnifiedPlugin`: Full plugin including `MarbleHeadlessPlugin` + rendering systems
 
 use bevy::prelude::*;
 
@@ -35,17 +35,28 @@ pub enum EditorState {
     Preview,
 }
 
-/// Unified plugin that supports dynamic mode switching via `AppMode` state.
+// ============================================================================
+// Headless Plugin (logic only, no rendering/window dependencies)
+// ============================================================================
+
+/// Headless plugin containing all game logic without rendering or window dependencies.
 ///
-/// All game and editor systems are registered here with `run_if` guards.
-/// Mode is controlled by sending `InitGame`, `InitEditor`, or `ClearMode` commands.
-pub struct MarbleUnifiedPlugin {
+/// Use this plugin in tests with `MinimalPlugins` to run ECS systems
+/// without requiring a windowing or rendering backend.
+///
+/// Excluded systems (rendering-dependent):
+/// - Gizmos-based rendering (render_map_objects, render_marbles, render_editor_gizmos, etc.)
+/// - Grid rendering (render_grid, manage_grid_labels)
+/// - Window-dependent systems (track_mouse_position, update_overview_camera, handle_editor_camera_input)
+/// - Projection-dependent systems (apply_camera_smoothing)
+/// - Camera2d spawning (setup_game_camera, setup_editor_camera)
+pub struct MarbleHeadlessPlugin {
     pub seed: u64,
     pub command_queue: Option<CommandQueue>,
     pub state_stores: Option<StateStores>,
 }
 
-impl Default for MarbleUnifiedPlugin {
+impl Default for MarbleHeadlessPlugin {
     fn default() -> Self {
         Self {
             seed: 12345,
@@ -55,17 +66,7 @@ impl Default for MarbleUnifiedPlugin {
     }
 }
 
-impl MarbleUnifiedPlugin {
-    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: Some(state_stores),
-        }
-    }
-}
-
-impl Plugin for MarbleUnifiedPlugin {
+impl Plugin for MarbleHeadlessPlugin {
     fn build(&self, app: &mut App) {
         // ====================================================================
         // States
@@ -96,7 +97,7 @@ impl Plugin for MarbleUnifiedPlugin {
             .insert_resource(self.command_queue.clone().unwrap_or_default())
             .insert_resource(self.state_stores.clone().unwrap_or_default());
 
-        // Rendering resources (shared)
+        // Rendering resources (shared, needed by some logic systems for config)
         app.insert_resource(systems::ShapeGizmoConfig::default());
 
         // Game-specific resources
@@ -242,19 +243,7 @@ impl Plugin for MarbleUnifiedPlugin {
         );
 
         // ====================================================================
-        // Rendering systems (Game | Editor)
-        // ====================================================================
-
-        let in_game_or_editor = in_state(AppMode::Game).or(in_state(AppMode::Editor));
-
-        app.add_systems(
-            Update,
-            (systems::render_map_objects, systems::render_marbles)
-                .run_if(in_game_or_editor.clone()),
-        );
-
-        // ====================================================================
-        // Game camera systems (Game only)
+        // Game camera logic (Game only) — no Window/Projection dependency
         // ====================================================================
 
         app.add_systems(
@@ -262,25 +251,9 @@ impl Plugin for MarbleUnifiedPlugin {
             (
                 systems::update_follow_target,
                 systems::update_follow_leader,
-                systems::update_overview_camera,
             )
                 .chain()
                 .run_if(in_state(AppMode::Game)),
-        );
-
-        // ====================================================================
-        // Editor camera systems (Editor only)
-        // ====================================================================
-
-        app.add_systems(
-            Update,
-            systems::handle_editor_camera_input.run_if(in_state(AppMode::Editor)),
-        );
-
-        // Camera smoothing (Game | Editor)
-        app.add_systems(
-            Update,
-            systems::apply_camera_smoothing.run_if(in_game_or_editor.clone()),
         );
 
         // ====================================================================
@@ -298,27 +271,13 @@ impl Plugin for MarbleUnifiedPlugin {
         );
 
         // ====================================================================
-        // Editor grid/guidelines (Editor only)
-        // ====================================================================
-
-        app.add_systems(
-            Update,
-            (
-                systems::render_grid,
-                systems::manage_grid_labels,
-                systems::render_guidelines,
-            )
-                .run_if(in_state(AppMode::Editor)),
-        );
-
-        // ====================================================================
         // Editor input and selection (EditorState::Editing only)
+        // — track_mouse_position excluded (needs Window/Camera)
         // ====================================================================
 
         app.add_systems(
             Update,
             (
-                systems::track_mouse_position,
                 systems::update_gizmo_hover,
                 systems::update_keyframe_gizmo_hover,
                 systems::sync_editor_state_from_store,
@@ -331,19 +290,6 @@ impl Plugin for MarbleUnifiedPlugin {
                 systems::validate_selection,
             )
                 .chain()
-                .run_if(in_state(EditorState::Editing)),
-        );
-
-        // Editor gizmo rendering (EditorState::Editing only)
-        app.add_systems(
-            Update,
-            (
-                systems::render_editor_gizmos,
-                systems::render_sequence_targets,
-                systems::render_keyframe_gizmos,
-                systems::render_guideline_gizmo,
-                systems::render_distance_lines,
-            )
                 .run_if(in_state(EditorState::Editing)),
         );
 
@@ -393,13 +339,142 @@ impl Plugin for MarbleUnifiedPlugin {
         app.add_systems(OnExit(EditorState::Preview), systems::on_exit_preview);
 
         // ====================================================================
-        // OnEnter / OnExit transition systems
+        // OnExit transition systems (cleanup only, no camera spawning)
+        // ====================================================================
+
+        app.add_systems(OnExit(AppMode::Game), cleanup_game_mode);
+        app.add_systems(OnExit(AppMode::Editor), cleanup_editor_mode);
+    }
+}
+
+// ============================================================================
+// Unified Plugin (headless + rendering)
+// ============================================================================
+
+/// Unified plugin that supports dynamic mode switching via `AppMode` state.
+///
+/// Includes `MarbleHeadlessPlugin` for all game logic, plus rendering systems
+/// that require `Gizmos`, `Mesh2d`, `Window`, `Projection`, and `Camera2d`.
+pub struct MarbleUnifiedPlugin {
+    pub seed: u64,
+    pub command_queue: Option<CommandQueue>,
+    pub state_stores: Option<StateStores>,
+}
+
+impl Default for MarbleUnifiedPlugin {
+    fn default() -> Self {
+        Self {
+            seed: 12345,
+            command_queue: None,
+            state_stores: None,
+        }
+    }
+}
+
+impl MarbleUnifiedPlugin {
+    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
+        Self {
+            seed: 12345,
+            command_queue: Some(command_queue),
+            state_stores: Some(state_stores),
+        }
+    }
+}
+
+impl Plugin for MarbleUnifiedPlugin {
+    fn build(&self, app: &mut App) {
+        // ====================================================================
+        // Headless logic (all game systems without rendering)
+        // ====================================================================
+        app.add_plugins(MarbleHeadlessPlugin {
+            seed: self.seed,
+            command_queue: self.command_queue.clone(),
+            state_stores: self.state_stores.clone(),
+        });
+
+        // ====================================================================
+        // Rendering systems (Game | Editor)
+        // ====================================================================
+
+        let in_game_or_editor = in_state(AppMode::Game).or(in_state(AppMode::Editor));
+
+        app.add_systems(
+            Update,
+            (systems::render_map_objects, systems::render_marbles)
+                .run_if(in_game_or_editor.clone()),
+        );
+
+        // ====================================================================
+        // Window-dependent game camera systems (Game only)
+        // ====================================================================
+
+        app.add_systems(
+            Update,
+            systems::update_overview_camera.run_if(in_state(AppMode::Game)),
+        );
+
+        // ====================================================================
+        // Editor camera systems (Editor only) — needs Window/Projection
+        // ====================================================================
+
+        app.add_systems(
+            Update,
+            systems::handle_editor_camera_input.run_if(in_state(AppMode::Editor)),
+        );
+
+        // Camera smoothing (Game | Editor) — needs Projection
+        app.add_systems(
+            Update,
+            systems::apply_camera_smoothing.run_if(in_game_or_editor.clone()),
+        );
+
+        // ====================================================================
+        // Editor grid/guidelines (Editor only) — needs Mesh2d/Text2d/Gizmos
+        // ====================================================================
+
+        app.add_systems(
+            Update,
+            (
+                systems::render_grid,
+                systems::manage_grid_labels,
+                systems::render_guidelines,
+            )
+                .run_if(in_state(AppMode::Editor)),
+        );
+
+        // ====================================================================
+        // Editor input: track_mouse_position (needs Window/Camera)
+        // ====================================================================
+
+        app.add_systems(
+            Update,
+            systems::track_mouse_position
+                .before(systems::update_gizmo_hover)
+                .run_if(in_state(EditorState::Editing)),
+        );
+
+        // ====================================================================
+        // Editor gizmo rendering (EditorState::Editing only) — needs Gizmos
+        // ====================================================================
+
+        app.add_systems(
+            Update,
+            (
+                systems::render_editor_gizmos,
+                systems::render_sequence_targets,
+                systems::render_keyframe_gizmos,
+                systems::render_guideline_gizmo,
+                systems::render_distance_lines,
+            )
+                .run_if(in_state(EditorState::Editing)),
+        );
+
+        // ====================================================================
+        // OnEnter camera setup (needs Camera2d)
         // ====================================================================
 
         app.add_systems(OnEnter(AppMode::Game), setup_game_camera);
         app.add_systems(OnEnter(AppMode::Editor), setup_editor_camera);
-        app.add_systems(OnExit(AppMode::Game), cleanup_game_mode);
-        app.add_systems(OnExit(AppMode::Editor), cleanup_editor_mode);
     }
 }
 
@@ -528,95 +603,4 @@ fn cleanup_editor_mode(
     *grid_mesh_state = systems::GridMeshState::default();
     *grid_label_state = systems::GridLabelState::default();
     physics.world.reset();
-}
-
-// ============================================================================
-// Legacy plugins (deprecated, kept for compatibility)
-// ============================================================================
-
-/// Core plugin with shared functionality (legacy).
-pub struct MarbleCorePlugin {
-    pub seed: u64,
-    pub command_queue: Option<CommandQueue>,
-    pub state_stores: Option<StateStores>,
-}
-
-impl Default for MarbleCorePlugin {
-    fn default() -> Self {
-        Self {
-            seed: 12345,
-            command_queue: None,
-            state_stores: None,
-        }
-    }
-}
-
-/// Game plugin (legacy wrapper).
-pub struct MarbleGamePlugin {
-    pub seed: u64,
-    pub command_queue: Option<CommandQueue>,
-    pub state_stores: Option<StateStores>,
-}
-
-impl Default for MarbleGamePlugin {
-    fn default() -> Self {
-        Self {
-            seed: 12345,
-            command_queue: None,
-            state_stores: None,
-        }
-    }
-}
-
-impl MarbleGamePlugin {
-    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: Some(state_stores),
-        }
-    }
-
-    pub fn with_command_queue(command_queue: CommandQueue) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: None,
-        }
-    }
-}
-
-/// Editor plugin (legacy wrapper).
-pub struct MarbleEditorPlugin {
-    pub seed: u64,
-    pub command_queue: Option<CommandQueue>,
-    pub state_stores: Option<StateStores>,
-}
-
-impl Default for MarbleEditorPlugin {
-    fn default() -> Self {
-        Self {
-            seed: 12345,
-            command_queue: None,
-            state_stores: None,
-        }
-    }
-}
-
-impl MarbleEditorPlugin {
-    pub fn new(command_queue: CommandQueue, state_stores: StateStores) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: Some(state_stores),
-        }
-    }
-
-    pub fn with_command_queue(command_queue: CommandQueue) -> Self {
-        Self {
-            seed: 12345,
-            command_queue: Some(command_queue),
-            state_stores: None,
-        }
-    }
 }

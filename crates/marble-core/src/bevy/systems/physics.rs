@@ -110,3 +110,128 @@ pub fn clear_external_forces(mut forces: Query<&mut PhysicsExternalForce>) {
         force.torque = 0.0;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::bevy::test_utils::TestApp;
+    use crate::bevy::Marble;
+    use crate::marble::Color;
+    use crate::map::*;
+
+    /// Create a map with a vector field pushing marbles to the right.
+    fn vector_field_map() -> RouletteConfig {
+        RouletteConfig {
+            meta: MapMeta {
+                name: "vf_test".to_string(),
+                gamerule: vec![],
+                live_ranking: LiveRankingConfig::default(),
+            },
+            objects: vec![
+                // Spawner
+                MapObject {
+                    id: Some("spawner".to_string()),
+                    role: ObjectRole::Spawner,
+                    shape: Shape::Rect {
+                        center: crate::dsl::Vec2OrExpr::Static([0.0, 0.0]),
+                        size: crate::dsl::Vec2OrExpr::Static([1.0, 0.5]),
+                        rotation: crate::dsl::NumberOrExpr::Number(0.0),
+                    },
+                    properties: ObjectProperties {
+                        spawn: Some(SpawnProperties::default()),
+                        ..Default::default()
+                    },
+                },
+                // Large vector field covering the spawn area, pushing right
+                MapObject {
+                    id: Some("field".to_string()),
+                    role: ObjectRole::VectorField,
+                    shape: Shape::Rect {
+                        center: crate::dsl::Vec2OrExpr::Static([0.0, 0.0]),
+                        size: crate::dsl::Vec2OrExpr::Static([20.0, 20.0]),
+                        rotation: crate::dsl::NumberOrExpr::Number(0.0),
+                    },
+                    properties: ObjectProperties {
+                        vector_field: Some(VectorFieldProperties {
+                            direction: crate::dsl::Vec2OrExpr::Static([1.0, 0.0]),
+                            magnitude: crate::dsl::NumberOrExpr::Number(50.0),
+                            enabled: crate::dsl::BoolOrExpr::Bool(true),
+                            falloff: VectorFieldFalloff::Uniform,
+                        }),
+                        ..Default::default()
+                    },
+                },
+            ],
+            keyframes: vec![],
+        }
+    }
+
+    #[test]
+    fn test_vector_field_pushes_marble() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+        app.load_map(vector_field_map());
+
+        app.add_player("Alice", Color::new(255, 0, 0, 255));
+        app.spawn_marbles();
+
+        // Record initial X position
+        let initial_x = {
+            let mut query = app
+                .world_mut()
+                .query::<(&Marble, &bevy::prelude::Transform)>();
+            let (_marble, transform) = query
+                .iter(app.world())
+                .next()
+                .expect("Expected a marble");
+            transform.translation.x
+        };
+
+        // Advance physics
+        app.step_physics(60);
+
+        // Marble should have moved to the right due to vector field
+        let final_x = {
+            let mut query = app
+                .world_mut()
+                .query::<(&Marble, &bevy::prelude::Transform)>();
+            let (_marble, transform) = query
+                .iter(app.world())
+                .next()
+                .expect("Marble should still exist");
+            transform.translation.x
+        };
+
+        assert!(
+            final_x > initial_x,
+            "Vector field should push marble right: initial_x={initial_x}, final_x={final_x}"
+        );
+    }
+
+    #[test]
+    fn test_deterministic_simulation() {
+        // Run the same simulation twice with the same seed
+        let run = |seed: u64| -> (f32, f32) {
+            let mut app = TestApp::with_seed(seed);
+            app.enter_game_mode();
+            app.load_map(vector_field_map());
+            app.add_player("Alice", Color::new(255, 0, 0, 255));
+            app.spawn_marbles();
+            app.step_physics(120);
+
+            let mut query = app
+                .world_mut()
+                .query::<(&Marble, &bevy::prelude::Transform)>();
+            let (_marble, transform) = query
+                .iter(app.world())
+                .next()
+                .expect("Marble should exist");
+            (transform.translation.x, transform.translation.y)
+        };
+
+        let (x1, y1) = run(42);
+        let (x2, y2) = run(42);
+
+        assert_eq!(x1, x2, "X positions should be identical for same seed");
+        assert_eq!(y1, y2, "Y positions should be identical for same seed");
+    }
+}

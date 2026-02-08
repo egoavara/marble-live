@@ -508,6 +508,7 @@ impl KeyframeExecutor {
 mod tests {
     use super::*;
     use crate::dsl::NumberOrExpr;
+    use crate::map::PivotMode;
 
     fn create_test_sequence() -> KeyframeSequence {
         KeyframeSequence {
@@ -531,6 +532,7 @@ mod tests {
                 },
             ],
             autoplay: true,
+            property_managed: false,
         }
     }
 
@@ -549,6 +551,7 @@ mod tests {
                 Keyframe::LoopEnd,
             ],
             autoplay: true,
+            property_managed: false,
         }
     }
 
@@ -637,6 +640,7 @@ mod tests {
                 Keyframe::LoopEnd,
             ],
             autoplay: true,
+            property_managed: false,
         };
 
         let mut executor = KeyframeExecutor::new("infinite".to_string());
@@ -667,11 +671,13 @@ mod tests {
             target_ids: vec!["flipper".to_string()],
             keyframes: vec![Keyframe::PivotRotate {
                 pivot: [0.0, 0.0], // Pivot at origin
+                pivot_mode: PivotMode::Absolute,
                 angle: 90.0,       // Rotate 90 degrees
                 duration: 1.0,
                 easing: EasingType::Linear,
             }],
             autoplay: true,
+            property_managed: false,
         };
 
         let mut executor = KeyframeExecutor::new("pivot_test".to_string());
@@ -728,6 +734,7 @@ mod tests {
                 Keyframe::LoopEnd,
             ],
             autoplay: true,
+            property_managed: false,
         };
 
         let mut executor = KeyframeExecutor::new("random_delay_test".to_string());

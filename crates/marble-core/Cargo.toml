@@ -29,6 +29,11 @@ marble-proto.workspace = true
 prost.workspace = true
 uuid.workspace = true
 
+[features]
+## Enables bevy_winit + webgpu for windowed rendering.
+## Activated by marble-client; omitted for headless tests.
+windowed = ["bevy/bevy_winit", "bevy/webgpu"]
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen.workspace = true
 serde-wasm-bindgen.workspace = true

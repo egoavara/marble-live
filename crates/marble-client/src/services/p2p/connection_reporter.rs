@@ -205,8 +205,9 @@ impl ConnectionReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_rtt_measurement() {
         let mut m = RttMeasurement::default();
 
@@ -220,7 +221,7 @@ mod tests {
         assert!(m.rtt_ms > 50 && m.rtt_ms < 70);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_packet_loss() {
         let mut m = RttMeasurement::default();
 
@@ -231,10 +232,10 @@ mod tests {
         assert!(m.packet_loss > 0.0 && m.packet_loss < 0.5);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_reporter() {
         let mut reporter = ConnectionReporter::new("room1".to_string(), "player1".to_string());
-        reporter.add_peer("player2".to_string(), PeerId::new());
+        reporter.add_peer("player2".to_string(), PeerId(uuid::Uuid::new_v4()));
 
         // Simulate ping/pong
         reporter.on_ping_sent("player2", 0.0);

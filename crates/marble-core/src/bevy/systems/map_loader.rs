@@ -724,3 +724,117 @@ fn spawn_vector_field(
         ))
         .id()
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::bevy::test_utils::TestApp;
+    use crate::bevy::{MapObjectMarker, SpawnerZone, TriggerZone};
+    use crate::map::*;
+
+    /// Helper: create a minimal map with one obstacle, one spawner, and one trigger.
+    fn simple_map() -> RouletteConfig {
+        RouletteConfig {
+            meta: MapMeta {
+                name: "test_map".to_string(),
+                gamerule: vec![],
+                live_ranking: LiveRankingConfig::default(),
+            },
+            objects: vec![
+                // Obstacle (static wall)
+                MapObject {
+                    id: Some("wall".to_string()),
+                    role: ObjectRole::Obstacle,
+                    shape: Shape::Rect {
+                        center: crate::dsl::Vec2OrExpr::Static([0.0, -2.0]),
+                        size: crate::dsl::Vec2OrExpr::Static([4.0, 0.2]),
+                        rotation: crate::dsl::NumberOrExpr::Number(0.0),
+                    },
+                    properties: ObjectProperties::default(),
+                },
+                // Spawner
+                MapObject {
+                    id: Some("spawner".to_string()),
+                    role: ObjectRole::Spawner,
+                    shape: Shape::Rect {
+                        center: crate::dsl::Vec2OrExpr::Static([0.0, 2.0]),
+                        size: crate::dsl::Vec2OrExpr::Static([2.0, 0.5]),
+                        rotation: crate::dsl::NumberOrExpr::Number(0.0),
+                    },
+                    properties: ObjectProperties {
+                        spawn: Some(SpawnProperties::default()),
+                        ..Default::default()
+                    },
+                },
+                // Trigger
+                MapObject {
+                    id: Some("trigger".to_string()),
+                    role: ObjectRole::Trigger,
+                    shape: Shape::Circle {
+                        center: crate::dsl::Vec2OrExpr::Static([0.0, -5.0]),
+                        radius: crate::dsl::NumberOrExpr::Number(0.5),
+                    },
+                    properties: ObjectProperties {
+                        trigger: Some(TriggerProperties {
+                            action: "gamerule".to_string(),
+                        }),
+                        ..Default::default()
+                    },
+                },
+            ],
+            keyframes: vec![],
+        }
+    }
+
+    #[test]
+    fn test_load_map_creates_entities() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+        app.load_map(simple_map());
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<MapObjectMarker>>();
+        let count = query.iter(app.world()).count();
+        assert!(count > 0, "Expected map objects to be spawned");
+    }
+
+    #[test]
+    fn test_load_map_creates_spawner() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+        app.load_map(simple_map());
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<SpawnerZone>>();
+        let count = query.iter(app.world()).count();
+        assert_eq!(count, 1, "Expected exactly one spawner");
+    }
+
+    #[test]
+    fn test_load_map_creates_trigger() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+        app.load_map(simple_map());
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<TriggerZone>>();
+        let count = query.iter(app.world()).count();
+        assert_eq!(count, 1, "Expected exactly one trigger");
+    }
+
+    #[test]
+    fn test_load_map_populates_object_entity_map() {
+        let mut app = TestApp::new();
+        app.enter_game_mode();
+        app.load_map(simple_map());
+
+        let object_map = app.world().resource::<crate::bevy::ObjectEntityMap>();
+        // Obstacles and triggers are registered by id in the map
+        assert!(object_map.get("wall").is_some());
+        assert!(object_map.get("trigger").is_some());
+        // Spawners are registered by index only, not by id
+        assert!(object_map.get_by_index(1).is_some());
+    }
+}

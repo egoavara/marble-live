@@ -186,8 +186,9 @@ pub fn generate_hash_code(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_hash_string() {
         let hash = hash_string("test");
         assert!(!hash.is_empty());

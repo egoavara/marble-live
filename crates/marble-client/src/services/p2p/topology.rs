@@ -172,6 +172,7 @@ impl TopologyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     fn create_test_topology() -> PeerTopology {
         PeerTopology {
@@ -194,7 +195,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_apply_topology() {
         let mut handler = TopologyHandler::new("me".to_string());
         let topology = create_test_topology();
@@ -206,7 +207,7 @@ mod tests {
         assert_eq!(handler.expected_peer_count(), 3);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_should_connect() {
         let mut handler = TopologyHandler::new("me".to_string());
         handler.apply_topology(&create_test_topology());

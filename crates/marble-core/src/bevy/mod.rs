@@ -14,6 +14,9 @@ pub mod state_store;
 pub mod sync_snapshot;
 pub mod systems;
 
+#[cfg(test)]
+pub(crate) mod test_utils;
+
 #[cfg(target_arch = "wasm32")]
 pub mod p2p_socket;
 #[cfg(target_arch = "wasm32")]
@@ -24,10 +27,7 @@ pub use wasm_entry::*;
 
 pub use components::*;
 pub use events::*;
-pub use plugin::{
-    AppMode, EditorState, MarbleCorePlugin, MarbleEditorPlugin, MarbleGamePlugin,
-    MarbleUnifiedPlugin,
-};
+pub use plugin::{AppMode, EditorState, MarbleHeadlessPlugin, MarbleUnifiedPlugin};
 pub use rapier_plugin::{
     CollisionEvent, CollisionEventFlags, MarblePhysicsPlugin, PhysicsBody, PhysicsCollider,
     PhysicsExternalForce, PhysicsSet, PhysicsWorldRes, Sensor,

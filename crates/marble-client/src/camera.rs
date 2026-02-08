@@ -453,8 +453,9 @@ impl CameraState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_camera_toggle_follow() {
         let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
 
@@ -474,7 +475,7 @@ mod tests {
         assert_eq!(camera.mode, CameraMode::FollowMe);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_camera_toggle_overview() {
         let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
 
@@ -492,7 +493,7 @@ mod tests {
         assert_eq!(camera.mode, CameraMode::FollowMe);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_view_projection_matrix() {
         let camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
         let matrix = camera.view_projection_matrix();
@@ -504,7 +505,7 @@ mod tests {
         assert!(matrix[3][3] != 0.0);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_map_center_calculation() {
         let camera = CameraState::new((800.0, 600.0), ((100.0, 200.0), (500.0, 800.0)));
 
@@ -519,7 +520,7 @@ mod tests {
         assert!((size.1 - 600.0).abs() < 0.001);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_screen_to_world_conversion() {
         let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
         camera.center = (400.0, 300.0);
@@ -536,7 +537,7 @@ mod tests {
         assert!((wy - 0.0).abs() < 0.001);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_world_to_screen_conversion() {
         let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
         camera.center = (400.0, 300.0);
@@ -548,7 +549,7 @@ mod tests {
         assert!((sy - 300.0).abs() < 0.001);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_pan_by_screen_delta() {
         let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
         camera.center = (400.0, 300.0);
@@ -560,7 +561,7 @@ mod tests {
         assert!((camera.center.1 - 300.0).abs() < 0.001);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_zoom_at_screen_pos() {
         let mut camera = CameraState::new((800.0, 600.0), ((0.0, 0.0), (800.0, 600.0)));
         camera.center = (400.0, 300.0);

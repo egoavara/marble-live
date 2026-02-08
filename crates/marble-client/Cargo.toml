@@ -9,7 +9,7 @@ description = "Yew WASM frontend for marble-live"
 workspace = true
 
 [dependencies]
-marble-core.workspace = true
+marble-core = { workspace = true, features = ["windowed"] }
 marble-proto = { workspace = true, features = ["client"] }
 
 tonic-web-wasm-client.workspace = true
@@ -57,3 +57,6 @@ console_error_panic_hook.workspace = true
 
 # wgpu and bytemuck removed - Bevy handles rendering now
 serde-wasm-bindgen.workspace = true
+
+[dev-dependencies]
+wasm-bindgen-test.workspace = true

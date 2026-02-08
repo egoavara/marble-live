@@ -41,9 +41,26 @@ build-server:
 build-server-only:
     SKIP_CLIENT_BUILD=1 cargo build -p marble-server --release
 
-# Run all tests
-test:
-    cargo test --all
+# Run tests (usage: just test, just test marble-core, just test marble-core --lib)
+# marble-client is WASM-only and automatically routed to wasm32 target.
+test *args:
+    #!/usr/bin/env bash
+    if [ -z "{{args}}" ]; then
+        cargo test --workspace --exclude marble-client
+        cargo test -p marble-client --target wasm32-unknown-unknown
+    elif [[ "{{args}}" == marble-client* ]]; then
+        cargo test -p {{args}} --target wasm32-unknown-unknown
+    else
+        cargo test -p {{args}}
+    fi
+
+# Run marble-core bevy system integration tests
+test-bevy *filter:
+    cargo test -p marble-core --lib -- bevy::systems {{filter}}
+
+# Run marble-client WASM tests in Node.js (requires wasm-bindgen-cli)
+test-wasm *args:
+    cargo test -p marble-client --target wasm32-unknown-unknown {{args}}
 
 # Run clippy
 lint:
