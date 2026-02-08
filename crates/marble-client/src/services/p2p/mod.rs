@@ -1,12 +1,10 @@
 mod connection_reporter;
-mod message_loop;
 mod room_handle;
 mod room_state;
 mod topology;
 mod types;
 
 pub use connection_reporter::ConnectionReporter;
-pub use message_loop::resolve_peer_ids_from_server;
 pub use room_handle::P2pRoomHandle;
 pub use room_state::P2pRoomState;
 pub use topology::TopologyHandler;

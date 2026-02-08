@@ -22,6 +22,7 @@ mod modal;
 pub mod network_visualization;
 pub mod peer_instance_card;
 mod peer_list;
+mod room_service;
 // mod peer_status;
 mod player_dashboard;
 // mod player_legend;
@@ -47,6 +48,7 @@ pub use modal::*;
 pub use network_visualization::{NetworkVisualization, PeerNetworkInfo};
 pub use peer_instance_card::{PeerConfig, PeerInstanceCard};
 pub use peer_list::*;
+pub use room_service::*;
 #[allow(unused_imports)]
 pub use player_dashboard::*;
 pub use reaction_display::*;

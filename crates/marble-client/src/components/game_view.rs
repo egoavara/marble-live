@@ -10,6 +10,7 @@ use yew::prelude::*;
 
 use super::peer_list::ArrivalInfo;
 use super::reaction_panel::{REACTION_COOLDOWN_MS, get_reaction_emoji};
+use super::room_service::use_room_service;
 use super::{ChatPanel, PeerList, ReactionDisplay};
 use crate::hooks::{
     P2pRoomConfig, PlayerInfo, send_command, use_bevy, use_bevy_chat, use_bevy_game,
@@ -102,6 +103,9 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
         .map(|x| x.to_string())
         .unwrap_or_default();
     let player_secret = config_secret.to_string();
+
+    // Room service for peer name resolution
+    let room_service = use_room_service();
 
     // P2P connection
     let config = P2pRoomConfig {
@@ -237,6 +241,7 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
         let peers = peers.clone();
         let player_id = player_id.clone();
         let bevy_initialized = bevy.initialized;
+        let room_service = room_service.clone();
 
         Callback::from(move |_: MouseEvent| {
             if !bevy_initialized {
@@ -275,13 +280,18 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
                 tracing::error!("Failed to add self as player: {:?}", e);
             }
 
-            // 5. Add peers as players
+            // 5. Add peers as players — use room_service cache for names
             for (i, peer) in peers.iter().enumerate() {
-                if let Some(peer_player_id) = &peer.player_id {
+                let peer_id_str = peer.peer_id.to_string();
+                let peer_name = room_service
+                    .player_name(&peer_id_str)
+                    .or_else(|| peer.player_id.clone());
+
+                if let Some(name) = peer_name {
                     let color = PLAYER_COLORS[(i + 1) % PLAYER_COLORS.len()];
                     let cmd = serde_json::json!({
                         "type": "add_player",
-                        "name": peer_player_id,
+                        "name": name,
                         "color": color
                     });
                     if let Err(e) = send_command(&cmd.to_string()) {
@@ -357,9 +367,15 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
         let host_peer_id = p2p.host_peer_id();
         let mut sorted_peers: Vec<_> = peers.iter().collect();
         sorted_peers.sort_by(|a, b| {
-            let a_name = a.player_id.as_deref().unwrap_or("???");
-            let b_name = b.player_id.as_deref().unwrap_or("???");
-            a_name.cmp(b_name)
+            let a_id = a.peer_id.to_string();
+            let b_id = b.peer_id.to_string();
+            let a_name = room_service
+                .player_name(&a_id)
+                .unwrap_or_else(|| a.player_id.as_deref().unwrap_or("???").to_string());
+            let b_name = room_service
+                .player_name(&b_id)
+                .unwrap_or_else(|| b.player_id.as_deref().unwrap_or("???").to_string());
+            a_name.cmp(&b_name)
         });
 
         let mut items = Vec::new();
@@ -378,7 +394,16 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
             if let Some(host_peer) =
                 host_peer_id.and_then(|hid| sorted_peers.iter().find(|p| p.peer_id == hid))
             {
-                let host_name = host_peer.player_id.as_deref().unwrap_or("???");
+                let host_id = host_peer.peer_id.to_string();
+                let host_name = room_service
+                    .player_name(&host_id)
+                    .unwrap_or_else(|| {
+                        host_peer
+                            .player_id
+                            .as_deref()
+                            .unwrap_or("???")
+                            .to_string()
+                    });
                 items.push(html! {
                     <div class="lobby-player-item host">
                         <span class="lobby-player-name">{host_name}</span>
@@ -403,7 +428,8 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
                     continue;
                 }
             }
-            let peer_name = peer.player_id.as_deref().unwrap_or("???");
+            let peer_id_str = peer.peer_id.to_string();
+            let peer_name = room_service.player_name_or_fallback(&peer_id_str);
             items.push(html! {
                 <div class="lobby-player-item">
                     <span class="lobby-player-name">{peer_name}</span>

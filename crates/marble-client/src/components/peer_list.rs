@@ -2,6 +2,7 @@
 
 use yew::prelude::*;
 
+use super::room_service::RoomServiceHandle;
 use crate::services::p2p::{P2pConnectionState, P2pPeerInfo};
 
 /// Arrival information for a player.
@@ -66,6 +67,8 @@ pub fn peer_list(props: &PeerListProps) -> Html {
         },
     };
 
+    let room_service = use_context::<RoomServiceHandle>();
+
     let peer_count = props.peers.iter().filter(|p| p.connected).count();
 
     // Build player list with arrival info
@@ -88,10 +91,12 @@ pub fn peer_list(props: &PeerListProps) -> Html {
 
     // Add peers
     for peer in &props.peers {
-        let display_name = peer
-            .player_id
-            .clone()
-            .unwrap_or_else(|| format!("Peer-{}", &peer.peer_id.to_string()[..8]));
+        let peer_id_str = peer.peer_id.to_string();
+        let display_name = room_service
+            .as_ref()
+            .and_then(|rs| rs.player_name(&peer_id_str))
+            .or_else(|| peer.player_id.clone())
+            .unwrap_or_else(|| format!("Peer-{}", &peer_id_str[..peer_id_str.len().min(8)]));
         let peer_arrival = props
             .arrival_info
             .iter()

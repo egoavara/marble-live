@@ -4,17 +4,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use marble_core::{GameState, PlayerId, RouletteConfig, SyncSnapshot};
-use marble_proto::room::room_service_client::RoomServiceClient;
-use marble_proto::room::{PlayerAuth, ReportArrivalRequest, StartGameRequest};
-use tonic_web_wasm_client::Client;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
-// use web_sys::HtmlCanvasElement; // Removed - Bevy handles canvas
 use yew::prelude::*;
 
 use crate::camera::{CameraMode, CameraState};
-// use crate::renderer::WgpuRenderer; // Removed - Bevy handles rendering
+use crate::components::RoomServiceHandle;
 use crate::services::p2p::P2pRoomHandle;
 
 /// Fixed timestep for physics simulation (60 FPS)
@@ -41,8 +36,7 @@ pub struct GameLoopHandle {
     is_host: bool,
     p2p: P2pRoomHandle,
     my_player_id: Option<String>,
-    room_id: String,
-    player_secret: Option<String>,
+    room_service: Option<RoomServiceHandle>,
     /// Track which players have been reported as arrived
     reported_arrivals: Rc<RefCell<Vec<PlayerId>>>,
     /// Track if game start has been reported to server (only report once)
@@ -217,61 +211,11 @@ impl GameLoopHandle {
         {
             tracing::info!("Marbles spawned for {} players", peers.len() + 1);
 
-            // Call StartGame RPC to register with server (only first time)
+            // Call StartGame RPC via RoomServiceHandle (only first time)
             if should_report_to_server {
-                if let Some(ref player_secret) = self.player_secret {
-                    // Mark as reported before async call
-                    *self.server_game_started.borrow_mut() = true;
-
-                    let room_id = self.room_id.clone();
-                    let player_id = my_player_id;
-                    let player_secret = player_secret.clone();
-
-                    spawn_local(async move {
-                        let Some(window) = web_sys::window() else {
-                            tracing::warn!("No window object available for StartGame RPC");
-                            return;
-                        };
-                        let Ok(origin) = window.location().origin() else {
-                            tracing::warn!("Failed to get origin for StartGame RPC");
-                            return;
-                        };
-                        let client = Client::new(format!("{}/grpc", origin));
-                        let mut grpc = RoomServiceClient::new(client);
-
-                        let req = StartGameRequest {
-                            room_id: room_id.clone(),
-                            player: Some(PlayerAuth {
-                                id: player_id.clone(),
-                                secret: player_secret,
-                            }),
-                            start_frame,
-                            rng_seed,
-                        };
-
-                        match grpc.start_game(req).await {
-                            Ok(resp) => {
-                                let resp = resp.into_inner();
-                                if resp.already_started {
-                                    tracing::info!(room_id = %room_id, "Game was already started on server");
-                                } else {
-                                    tracing::info!(
-                                        room_id = %room_id,
-                                        start_frame = start_frame,
-                                        rng_seed = rng_seed,
-                                        "Game started on server"
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    room_id = %room_id,
-                                    error = %e,
-                                    "Failed to call StartGame RPC"
-                                );
-                            }
-                        }
-                    });
+                *self.server_game_started.borrow_mut() = true;
+                if let Some(ref rs) = self.room_service {
+                    rs.start_game(start_frame, rng_seed);
                 }
             } else {
                 tracing::info!("Respawn (server already notified, P2P only)");
@@ -332,6 +276,9 @@ pub fn use_game_loop(
     seed: u64,
     initial_camera_mode: CameraMode,
 ) -> GameLoopHandle {
+    // Get RoomServiceHandle from context (optional for backward compat)
+    let room_service = use_context::<RoomServiceHandle>();
+
     // Game state - shared with P2P layer
     let game_state = use_memo(seed, |seed| {
         let mut state = GameState::new(*seed);
@@ -366,14 +313,8 @@ pub fn use_game_loop(
     // Animation frame ID for cleanup
     let animation_frame_id = use_mut_ref(|| None::<i32>);
 
-    // NOTE: Bevy handles rendering now, renderer_ref removed
-
     // Store my_player_id for the handle
     let my_player_id = p2p.my_player_id();
-
-    // Store room_id and player_secret for RPC calls
-    let room_id = p2p.room_id();
-    let player_secret = p2p.player_secret();
 
     // Track reported arrivals (to avoid duplicate RPC calls)
     let reported_arrivals: Rc<RefCell<Vec<PlayerId>>> = use_mut_ref(Vec::new);
@@ -383,13 +324,11 @@ pub fn use_game_loop(
 
     // Set host status on mount
     {
-        let p2p = p2p.clone();
+        let p2p_for_host = p2p.clone();
         use_effect_with(seed, move |_seed| {
-            p2p.set_host_status(is_host);
+            p2p_for_host.set_host_status(is_host);
         });
     }
-
-    // NOTE: Bevy handles rendering initialization and idle state rendering
 
     // Main game loop
     {
@@ -397,16 +336,13 @@ pub fn use_game_loop(
         let camera_state = camera_state.clone();
         let loop_state = loop_state.clone();
         let current_frame = current_frame.clone();
-        // NOTE: renderer_ref removed - Bevy handles rendering
         let p2p = p2p.clone();
         let accumulated_time = accumulated_time.clone();
         let last_time = last_time.clone();
         let animation_frame_id = animation_frame_id.clone();
         let my_player_id_for_camera = my_player_id.clone();
         let reported_arrivals_for_loop = reported_arrivals.clone();
-        let room_id_for_loop = room_id.clone();
-        let player_secret_for_loop = player_secret.clone();
-        let my_player_id_for_rpc = my_player_id.clone();
+        let room_service_for_loop = room_service.clone();
 
         use_effect_with(
             ((*loop_state).clone(), *renderer_version),
@@ -428,16 +364,12 @@ pub fn use_game_loop(
                     let camera_state = camera_state.clone();
                     let current_frame = current_frame.clone();
                     let loop_state = loop_state.clone();
-                    let p2p = p2p.clone();
                     let accumulated_time = accumulated_time.clone();
                     let last_time = last_time.clone();
                     let animation_frame_id = animation_frame_id.clone();
-                    // NOTE: renderer_ref removed - Bevy handles rendering
                     let my_player_id_for_camera = my_player_id_for_camera.clone();
                     let reported_arrivals = reported_arrivals_for_loop.clone();
-                    let room_id = room_id_for_loop.clone();
-                    let player_secret = player_secret_for_loop.clone();
-                    let my_player_id_for_rpc = my_player_id_for_rpc.clone();
+                    let room_service = room_service_for_loop.clone();
 
                     *closure.borrow_mut() = Some(Closure::new(move |timestamp: f64| {
                         // Check if still running
@@ -474,7 +406,7 @@ pub fn use_game_loop(
 
                             let frame = game.current_frame();
 
-                            // Host: report arrivals to server
+                            // Host: report arrivals to server via RoomServiceHandle
                             if is_host && !newly_arrived.is_empty() {
                                 let mut reported = reported_arrivals.borrow_mut();
                                 for &player_id in &newly_arrived {
@@ -493,54 +425,9 @@ pub fn use_game_loop(
                                         .unwrap_or_default();
                                     let rank = reported.len() as u32;
 
-                                    // Call ReportArrival RPC
-                                    if let Some(ref secret) = player_secret {
-                                        let room_id = room_id.clone();
-                                        let my_player_id = my_player_id_for_rpc.clone();
-                                        let secret = secret.clone();
-                                        let arrival_frame = frame;
-
-                                        spawn_local(async move {
-                                            let Some(window) = web_sys::window() else {
-                                                return;
-                                            };
-                                            let Ok(origin) = window.location().origin() else {
-                                                return;
-                                            };
-                                            let client = Client::new(format!("{}/grpc", origin));
-                                            let mut grpc = RoomServiceClient::new(client);
-
-                                            let req = ReportArrivalRequest {
-                                                room_id: room_id.clone(),
-                                                player: Some(PlayerAuth {
-                                                    id: my_player_id,
-                                                    secret,
-                                                }),
-                                                arrived_player_id: player_name.clone(),
-                                                arrival_frame,
-                                                rank,
-                                            };
-
-                                            match grpc.report_arrival(req).await {
-                                                Ok(resp) => {
-                                                    let resp = resp.into_inner();
-                                                    tracing::info!(
-                                                        player = %player_name,
-                                                        rank = rank,
-                                                        frame = arrival_frame,
-                                                        game_ended = resp.game_ended,
-                                                        "Reported player arrival"
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    tracing::warn!(
-                                                        player = %player_name,
-                                                        error = %e,
-                                                        "Failed to report arrival"
-                                                    );
-                                                }
-                                            }
-                                        });
+                                    // Report arrival via RoomServiceHandle
+                                    if let Some(ref rs) = room_service {
+                                        rs.report_arrival(&player_name, frame, rank);
                                     }
                                 }
                             }
@@ -549,8 +436,6 @@ pub fn use_game_loop(
 
                             current_frame.set(frame);
                             *accumulated_time.borrow_mut() -= PHYSICS_DT_MS;
-
-                            // NOTE: Frame hash broadcasting is now handled by Bevy's P2P sync systems
                         }
 
                         // Update camera
@@ -559,8 +444,6 @@ pub fn use_game_loop(
                             let mut camera = camera_state.borrow_mut();
                             camera.update(&game, my_numeric_id);
                         }
-
-                        // NOTE: Bevy handles rendering via its own game loop
 
                         // Request next frame
                         if matches!(*loop_state, GameLoopState::Running) {
@@ -595,7 +478,6 @@ pub fn use_game_loop(
                         }
                     }
                     // Break the reference cycle by clearing the closure
-                    // This allows the Closure to be properly dropped
                     *closure_for_cleanup_clone.borrow_mut() = None;
                 }
             },
@@ -610,8 +492,7 @@ pub fn use_game_loop(
         is_host,
         p2p: p2p.clone(),
         my_player_id: Some(my_player_id),
-        room_id,
-        player_secret,
+        room_service,
         reported_arrivals,
         server_game_started,
     }

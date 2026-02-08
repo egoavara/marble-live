@@ -1,14 +1,8 @@
 //! Home page with lobby functionality.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::components::{Layout, WelcomeModal};
-use crate::hooks::{use_config_secret, use_config_username, use_grpc_room_service};
+use crate::components::{Layout, RoomState, WelcomeModal, use_room_service};
+use crate::hooks::use_config_username;
 use crate::routes::Route;
-use crate::util::async_callback;
-use marble_proto::room::{CreateRoomRequest, PlayerAuth};
-use uuid::Uuid;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -37,11 +31,9 @@ fn extract_room_id(input: &str) -> String {
 pub fn home_page() -> Html {
     let navigator = use_navigator().unwrap();
     let username = use_config_username();
-    let secret = use_config_secret();
+    let room_service = use_room_service();
 
     let show_welcome_modal = use_state(|| username.is_none());
-
-    let room_service = use_grpc_room_service();
 
     let room_id_input = use_state(|| "".to_string());
     let on_room_id_input = {
@@ -59,53 +51,31 @@ pub fn home_page() -> Html {
             e.prevent_default();
             let extracted_room_id = extract_room_id(&room_id_input);
             if !extracted_room_id.is_empty() {
-                // navigator.push(&Route::Play {
-                //     room_id: extracted_room_id,
-                // });
+                navigator.push(&Route::Play {
+                    room_id: extracted_room_id,
+                });
             }
         })
     };
 
-    let on_start_race = {
-        async_callback(
-            (
-                navigator.clone(),
-                room_service.clone(),
-                username.clone(),
-                secret.clone(),
-            ),
-            async move |(navigator, room_service, username, secret)| {
-                match room_service
-                    .borrow_mut()
-                    .create_room(CreateRoomRequest {
-                        host: Some(PlayerAuth {
-                            id: username
-                                .as_ref()
-                                .cloned()
-                                .expect("Username must be set to create a room"),
-                            secret: secret.to_string(),
-                        }),
-                        max_players: 8,
-                    })
-                    .await
-                {
-                    Ok(response) => {
-                        let new_room_id = response.into_inner().room_id;
-                        navigator.push(&Route::Play {
-                            room_id: new_room_id,
-                        });
-                    }
-                    Err(err) => {
-                        // TODO: 사용자 이름이 없거나 매개변수에 문제가 있는 경우에 대한 처리 추가
-                        tracing::error!("Failed to create room: {}", err);
-                    }
-                }
+    // Navigate to play page when room becomes Active after create_and_join
+    {
+        let room_state = room_service.room_state();
+        let navigator = navigator.clone();
+        use_effect_with(room_state, move |state| {
+            if let RoomState::Active { room_id, .. } = state {
+                navigator.push(&Route::Play {
+                    room_id: room_id.clone(),
+                });
+            }
+        });
+    }
 
-                // navigator.push(&Route::Play {
-                //     room_id: new_room_id,
-                // });
-            },
-        )
+    let on_start_race = {
+        let rs = room_service.clone();
+        Callback::from(move |_: MouseEvent| {
+            rs.create_and_join(8);
+        })
     };
 
     html! {

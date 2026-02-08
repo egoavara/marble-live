@@ -2,8 +2,8 @@
 
 use yew::prelude::*;
 
-use crate::components::{GameView, Layout};
-use crate::hooks::{JoinRoomState, PlayerInfo, use_join_room};
+use crate::components::{GameView, Layout, RoomState, use_room_service};
+use crate::hooks::PlayerInfo;
 
 /// Props for the PlayPage component.
 #[derive(Properties, PartialEq)]
@@ -15,7 +15,7 @@ pub struct PlayPageProps {
 #[function_component(PlayPage)]
 pub fn play_page(props: &PlayPageProps) -> Html {
     let room_id = props.room_id.clone();
-    let join_state = use_join_room(&room_id);
+    let room_service = use_room_service();
 
     // Game end callback (for winner modal)
     let game_ended = use_state(|| false);
@@ -30,8 +30,19 @@ pub fn play_page(props: &PlayPageProps) -> Html {
         })
     };
 
-    let content = match &*join_state {
-        JoinRoomState::Idle | JoinRoomState::Joining => {
+    // On mount: join room. On unmount: leave.
+    {
+        let rs = room_service.clone();
+        let room_id = room_id.clone();
+        use_effect_with(room_id.clone(), move |room_id| {
+            rs.join(room_id);
+            let rs = rs.clone();
+            move || rs.leave()
+        });
+    }
+
+    let content = match room_service.room_state() {
+        RoomState::Idle | RoomState::Joining { .. } => {
             html! {
                 <div class="connecting-overlay fullscreen">
                     <div class="connecting-spinner"></div>
@@ -40,24 +51,25 @@ pub fn play_page(props: &PlayPageProps) -> Html {
                 </div>
             }
         }
-        JoinRoomState::Error(error) => {
+        RoomState::Error { message, .. } => {
             html! {
                 <div class="error-overlay fullscreen">
                     <p class="error-message">{"Failed to join room"}</p>
-                    <p class="error-detail">{error}</p>
+                    <p class="error-detail">{message}</p>
                 </div>
             }
         }
-        JoinRoomState::Joined {
+        RoomState::Active {
             signaling_url,
             is_host,
+            ..
         } => {
             html! {
                 <>
                     <GameView
                         room_id={room_id.clone()}
-                        signaling_url={signaling_url.clone()}
-                        is_host={*is_host}
+                        signaling_url={signaling_url}
+                        is_host={is_host}
                     />
 
                     // Winner modal
