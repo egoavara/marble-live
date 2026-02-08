@@ -110,6 +110,7 @@ pub fn handle_reset_simulation(
         // Reset game state
         game_state.frame = 0;
         game_state.arrival_order.clear();
+        game_state.arrival_frames.clear();
 
         // Reset RNG for determinism
         rng.reset();

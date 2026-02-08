@@ -24,6 +24,8 @@ pub struct MarbleGameState {
     pub players: Vec<Player>,
     /// Order in which marbles arrived at triggers.
     pub arrival_order: Vec<PlayerId>,
+    /// Frame at which each player arrived (player_id → frame).
+    pub arrival_frames: HashMap<PlayerId, u64>,
     /// Selected game rule (e.g., "top_n", "last_n").
     pub selected_gamerule: String,
     /// Current simulation frame number.
@@ -37,6 +39,7 @@ impl MarbleGameState {
         Self {
             players: Vec::new(),
             arrival_order: Vec::new(),
+            arrival_frames: HashMap::new(),
             selected_gamerule: String::new(),
             frame: 0,
             rng_seed: seed,

@@ -5,6 +5,9 @@
 //! # Features
 //! - `server`: Enable gRPC server/client code generation (requires tokio runtime)
 
+pub const FILE_DESCRIPTOR_SET: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/marble_descriptor.bin"));
+
 #[allow(clippy::pedantic)]
 pub mod user {
     #[cfg(feature = "server")]

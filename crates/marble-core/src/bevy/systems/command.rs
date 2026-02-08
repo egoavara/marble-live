@@ -62,6 +62,7 @@ pub fn process_commands(
                 );
                 game_state.players.clear();
                 game_state.arrival_order.clear();
+                game_state.arrival_frames.clear();
                 game_state.frame = 0;
             }
             GameCommand::AddPlayer { name, color } => {

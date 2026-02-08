@@ -44,7 +44,9 @@ pub fn check_trigger_arrivals(
         }
 
         // Record arrival
+        let frame = game_state.frame;
         game_state.arrival_order.push(marble.owner_id);
+        game_state.arrival_frames.insert(marble.owner_id, frame);
 
         // Send event
         arrival_events.write(MarbleArrivedEvent {

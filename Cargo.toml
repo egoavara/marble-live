@@ -27,6 +27,7 @@ postcard = { version = "1.1", features = ["alloc"] }
 # gRPC / Protobuf
 tonic = "0.14"
 tonic-web = "0.14"
+tonic-reflection = "0.14"
 prost = "0.14"
 tonic-web-wasm-client = "0.8.0"
 

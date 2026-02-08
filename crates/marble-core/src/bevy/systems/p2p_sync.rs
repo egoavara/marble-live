@@ -765,6 +765,7 @@ pub fn handle_sync_request(
             game_ctx_time: game_context.context.time,
             players: game_state.players.clone(),
             arrival_order: game_state.arrival_order.clone(),
+            arrival_frames: game_state.arrival_frames.clone(),
             selected_gamerule: game_state.selected_gamerule.clone(),
             marbles: marble_snapshots,
             keyframe_executors: keyframe_executors.executors.clone(),
@@ -913,6 +914,7 @@ pub fn apply_sync_snapshot(
     // 3. Restore game state
     game_state.players = snapshot.players;
     game_state.arrival_order = snapshot.arrival_order;
+    game_state.arrival_frames = snapshot.arrival_frames;
     game_state.frame = snapshot.frame;
     game_state.rng_seed = snapshot.rng_seed;
     game_state.selected_gamerule = snapshot.selected_gamerule;

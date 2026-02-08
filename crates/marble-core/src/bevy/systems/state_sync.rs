@@ -72,6 +72,7 @@ pub fn sync_game_state_to_stores(
                 arrived,
                 rank,
                 live_rank,
+                arrival_frame: game_state.arrival_frames.get(&p.id).copied(),
             }
         })
         .collect();

@@ -7,6 +7,8 @@
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
+use std::collections::HashMap;
+
 use crate::bevy::resources::ActivatedKeyframes;
 use crate::game::Player;
 use crate::keyframe::KeyframeExecutor;
@@ -71,6 +73,9 @@ pub struct BevySyncSnapshot {
     pub players: Vec<Player>,
     /// Order in which marbles arrived at triggers.
     pub arrival_order: Vec<PlayerId>,
+    /// Frame at which each player arrived.
+    #[serde(default)]
+    pub arrival_frames: HashMap<PlayerId, u64>,
     /// Selected game rule.
     pub selected_gamerule: String,
     /// Per-marble state snapshots.

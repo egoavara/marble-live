@@ -50,14 +50,8 @@ pub enum RoomError {
     #[error("Only the room host can perform this action: {0}")]
     RoomHostOnly(&'static str),
 
-    #[error("Game already started")]
-    GameAlreadyStarted,
-
     #[error("Game not started yet")]
     GameNotStarted,
-
-    #[error("User already arrived: {0}")]
-    UserAlreadyArrived(String),
 }
 
 impl RoomError {
@@ -67,8 +61,7 @@ impl RoomError {
             Self::UserNotFound => tonic::Code::NotFound,
             Self::HostCanNotKick => tonic::Code::InvalidArgument,
             Self::RoomHostOnly(_) => tonic::Code::PermissionDenied,
-            Self::GameAlreadyStarted | Self::GameNotStarted => tonic::Code::FailedPrecondition,
-            Self::UserAlreadyArrived(_) => tonic::Code::AlreadyExists,
+            Self::GameNotStarted => tonic::Code::FailedPrecondition,
         }
     }
 }
@@ -300,7 +293,7 @@ impl Room {
         Ok(true)
     }
 
-    /// Report a player's arrival. Host only.
+    /// Report a player's arrival. Host only. Idempotent — duplicate arrivals are ignored.
     pub fn report_arrival(
         &mut self,
         user_id: &str,
@@ -314,19 +307,18 @@ impl Room {
             return Err(RoomError::GameNotStarted);
         }
 
-        if self
+        // Idempotent: skip if already reported
+        if !self
             .game_results
             .iter()
             .any(|r| r.user_id == arrived_user_id)
         {
-            return Err(RoomError::UserAlreadyArrived(arrived_user_id.to_string()));
+            self.game_results.push(GameResult {
+                user_id: arrived_user_id.to_string(),
+                rank,
+                arrival_frame,
+            });
         }
-
-        self.game_results.push(GameResult {
-            user_id: arrived_user_id.to_string(),
-            rank,
-            arrival_frame,
-        });
 
         let participant_count = self.participant_count() as usize;
         Ok(self.game_results.len() >= participant_count)

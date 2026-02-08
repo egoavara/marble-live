@@ -107,6 +107,7 @@ pub fn handle_clear_marbles(
             commands.entity(entity).despawn();
         }
         game_state.arrival_order.clear();
+        game_state.arrival_frames.clear();
     }
 }
 

@@ -67,10 +67,21 @@ async fn main() -> () {
     let map_service = MapServiceImpl::new(database.clone());
     let room_service = RoomServiceImpl::new(database, signaling_base_url);
 
+    let reflection_v1 = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(marble_proto::FILE_DESCRIPTOR_SET)
+        .build_v1()
+        .expect("failed to build gRPC reflection v1 service");
+    let reflection_v1alpha = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(marble_proto::FILE_DESCRIPTOR_SET)
+        .build_v1alpha()
+        .expect("failed to build gRPC reflection v1alpha service");
+
     let interceptor = jwt_interceptor(jwt_manager.clone());
     let grpc_router = Routes::new(UserServiceServer::with_interceptor(user_service, interceptor.clone()))
         .add_service(MapServiceServer::with_interceptor(map_service, interceptor.clone()))
         .add_service(RoomServiceServer::with_interceptor(room_service, interceptor))
+        .add_service(reflection_v1)
+        .add_service(reflection_v1alpha)
         .into_axum_router()
         .layer(GrpcWebLayer::new());
 

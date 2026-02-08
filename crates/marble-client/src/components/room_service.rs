@@ -10,7 +10,7 @@ use std::rc::Rc;
 use gloo::timers::callback::Interval;
 use marble_proto::room::room_service_client::RoomServiceClient;
 use marble_proto::room::{
-    CreateRoomRequest, JoinRoomRequest, RegisterPeerIdRequest,
+    CreateRoomRequest, JoinRoomRequest, PlayerResult, RegisterPeerIdRequest,
     ReportArrivalRequest, ResolvePeerIdsRequest, StartGameRequest,
 };
 use marble_proto::user::user_service_client::UserServiceClient;
@@ -50,6 +50,12 @@ struct RoomServiceInner {
     // Auth
     player_id: String,
     auth_token: Option<String>,
+    auth_token_setter: Option<UseStateHandle<Option<String>>>,
+
+    // Login credentials (for automatic re-login on token expiry)
+    login_display_name: String,
+    login_salt: String,
+    login_fingerprint: String,
 
     // Room lifecycle
     room_state: RoomState,
@@ -64,9 +70,16 @@ struct RoomServiceInner {
 
     // RegisterPeerId state
     peer_registered: bool,
+    peer_register_confirmed: bool,
+    register_in_flight: bool,
 
     // Bevy polling state
     last_peers_version: u64,
+
+    // Server game state (from JoinRoom / ReportArrival responses)
+    server_room_state: Option<i32>,  // proto RoomState (1=WAITING, 2=PLAYING, 3=ENDED)
+    server_game_results: Vec<PlayerResult>,
+    server_game_ended: bool,
 
     // Version setter — bumped on every state change to trigger re-render
     version_setter: Option<UseStateHandle<u32>>,
@@ -77,13 +90,22 @@ impl RoomServiceInner {
         Self {
             player_id,
             auth_token: None,
+            auth_token_setter: None,
+            login_display_name: String::new(),
+            login_salt: String::new(),
+            login_fingerprint: String::new(),
             room_state: RoomState::Idle,
             peer_cache: HashMap::new(),
             resolve_in_flight: false,
             display_name_cache: HashMap::new(),
             get_users_in_flight: false,
             peer_registered: false,
+            peer_register_confirmed: false,
+            register_in_flight: false,
             last_peers_version: 0,
+            server_room_state: None,
+            server_game_results: Vec::new(),
+            server_game_ended: false,
             version_setter: None,
         }
     }
@@ -170,6 +192,7 @@ impl RoomServiceHandle {
             };
 
             // 1. JoinRoom
+            let mut token = token;
             let join_resp = grpc
                 .join_room(attach_auth(
                     JoinRoomRequest {
@@ -180,7 +203,28 @@ impl RoomServiceHandle {
                 ))
                 .await;
 
-            let (signaling_url, is_host) = match join_resp {
+            // Retry on authentication failure (e.g. server restart invalidated token)
+            let join_resp = match join_resp {
+                Err(e) if is_unauthenticated(&e) => {
+                    tracing::info!("RoomService: JoinRoom auth failed, attempting re-login");
+                    if let Some(new_token) = relogin(&inner).await {
+                        token = Some(new_token);
+                        grpc.join_room(attach_auth(
+                            JoinRoomRequest {
+                                room_id: room_id.clone(),
+                                role: None,
+                            },
+                            &token,
+                        ))
+                        .await
+                    } else {
+                        Err(e)
+                    }
+                }
+                other => other,
+            };
+
+            let (signaling_url, is_host, server_state, game_results) = match join_resp {
                 Ok(resp) => {
                     let resp = resp.into_inner();
                     let sig_url = resp
@@ -193,7 +237,12 @@ impl RoomServiceHandle {
                         .as_ref()
                         .map(|r| r.host_user_id == player_id)
                         .unwrap_or(false);
-                    (sig_url, host)
+                    let state = resp.room.as_ref().map(|r| r.state).unwrap_or(0);
+                    let results = resp.room.as_ref()
+                        .and_then(|r| r.game_state.as_ref())
+                        .map(|gs| gs.results.clone())
+                        .unwrap_or_default();
+                    (sig_url, host, state, results)
                 }
                 Err(e) => {
                     let mut inner_mut = inner.borrow_mut();
@@ -208,6 +257,7 @@ impl RoomServiceHandle {
 
             // 2. Transition → Active
             {
+                let game_ended = server_state == 3; // ROOM_STATE_ENDED
                 let mut inner_mut = inner.borrow_mut();
                 inner_mut.room_state = RoomState::Active {
                     room_id,
@@ -215,9 +265,14 @@ impl RoomServiceHandle {
                     is_host,
                 };
                 inner_mut.peer_registered = false;
+                inner_mut.peer_register_confirmed = false;
+                inner_mut.register_in_flight = false;
                 inner_mut.peer_cache.clear();
                 inner_mut.get_users_in_flight = false;
                 inner_mut.last_peers_version = 0;
+                inner_mut.server_room_state = Some(server_state);
+                inner_mut.server_game_results = game_results;
+                inner_mut.server_game_ended = game_ended;
                 inner_mut.bump_version();
             }
 
@@ -257,6 +312,7 @@ impl RoomServiceHandle {
             };
 
             // CreateRoom
+            let mut token = token;
             let create_resp = grpc
                 .create_room(attach_auth(
                     CreateRoomRequest {
@@ -268,6 +324,29 @@ impl RoomServiceHandle {
                     &token,
                 ))
                 .await;
+
+            // Retry on authentication failure
+            let create_resp = match create_resp {
+                Err(e) if is_unauthenticated(&e) => {
+                    tracing::info!("RoomService: CreateRoom auth failed, attempting re-login");
+                    if let Some(new_token) = relogin(&inner).await {
+                        token = Some(new_token);
+                        grpc.create_room(attach_auth(
+                            CreateRoomRequest {
+                                map_id: String::new(),
+                                max_players,
+                                room_name: String::new(),
+                                is_public: true,
+                            },
+                            &token,
+                        ))
+                        .await
+                    } else {
+                        Err(e)
+                    }
+                }
+                other => other,
+            };
 
             match create_resp {
                 Ok(resp) => {
@@ -299,8 +378,13 @@ impl RoomServiceHandle {
         inner.peer_cache.clear();
         inner.get_users_in_flight = false;
         inner.peer_registered = false;
+        inner.peer_register_confirmed = false;
+        inner.register_in_flight = false;
         inner.resolve_in_flight = false;
         inner.last_peers_version = 0;
+        inner.server_room_state = None;
+        inner.server_game_results = Vec::new();
+        inner.server_game_ended = false;
         inner.bump_version();
         tracing::info!("RoomService: left room");
     }
@@ -343,18 +427,23 @@ impl RoomServiceHandle {
 
     /// Report game start to server (host only).
     pub fn start_game(&self, start_frame: u64) {
-        let inner = self.inner.borrow();
-        let room_id = match &inner.room_state {
-            RoomState::Active { room_id, .. } => room_id.clone(),
-            _ => return,
-        };
-        let token = inner.auth_token.clone();
-        drop(inner);
+        let inner_rc = self.inner.clone();
+        let room_id;
+        let token;
+        {
+            let inner = inner_rc.borrow();
+            room_id = match &inner.room_state {
+                RoomState::Active { room_id, .. } => room_id.clone(),
+                _ => return,
+            };
+            token = inner.auth_token.clone();
+        }
 
         spawn_local(async move {
             let Some(mut grpc) = create_grpc_client() else {
                 return;
             };
+            let mut token = token;
             let req = attach_auth(
                 StartGameRequest {
                     room_id: room_id.clone(),
@@ -371,6 +460,35 @@ impl RoomServiceHandle {
                         "RoomService: game started on server"
                     );
                 }
+                Err(e) if is_unauthenticated(&e) => {
+                    tracing::info!("RoomService: StartGame auth failed, attempting re-login");
+                    if let Some(new_token) = relogin(&inner_rc).await {
+                        token = Some(new_token);
+                        let req = attach_auth(
+                            StartGameRequest {
+                                room_id: room_id.clone(),
+                                start_frame,
+                            },
+                            &token,
+                        );
+                        match grpc.start_game(req).await {
+                            Ok(_) => {
+                                tracing::info!(
+                                    room_id = %room_id,
+                                    start_frame,
+                                    "RoomService: game started on server (after re-login)"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    room_id = %room_id,
+                                    error = %e,
+                                    "RoomService: StartGame RPC failed after re-login"
+                                );
+                            }
+                        }
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(
                         room_id = %room_id,
@@ -384,19 +502,24 @@ impl RoomServiceHandle {
 
     /// Report player arrival to server (host only).
     pub fn report_arrival(&self, arrived_user_id: &str, arrival_frame: u64, rank: u32) {
-        let inner = self.inner.borrow();
-        let room_id = match &inner.room_state {
-            RoomState::Active { room_id, .. } => room_id.clone(),
-            _ => return,
-        };
-        let token = inner.auth_token.clone();
-        drop(inner);
+        let inner_rc = self.inner.clone();
+        let room_id;
+        let token;
+        {
+            let inner = inner_rc.borrow();
+            room_id = match &inner.room_state {
+                RoomState::Active { room_id, .. } => room_id.clone(),
+                _ => return,
+            };
+            token = inner.auth_token.clone();
+        }
         let arrived_user_id = arrived_user_id.to_string();
 
         spawn_local(async move {
             let Some(mut grpc) = create_grpc_client() else {
                 return;
             };
+            let mut token = token;
             let req = attach_auth(
                 ReportArrivalRequest {
                     room_id: room_id.clone(),
@@ -408,13 +531,72 @@ impl RoomServiceHandle {
             );
             match grpc.report_arrival(req).await {
                 Ok(resp) => {
-                    let _resp = resp.into_inner();
+                    let resp = resp.into_inner();
+                    // Check if game ended from server response
+                    if let Some(room_info) = resp.room.as_ref() {
+                        if room_info.state == 3 {  // ROOM_STATE_ENDED
+                            let results = room_info.game_state.as_ref()
+                                .map(|gs| gs.results.clone())
+                                .unwrap_or_default();
+                            let mut inner_mut = inner_rc.borrow_mut();
+                            inner_mut.server_game_ended = true;
+                            inner_mut.server_room_state = Some(3);
+                            inner_mut.server_game_results = results;
+                            inner_mut.bump_version();
+                        }
+                    }
                     tracing::info!(
                         user = %arrived_user_id,
                         rank,
                         frame = arrival_frame,
                         "RoomService: reported arrival"
                     );
+                }
+                Err(e) if is_unauthenticated(&e) => {
+                    tracing::info!("RoomService: ReportArrival auth failed, attempting re-login");
+                    if let Some(new_token) = relogin(&inner_rc).await {
+                        token = Some(new_token);
+                        let req = attach_auth(
+                            ReportArrivalRequest {
+                                room_id: room_id.clone(),
+                                arrived_user_id: arrived_user_id.clone(),
+                                arrival_frame,
+                                rank,
+                            },
+                            &token,
+                        );
+                        match grpc.report_arrival(req).await {
+                            Ok(resp) => {
+                                let resp = resp.into_inner();
+                                // Check if game ended from server response (after re-login)
+                                if let Some(room_info) = resp.room.as_ref() {
+                                    if room_info.state == 3 {
+                                        let results = room_info.game_state.as_ref()
+                                            .map(|gs| gs.results.clone())
+                                            .unwrap_or_default();
+                                        let mut inner_mut = inner_rc.borrow_mut();
+                                        inner_mut.server_game_ended = true;
+                                        inner_mut.server_room_state = Some(3);
+                                        inner_mut.server_game_results = results;
+                                        inner_mut.bump_version();
+                                    }
+                                }
+                                tracing::info!(
+                                    user = %arrived_user_id,
+                                    rank,
+                                    frame = arrival_frame,
+                                    "RoomService: reported arrival (after re-login)"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    user = %arrived_user_id,
+                                    error = %e,
+                                    "RoomService: ReportArrival RPC failed after re-login"
+                                );
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -461,6 +643,33 @@ impl RoomServiceHandle {
             RoomState::Active { is_host: true, .. }
         )
     }
+
+    // =======================================================================
+    // Server game state accessors
+    // =======================================================================
+
+    /// Server room state (proto RoomState: 1=WAITING, 2=PLAYING, 3=ENDED).
+    pub fn server_room_state(&self) -> Option<i32> {
+        self.inner.borrow().server_room_state
+    }
+
+    /// Whether the server has indicated the game is ended.
+    pub fn is_game_ended(&self) -> bool {
+        self.inner.borrow().server_game_ended
+    }
+
+    /// Server game results (sorted by rank).
+    pub fn game_results(&self) -> Vec<PlayerResult> {
+        self.inner.borrow().server_game_results.clone()
+    }
+
+    /// Mark game as ended from client-side detection (e.g. all marbles arrived).
+    pub fn set_game_ended(&self, results: Vec<PlayerResult>) {
+        let mut inner = self.inner.borrow_mut();
+        inner.server_game_ended = true;
+        inner.server_game_results = results;
+        inner.bump_version();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +700,77 @@ fn attach_auth<T>(msg: T, token: &Option<String>) -> tonic::Request<T> {
         }
     }
     req
+}
+
+/// Check if a tonic error indicates authentication failure.
+fn is_unauthenticated(status: &tonic::Status) -> bool {
+    status.code() == tonic::Code::Unauthenticated
+}
+
+/// Attempt re-login using stored credentials. Updates inner state and Yew hook on success.
+async fn relogin(inner: &Rc<RefCell<RoomServiceInner>>) -> Option<String> {
+    let (display_name, salt, fingerprint) = {
+        let inner_ref = inner.borrow();
+        (
+            inner_ref.login_display_name.clone(),
+            inner_ref.login_salt.clone(),
+            inner_ref.login_fingerprint.clone(),
+        )
+    };
+
+    if display_name.is_empty() || fingerprint.is_empty() {
+        tracing::warn!("Cannot re-login: missing credentials");
+        return None;
+    }
+
+    let mut grpc = create_user_grpc_client()?;
+    let login_req = LoginRequest {
+        method: Some(login_request::Method::Anonymous(AnonymousLogin {
+            display_name: display_name.clone(),
+            salt,
+            fingerprint,
+        })),
+    };
+
+    match grpc.login(login_req).await {
+        Ok(resp) => {
+            let resp = resp.into_inner();
+            let token = resp.token;
+            let user_id = resp
+                .user
+                .as_ref()
+                .map(|u| u.user_id.clone())
+                .unwrap_or_default();
+            let dn = resp
+                .user
+                .as_ref()
+                .map(|u| u.display_name.clone())
+                .unwrap_or_default();
+
+            tracing::info!(
+                user_id = %user_id,
+                display_name = %dn,
+                "Re-login successful, token refreshed"
+            );
+
+            let mut inner_mut = inner.borrow_mut();
+            inner_mut.auth_token = Some(token.clone());
+            inner_mut.player_id = user_id.clone();
+            if !dn.is_empty() {
+                inner_mut.display_name_cache.insert(user_id, dn);
+            }
+            // Update Yew hook → triggers localStorage persistence
+            if let Some(ref setter) = inner_mut.auth_token_setter {
+                setter.set(Some(token.clone()));
+            }
+
+            Some(token)
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Re-login failed");
+            None
+        }
+    }
 }
 
 /// Extract `user_id` (the `sub` claim) from our custom JWT token.
@@ -587,6 +867,32 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                 }
             }
         });
+    }
+
+    // Store auth_token setter in inner for re-login
+    {
+        let inner = inner.clone();
+        let auth_token = auth_token.clone();
+        use_effect_with((), move |_| {
+            inner.borrow_mut().auth_token_setter = Some(auth_token);
+        });
+    }
+
+    // Sync login credentials to inner for automatic re-login on token expiry
+    {
+        let inner = inner.clone();
+        let username = (*config_username).clone();
+        let secret_val = (*config_secret).to_string();
+        let fp = (*fingerprint).clone();
+        use_effect_with(
+            (username.clone(), secret_val.clone(), fp.clone()),
+            move |_| {
+                let mut inner_mut = inner.borrow_mut();
+                inner_mut.login_display_name = username.unwrap_or_default();
+                inner_mut.login_salt = secret_val;
+                inner_mut.login_fingerprint = fp.unwrap_or_default();
+            },
+        );
     }
 
     // Auto-login: when username + fingerprint are ready and no token exists, perform Login RPC
@@ -692,27 +998,53 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                     return;
                 }
 
-                // --- RegisterPeerId ---
-                let peer_registered = inner.borrow().peer_registered;
-                let token = inner.borrow().auth_token.clone();
-                if !peer_registered {
+                // --- RegisterPeerId (등록 + 검증) ---
+                let peer_register_confirmed = inner.borrow().peer_register_confirmed;
+                let register_in_flight = inner.borrow().register_in_flight;
+
+                if !peer_register_confirmed && !register_in_flight {
                     let my_peer_id = marble_core::bevy::wasm_entry::get_my_peer_id();
                     if !my_peer_id.is_empty() {
-                        inner.borrow_mut().peer_registered = true; // optimistic
+                        inner.borrow_mut().register_in_flight = true;
                         let inner_c = inner.clone();
                         let room_id = room_id.clone();
-                        let token = token.clone();
 
                         spawn_local(async move {
-                            let success = register_peer_id_grpc(
+                            // 1) RegisterPeerId 호출
+                            let registered = register_peer_id_grpc(
                                 &room_id,
                                 &my_peer_id,
-                                &token,
-                            )
-                            .await;
-                            if !success {
-                                inner_c.borrow_mut().peer_registered = false;
+                                &inner_c,
+                            ).await;
+
+                            if !registered {
+                                inner_c.borrow_mut().register_in_flight = false;
+                                return;
                             }
+
+                            // 2) ResolvePeerIds로 자신의 peer_id 검증
+                            if let Some(resolved) = resolve_peer_ids_grpc(
+                                &room_id,
+                                &[my_peer_id.clone()],
+                                &inner_c,
+                            ).await {
+                                if resolved.contains_key(&my_peer_id) {
+                                    // 서버에 매핑 확인됨 → 완료
+                                    let mut inner_mut = inner_c.borrow_mut();
+                                    inner_mut.peer_registered = true;
+                                    inner_mut.peer_register_confirmed = true;
+                                    inner_mut.register_in_flight = false;
+                                    tracing::info!(
+                                        peer_id = %my_peer_id,
+                                        "RoomService: peer_id registration confirmed"
+                                    );
+                                    return;
+                                }
+                            }
+
+                            // 검증 실패 → 다음 틱에 재시도
+                            inner_c.borrow_mut().register_in_flight = false;
+                            tracing::debug!("RoomService: peer_id registration not yet confirmed, will retry");
                         });
                     }
                 }
@@ -749,13 +1081,12 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                             inner.borrow_mut().resolve_in_flight = true;
                             let inner_c = inner.clone();
                             let room_id = room_id.clone();
-                            let token = token.clone();
 
                             spawn_local(async move {
                                 if let Some(resolved) = resolve_peer_ids_grpc(
                                     &room_id,
                                     &unresolved,
-                                    &token,
+                                    &inner_c,
                                 )
                                 .await
                                 {
@@ -796,16 +1127,24 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                         {
                             ids.push(inner_ref.player_id.clone());
                         }
+                        // Also include user_ids from server game results
+                        for result in &inner_ref.server_game_results {
+                            if !result.user_id.is_empty()
+                                && !inner_ref.display_name_cache.contains_key(&result.user_id)
+                                && !ids.contains(&result.user_id)
+                            {
+                                ids.push(result.user_id.clone());
+                            }
+                        }
                         ids
                     };
 
                     if !unresolved_user_ids.is_empty() {
                         inner.borrow_mut().get_users_in_flight = true;
                         let inner_c = inner.clone();
-                        let token = token.clone();
 
                         spawn_local(async move {
-                            if let Some(users) = get_users_grpc(&unresolved_user_ids, &token).await {
+                            if let Some(users) = get_users_grpc(&unresolved_user_ids, &inner_c).await {
                                 let mut inner_mut = inner_c.borrow_mut();
                                 for user in users {
                                     inner_mut
@@ -853,11 +1192,14 @@ pub fn use_room_service() -> RoomServiceHandle {
 async fn register_peer_id_grpc(
     room_id: &str,
     peer_id: &str,
-    token: &Option<String>,
+    inner: &Rc<RefCell<RoomServiceInner>>,
 ) -> bool {
     let Some(mut grpc) = create_grpc_client() else {
         return false;
     };
+
+    let mut token = inner.borrow().auth_token.clone();
+    let mut relogin_attempted = false;
 
     for attempt in 0..=3u32 {
         let req = attach_auth(
@@ -865,7 +1207,7 @@ async fn register_peer_id_grpc(
                 room_id: room_id.to_string(),
                 peer_id: peer_id.to_string(),
             },
-            token,
+            &token,
         );
 
         match grpc.register_peer_id(req).await {
@@ -875,6 +1217,15 @@ async fn register_peer_id_grpc(
                     "RoomService: registered peer_id"
                 );
                 return true;
+            }
+            Err(e) if is_unauthenticated(&e) && !relogin_attempted => {
+                relogin_attempted = true;
+                tracing::info!("RoomService: RegisterPeerId auth failed, attempting re-login");
+                if let Some(new_token) = relogin(inner).await {
+                    token = Some(new_token);
+                    continue;
+                }
+                return false;
             }
             Err(e) => {
                 if attempt < 3 {
@@ -900,7 +1251,7 @@ async fn register_peer_id_grpc(
 async fn resolve_peer_ids_grpc(
     room_id: &str,
     peer_ids: &[String],
-    token: &Option<String>,
+    inner: &Rc<RefCell<RoomServiceInner>>,
 ) -> Option<HashMap<String, String>> {
     if peer_ids.is_empty() {
         return Some(HashMap::new());
@@ -910,12 +1261,13 @@ async fn resolve_peer_ids_grpc(
         return None;
     };
 
+    let mut token = inner.borrow().auth_token.clone();
     let req = attach_auth(
         ResolvePeerIdsRequest {
             room_id: room_id.to_string(),
             peer_ids: peer_ids.to_vec(),
         },
-        token,
+        &token,
     );
 
     match grpc.resolve_peer_ids(req).await {
@@ -928,6 +1280,36 @@ async fn resolve_peer_ids_grpc(
             );
             Some(resolved)
         }
+        Err(e) if is_unauthenticated(&e) => {
+            tracing::info!("RoomService: ResolvePeerIds auth failed, attempting re-login");
+            if let Some(new_token) = relogin(inner).await {
+                token = Some(new_token);
+                let req = attach_auth(
+                    ResolvePeerIdsRequest {
+                        room_id: room_id.to_string(),
+                        peer_ids: peer_ids.to_vec(),
+                    },
+                    &token,
+                );
+                match grpc.resolve_peer_ids(req).await {
+                    Ok(resp) => {
+                        let resolved = resp.into_inner().peer_to_user;
+                        tracing::debug!(
+                            resolved = resolved.len(),
+                            requested = peer_ids.len(),
+                            "RoomService: resolved peer_ids (after re-login)"
+                        );
+                        Some(resolved)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "RoomService: ResolvePeerIds failed after re-login");
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        }
         Err(e) => {
             tracing::warn!(error = %e, "RoomService: ResolvePeerIds failed");
             None
@@ -937,7 +1319,7 @@ async fn resolve_peer_ids_grpc(
 
 async fn get_users_grpc(
     user_ids: &[String],
-    token: &Option<String>,
+    inner: &Rc<RefCell<RoomServiceInner>>,
 ) -> Option<Vec<UserInfo>> {
     if user_ids.is_empty() {
         return Some(Vec::new());
@@ -947,11 +1329,12 @@ async fn get_users_grpc(
         return None;
     };
 
+    let mut token = inner.borrow().auth_token.clone();
     let req = attach_auth(
         GetUsersRequest {
             user_ids: user_ids.to_vec(),
         },
-        token,
+        &token,
     );
 
     match grpc.get_users(req).await {
@@ -963,6 +1346,35 @@ async fn get_users_grpc(
                 "RoomService: resolved display names"
             );
             Some(users)
+        }
+        Err(e) if is_unauthenticated(&e) => {
+            tracing::info!("RoomService: GetUsers auth failed, attempting re-login");
+            if let Some(new_token) = relogin(inner).await {
+                token = Some(new_token);
+                let req = attach_auth(
+                    GetUsersRequest {
+                        user_ids: user_ids.to_vec(),
+                    },
+                    &token,
+                );
+                match grpc.get_users(req).await {
+                    Ok(resp) => {
+                        let users = resp.into_inner().users;
+                        tracing::debug!(
+                            resolved = users.len(),
+                            requested = user_ids.len(),
+                            "RoomService: resolved display names (after re-login)"
+                        );
+                        Some(users)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "RoomService: GetUsers failed after re-login");
+                        None
+                    }
+                }
+            } else {
+                None
+            }
         }
         Err(e) => {
             tracing::warn!(error = %e, "RoomService: GetUsers failed");

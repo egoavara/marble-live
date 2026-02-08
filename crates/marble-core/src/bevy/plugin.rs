@@ -556,6 +556,7 @@ fn cleanup_game_mode(
     keyframe_executors.clear();
     game_state.players.clear();
     game_state.arrival_order.clear();
+    game_state.arrival_frames.clear();
     game_state.frame = 0;
     physics.world.reset();
 }

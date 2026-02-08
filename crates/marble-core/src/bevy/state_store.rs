@@ -50,6 +50,7 @@ pub struct PlayerInfo {
     pub arrived: bool,
     pub rank: Option<u32>,
     pub live_rank: Option<u32>,
+    pub arrival_frame: Option<u64>,
 }
 
 impl PlayerInfo {
@@ -61,6 +62,7 @@ impl PlayerInfo {
             arrived: false,
             rank: None,
             live_rank: None,
+            arrival_frame: None,
         }
     }
 }

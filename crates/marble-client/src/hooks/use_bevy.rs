@@ -72,6 +72,8 @@ pub struct PlayerInfo {
     pub arrived: bool,
     pub rank: Option<u32>,
     pub live_rank: Option<u32>,
+    #[serde(default)]
+    pub arrival_frame: Option<u64>,
 }
 
 /// Chat message.
