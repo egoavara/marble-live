@@ -267,23 +267,28 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
                 tracing::error!("Failed to clear players: {:?}", e);
             }
 
-            // 4. Add self as first player
+            // 4. Add self as first player (use display name)
             let self_color = PLAYER_COLORS[0];
+            let my_uid = room_service.player_id();
+            let my_name = room_service
+                .display_name(&my_uid)
+                .unwrap_or_else(|| player_id.clone());
             let cmd = serde_json::json!({
                 "type": "add_player",
-                "name": player_id,
+                "name": my_name,
                 "color": self_color
             });
             if let Err(e) = send_command(&cmd.to_string()) {
                 tracing::error!("Failed to add self as player: {:?}", e);
             }
 
-            // 5. Add peers as players — use room_service cache for names
+            // 5. Add peers as players — use display name via room_service
             for (i, peer) in peers.iter().enumerate() {
                 let peer_id_str = peer.peer_id.to_string();
                 let peer_name = room_service
                     .player_name(&peer_id_str)
-                    .or_else(|| peer.player_id.clone());
+                    .map(|user_id| room_service.display_name_or_fallback(&user_id))
+                    .or_else(|| peer.player_id.as_ref().map(|pid| room_service.display_name_or_fallback(pid)));
 
                 if let Some(name) = peer_name {
                     let color = PLAYER_COLORS[(i + 1) % PLAYER_COLORS.len()];
@@ -360,6 +365,24 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
     // Determine if in lobby phase
     let in_lobby = matches!(*game_phase, GamePhase::InLobby);
 
+    // Helper: resolve peer display name (peer_id → user_id → display_name)
+    let resolve_display_name = |peer_id_str: &str, peer: &crate::services::p2p::P2pPeerInfo| -> String {
+        if let Some(user_id) = room_service.player_name(peer_id_str) {
+            room_service.display_name_or_fallback(&user_id)
+        } else {
+            peer.player_id
+                .as_deref()
+                .map(|pid| room_service.display_name_or_fallback(pid))
+                .unwrap_or_else(|| format!("Peer-{}", &peer_id_str[..peer_id_str.len().min(8)]))
+        }
+    };
+
+    // Own display name (prefer cache, fallback to config_username)
+    let my_user_id = room_service.player_id();
+    let my_display_name = room_service
+        .display_name(&my_user_id)
+        .unwrap_or_else(|| player_id.clone());
+
     // Build sorted player list for lobby (host → me → others alphabetically)
     let lobby_player_items = {
         let host_peer_id = p2p.host_peer_id();
@@ -367,12 +390,8 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
         sorted_peers.sort_by(|a, b| {
             let a_id = a.peer_id.to_string();
             let b_id = b.peer_id.to_string();
-            let a_name = room_service
-                .player_name(&a_id)
-                .unwrap_or_else(|| a.player_id.as_deref().unwrap_or("???").to_string());
-            let b_name = room_service
-                .player_name(&b_id)
-                .unwrap_or_else(|| b.player_id.as_deref().unwrap_or("???").to_string());
+            let a_name = resolve_display_name(&a_id, a);
+            let b_name = resolve_display_name(&b_id, b);
             a_name.cmp(&b_name)
         });
 
@@ -382,7 +401,8 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
         if props.is_host {
             items.push(html! {
                 <div class="lobby-player-item host me">
-                    <span class="lobby-player-name">{&player_id}</span>
+                    <span class="lobby-connection-indicator connected">{"\u{25CF}"}</span>
+                    <span class="lobby-player-name">{&my_display_name}</span>
                     <span class="lobby-host-badge">{"호스트"}</span>
                     <span class="lobby-me-badge">{"나"}</span>
                 </div>
@@ -393,17 +413,12 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
                 host_peer_id.and_then(|hid| sorted_peers.iter().find(|p| p.peer_id == hid))
             {
                 let host_id = host_peer.peer_id.to_string();
-                let host_name = room_service
-                    .player_name(&host_id)
-                    .unwrap_or_else(|| {
-                        host_peer
-                            .player_id
-                            .as_deref()
-                            .unwrap_or("???")
-                            .to_string()
-                    });
+                let host_name = resolve_display_name(&host_id, host_peer);
+                let conn_class = if host_peer.connected { "connected" } else { "disconnected" };
+                let conn_dot = if host_peer.connected { "\u{25CF}" } else { "\u{25CB}" };
                 items.push(html! {
                     <div class="lobby-player-item host">
+                        <span class={classes!("lobby-connection-indicator", conn_class)}>{conn_dot}</span>
                         <span class="lobby-player-name">{host_name}</span>
                         <span class="lobby-host-badge">{"호스트"}</span>
                     </div>
@@ -412,7 +427,8 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
             // 2. Show myself second (when not host)
             items.push(html! {
                 <div class="lobby-player-item me">
-                    <span class="lobby-player-name">{&player_id}</span>
+                    <span class="lobby-connection-indicator connected">{"\u{25CF}"}</span>
+                    <span class="lobby-player-name">{&my_display_name}</span>
                     <span class="lobby-me-badge">{"나"}</span>
                 </div>
             });
@@ -427,9 +443,12 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
                 }
             }
             let peer_id_str = peer.peer_id.to_string();
-            let peer_name = room_service.player_name_or_fallback(&peer_id_str);
+            let peer_name = resolve_display_name(&peer_id_str, peer);
+            let conn_class = if peer.connected { "connected" } else { "disconnected" };
+            let conn_dot = if peer.connected { "\u{25CF}" } else { "\u{25CB}" };
             items.push(html! {
                 <div class="lobby-player-item">
+                    <span class={classes!("lobby-connection-indicator", conn_class)}>{conn_dot}</span>
                     <span class="lobby-player-name">{peer_name}</span>
                 </div>
             });
@@ -508,7 +527,7 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
             if !in_lobby {
                 <PeerList
                     peers={peers.clone()}
-                    my_player_id={player_id.clone()}
+                    my_player_id={my_display_name.clone()}
                     connection_state={connection_state.clone()}
                     arrival_info={arrival_info}
                     gamerule={gamerule}

@@ -13,6 +13,7 @@ marble-core = { workspace = true, features = ["windowed"] }
 marble-proto = { workspace = true, features = ["client"] }
 
 tonic-web-wasm-client.workspace = true
+tonic = { version = "0.14", default-features = false, features = ["codegen"] }
 
 yew.workspace = true
 yew-router.workspace = true

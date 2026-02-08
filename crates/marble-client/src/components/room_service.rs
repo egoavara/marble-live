@@ -13,11 +13,13 @@ use marble_proto::room::{
     CreateRoomRequest, JoinRoomRequest, RegisterPeerIdRequest,
     ReportArrivalRequest, ResolvePeerIdsRequest, StartGameRequest,
 };
+use marble_proto::user::user_service_client::UserServiceClient;
+use marble_proto::user::{login_request, AnonymousLogin, GetUsersRequest, LoginRequest, UserInfo};
 use tonic_web_wasm_client::Client;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-use crate::hooks::use_config_username;
+use crate::hooks::{use_auth_token, use_config_secret, use_config_username, use_fingerprint};
 
 // ---------------------------------------------------------------------------
 // RoomState
@@ -47,6 +49,7 @@ pub enum RoomState {
 struct RoomServiceInner {
     // Auth
     player_id: String,
+    auth_token: Option<String>,
 
     // Room lifecycle
     room_state: RoomState,
@@ -54,6 +57,10 @@ struct RoomServiceInner {
     // peer_id → player_id cache (Yew-side, no Bevy round-trip)
     peer_cache: HashMap<String, String>,
     resolve_in_flight: bool,
+
+    // user_id → display_name cache
+    display_name_cache: HashMap<String, String>,
+    get_users_in_flight: bool,
 
     // RegisterPeerId state
     peer_registered: bool,
@@ -69,9 +76,12 @@ impl RoomServiceInner {
     fn new(player_id: String) -> Self {
         Self {
             player_id,
+            auth_token: None,
             room_state: RoomState::Idle,
             peer_cache: HashMap::new(),
             resolve_in_flight: false,
+            display_name_cache: HashMap::new(),
+            get_users_in_flight: false,
             peer_registered: false,
             last_peers_version: 0,
             version_setter: None,
@@ -142,9 +152,11 @@ impl RoomServiceHandle {
 
         spawn_local(async move {
             let player_id;
+            let token;
             {
                 let inner_ref = inner.borrow();
                 player_id = inner_ref.player_id.clone();
+                token = inner_ref.auth_token.clone();
             }
 
             let Some(mut grpc) = create_grpc_client() else {
@@ -159,10 +171,13 @@ impl RoomServiceHandle {
 
             // 1. JoinRoom
             let join_resp = grpc
-                .join_room(JoinRoomRequest {
-                    room_id: room_id.clone(),
-                    role: None,
-                })
+                .join_room(attach_auth(
+                    JoinRoomRequest {
+                        room_id: room_id.clone(),
+                        role: None,
+                    },
+                    &token,
+                ))
                 .await;
 
             let (signaling_url, is_host) = match join_resp {
@@ -201,6 +216,7 @@ impl RoomServiceHandle {
                 };
                 inner_mut.peer_registered = false;
                 inner_mut.peer_cache.clear();
+                inner_mut.get_users_in_flight = false;
                 inner_mut.last_peers_version = 0;
                 inner_mut.bump_version();
             }
@@ -224,6 +240,12 @@ impl RoomServiceHandle {
 
         let handle = self.clone();
         spawn_local(async move {
+            let token;
+            {
+                let inner_ref = inner.borrow();
+                token = inner_ref.auth_token.clone();
+            }
+
             let Some(mut grpc) = create_grpc_client() else {
                 let mut inner_mut = inner.borrow_mut();
                 inner_mut.room_state = RoomState::Error {
@@ -236,12 +258,15 @@ impl RoomServiceHandle {
 
             // CreateRoom
             let create_resp = grpc
-                .create_room(CreateRoomRequest {
-                    map_id: String::new(),
-                    max_players,
-                    room_name: String::new(),
-                    is_public: true,
-                })
+                .create_room(attach_auth(
+                    CreateRoomRequest {
+                        map_id: String::new(),
+                        max_players,
+                        room_name: String::new(),
+                        is_public: true,
+                    },
+                    &token,
+                ))
                 .await;
 
             match create_resp {
@@ -272,6 +297,7 @@ impl RoomServiceHandle {
         let mut inner = self.inner.borrow_mut();
         inner.room_state = RoomState::Idle;
         inner.peer_cache.clear();
+        inner.get_users_in_flight = false;
         inner.peer_registered = false;
         inner.resolve_in_flight = false;
         inner.last_peers_version = 0;
@@ -300,6 +326,17 @@ impl RoomServiceHandle {
             .unwrap_or_else(|| format!("Peer-{}", &peer_id[..peer_id.len().min(8)]))
     }
 
+    /// Resolve a user_id to a display name from cache.
+    pub fn display_name(&self, user_id: &str) -> Option<String> {
+        self.inner.borrow().display_name_cache.get(user_id).cloned()
+    }
+
+    /// Resolve a user_id to a display name, falling back to "User-{8chars}".
+    pub fn display_name_or_fallback(&self, user_id: &str) -> String {
+        self.display_name(user_id)
+            .unwrap_or_else(|| format!("User-{}", &user_id[..user_id.len().min(8)]))
+    }
+
     // =======================================================================
     // Game operations (fire-and-forget gRPC)
     // =======================================================================
@@ -311,15 +348,20 @@ impl RoomServiceHandle {
             RoomState::Active { room_id, .. } => room_id.clone(),
             _ => return,
         };
+        let token = inner.auth_token.clone();
+        drop(inner);
 
         spawn_local(async move {
             let Some(mut grpc) = create_grpc_client() else {
                 return;
             };
-            let req = StartGameRequest {
-                room_id: room_id.clone(),
-                start_frame,
-            };
+            let req = attach_auth(
+                StartGameRequest {
+                    room_id: room_id.clone(),
+                    start_frame,
+                },
+                &token,
+            );
             match grpc.start_game(req).await {
                 Ok(resp) => {
                     let _resp = resp.into_inner();
@@ -347,18 +389,23 @@ impl RoomServiceHandle {
             RoomState::Active { room_id, .. } => room_id.clone(),
             _ => return,
         };
+        let token = inner.auth_token.clone();
+        drop(inner);
         let arrived_user_id = arrived_user_id.to_string();
 
         spawn_local(async move {
             let Some(mut grpc) = create_grpc_client() else {
                 return;
             };
-            let req = ReportArrivalRequest {
-                room_id: room_id.clone(),
-                arrived_user_id: arrived_user_id.clone(),
-                arrival_frame,
-                rank,
-            };
+            let req = attach_auth(
+                ReportArrivalRequest {
+                    room_id: room_id.clone(),
+                    arrived_user_id: arrived_user_id.clone(),
+                    arrival_frame,
+                    rank,
+                },
+                &token,
+            );
             match grpc.report_arrival(req).await {
                 Ok(resp) => {
                     let _resp = resp.into_inner();
@@ -428,6 +475,67 @@ fn create_grpc_client() -> Option<RoomServiceClient<Client>> {
     ))))
 }
 
+fn create_user_grpc_client() -> Option<UserServiceClient<Client>> {
+    let origin = web_sys::window()?.location().origin().ok()?;
+    Some(UserServiceClient::new(Client::new(format!(
+        "{}/grpc",
+        origin
+    ))))
+}
+
+fn attach_auth<T>(msg: T, token: &Option<String>) -> tonic::Request<T> {
+    let mut req = tonic::Request::new(msg);
+    if let Some(token) = token {
+        if let Ok(val) = format!("Bearer {token}").parse() {
+            req.metadata_mut().insert("authorization", val);
+        }
+    }
+    req
+}
+
+/// Extract `user_id` (the `sub` claim) from our custom JWT token.
+/// Token format: `{base64url_payload}.{signature}`.
+fn extract_user_id_from_token(token: &str) -> Option<String> {
+    let payload_b64 = token.split('.').next()?;
+    let decoded = base64url_decode(payload_b64)?;
+    let payload: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    payload.get("sub")?.as_str().map(|s| s.to_string())
+}
+
+fn base64url_decode(input: &str) -> Option<Vec<u8>> {
+    const TABLE: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+    fn val(c: u8) -> Option<u32> {
+        TABLE.iter().position(|&ch| ch == c).map(|p| p as u32)
+    }
+
+    let bytes = input.as_bytes();
+    let mut result = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        let b0 = val(bytes[i])?;
+        let b1 = if i + 1 < bytes.len() { val(bytes[i + 1])? } else { 0 };
+        let b2 = if i + 2 < bytes.len() { val(bytes[i + 2])? } else { 0 };
+        let b3 = if i + 3 < bytes.len() { val(bytes[i + 3])? } else { 0 };
+
+        let n = (b0 << 18) | (b1 << 12) | (b2 << 6) | b3;
+
+        result.push(((n >> 16) & 0xFF) as u8);
+        if i + 2 < bytes.len() {
+            result.push(((n >> 8) & 0xFF) as u8);
+        }
+        if i + 3 < bytes.len() {
+            result.push((n & 0xFF) as u8);
+        }
+
+        i += 4;
+    }
+
+    Some(result)
+}
+
 // ---------------------------------------------------------------------------
 // RoomServiceProvider component
 // ---------------------------------------------------------------------------
@@ -440,6 +548,9 @@ pub struct RoomServiceProviderProps {
 #[function_component(RoomServiceProvider)]
 pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
     let config_username = use_config_username();
+    let config_secret = use_config_secret();
+    let fingerprint = use_fingerprint();
+    let auth_token = use_auth_token();
 
     let player_id = (*config_username)
         .as_ref()
@@ -448,13 +559,103 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
 
     let inner = use_mut_ref(|| RoomServiceInner::new(player_id.clone()));
 
-    // Keep player credentials in sync with config changes
+    // Keep player credentials in sync with config changes (only pre-login fallback)
     {
         let inner = inner.clone();
         let pid = player_id.clone();
         use_effect_with(pid, move |pid| {
             let mut inner_mut = inner.borrow_mut();
-            inner_mut.player_id = pid.clone();
+            // Only use config_username when no token (pre-login state).
+            // Once a token exists, player_id is the UUID extracted from the token.
+            if inner_mut.auth_token.is_none() {
+                inner_mut.player_id = pid.clone();
+            }
+        });
+    }
+
+    // Sync auth_token from hook → inner, and extract user_id from JWT
+    {
+        let inner = inner.clone();
+        let token = (*auth_token).clone();
+        use_effect_with(token, move |token| {
+            let mut inner_mut = inner.borrow_mut();
+            inner_mut.auth_token = token.clone();
+            // Extract user_id (UUID) from JWT so player_id is always correct
+            if let Some(t) = token.as_deref() {
+                if let Some(uid) = extract_user_id_from_token(t) {
+                    inner_mut.player_id = uid;
+                }
+            }
+        });
+    }
+
+    // Auto-login: when username + fingerprint are ready and no token exists, perform Login RPC
+    {
+        let inner = inner.clone();
+        let auth_token = auth_token.clone();
+        let username = (*config_username).clone();
+        let secret = (*config_secret).clone();
+        let fp = (*fingerprint).clone();
+
+        use_effect_with((username.clone(), fp.clone(), (*auth_token).clone()), move |_| {
+            // Need username and fingerprint to be ready, and no existing token
+            let Some(display_name) = username else {
+                return;
+            };
+            if display_name.is_empty() {
+                return;
+            }
+            let Some(fp_value) = fp else {
+                return;
+            };
+            if auth_token.is_some() {
+                return;
+            }
+
+            let salt = secret.to_string();
+            let inner = inner.clone();
+            let auth_token = auth_token.clone();
+
+            spawn_local(async move {
+                let Some(mut grpc) = create_user_grpc_client() else {
+                    tracing::warn!("Failed to create UserService gRPC client for login");
+                    return;
+                };
+
+                let login_req = LoginRequest {
+                    method: Some(login_request::Method::Anonymous(AnonymousLogin {
+                        display_name: display_name.clone(),
+                        salt,
+                        fingerprint: fp_value,
+                    })),
+                };
+
+                match grpc.login(login_req).await {
+                    Ok(resp) => {
+                        let resp = resp.into_inner();
+                        let token = resp.token;
+                        let user_id = resp.user.as_ref().map(|u| u.user_id.clone()).unwrap_or_default();
+                        let dn = resp.user.as_ref().map(|u| u.display_name.clone()).unwrap_or_default();
+
+                        tracing::info!(user_id = %user_id, display_name = %dn, "Auto-login successful");
+
+                        // Store token in hook (persists to LocalStorage)
+                        auth_token.set(Some(token.clone()));
+
+                        // Update inner state
+                        let mut inner_mut = inner.borrow_mut();
+                        inner_mut.auth_token = Some(token);
+                        inner_mut.player_id = user_id.clone();
+                        // Cache own display name so lobby shows it immediately
+                        if !dn.is_empty() {
+                            inner_mut.display_name_cache.insert(user_id, dn);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Auto-login failed");
+                    }
+                }
+            });
         });
     }
 
@@ -493,17 +694,20 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
 
                 // --- RegisterPeerId ---
                 let peer_registered = inner.borrow().peer_registered;
+                let token = inner.borrow().auth_token.clone();
                 if !peer_registered {
                     let my_peer_id = marble_core::bevy::wasm_entry::get_my_peer_id();
                     if !my_peer_id.is_empty() {
                         inner.borrow_mut().peer_registered = true; // optimistic
                         let inner_c = inner.clone();
                         let room_id = room_id.clone();
+                        let token = token.clone();
 
                         spawn_local(async move {
                             let success = register_peer_id_grpc(
                                 &room_id,
                                 &my_peer_id,
+                                &token,
                             )
                             .await;
                             if !success {
@@ -545,11 +749,13 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                             inner.borrow_mut().resolve_in_flight = true;
                             let inner_c = inner.clone();
                             let room_id = room_id.clone();
+                            let token = token.clone();
 
                             spawn_local(async move {
                                 if let Some(resolved) = resolve_peer_ids_grpc(
                                     &room_id,
                                     &unresolved,
+                                    &token,
                                 )
                                 .await
                                 {
@@ -570,6 +776,46 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                                 inner_c.borrow_mut().resolve_in_flight = false;
                             });
                         }
+                    }
+                }
+
+                // --- GetUsers (display name resolution) ---
+                let get_users_in_flight = inner.borrow().get_users_in_flight;
+                if !get_users_in_flight {
+                    let unresolved_user_ids: Vec<String> = {
+                        let inner_ref = inner.borrow();
+                        let mut ids: Vec<String> = inner_ref
+                            .peer_cache
+                            .values()
+                            .filter(|user_id| !inner_ref.display_name_cache.contains_key(user_id.as_str()))
+                            .cloned()
+                            .collect();
+                        // Also include self if not yet cached
+                        if !inner_ref.player_id.is_empty()
+                            && !inner_ref.display_name_cache.contains_key(&inner_ref.player_id)
+                        {
+                            ids.push(inner_ref.player_id.clone());
+                        }
+                        ids
+                    };
+
+                    if !unresolved_user_ids.is_empty() {
+                        inner.borrow_mut().get_users_in_flight = true;
+                        let inner_c = inner.clone();
+                        let token = token.clone();
+
+                        spawn_local(async move {
+                            if let Some(users) = get_users_grpc(&unresolved_user_ids, &token).await {
+                                let mut inner_mut = inner_c.borrow_mut();
+                                for user in users {
+                                    inner_mut
+                                        .display_name_cache
+                                        .insert(user.user_id.clone(), user.display_name.clone());
+                                }
+                                inner_mut.bump_version();
+                            }
+                            inner_c.borrow_mut().get_users_in_flight = false;
+                        });
                     }
                 }
             });
@@ -607,16 +853,20 @@ pub fn use_room_service() -> RoomServiceHandle {
 async fn register_peer_id_grpc(
     room_id: &str,
     peer_id: &str,
+    token: &Option<String>,
 ) -> bool {
     let Some(mut grpc) = create_grpc_client() else {
         return false;
     };
 
     for attempt in 0..=3u32 {
-        let req = RegisterPeerIdRequest {
-            room_id: room_id.to_string(),
-            peer_id: peer_id.to_string(),
-        };
+        let req = attach_auth(
+            RegisterPeerIdRequest {
+                room_id: room_id.to_string(),
+                peer_id: peer_id.to_string(),
+            },
+            token,
+        );
 
         match grpc.register_peer_id(req).await {
             Ok(_) => {
@@ -650,6 +900,7 @@ async fn register_peer_id_grpc(
 async fn resolve_peer_ids_grpc(
     room_id: &str,
     peer_ids: &[String],
+    token: &Option<String>,
 ) -> Option<HashMap<String, String>> {
     if peer_ids.is_empty() {
         return Some(HashMap::new());
@@ -659,10 +910,13 @@ async fn resolve_peer_ids_grpc(
         return None;
     };
 
-    let req = ResolvePeerIdsRequest {
-        room_id: room_id.to_string(),
-        peer_ids: peer_ids.to_vec(),
-    };
+    let req = attach_auth(
+        ResolvePeerIdsRequest {
+            room_id: room_id.to_string(),
+            peer_ids: peer_ids.to_vec(),
+        },
+        token,
+    );
 
     match grpc.resolve_peer_ids(req).await {
         Ok(resp) => {
@@ -676,6 +930,42 @@ async fn resolve_peer_ids_grpc(
         }
         Err(e) => {
             tracing::warn!(error = %e, "RoomService: ResolvePeerIds failed");
+            None
+        }
+    }
+}
+
+async fn get_users_grpc(
+    user_ids: &[String],
+    token: &Option<String>,
+) -> Option<Vec<UserInfo>> {
+    if user_ids.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let Some(mut grpc) = create_user_grpc_client() else {
+        return None;
+    };
+
+    let req = attach_auth(
+        GetUsersRequest {
+            user_ids: user_ids.to_vec(),
+        },
+        token,
+    );
+
+    match grpc.get_users(req).await {
+        Ok(resp) => {
+            let users = resp.into_inner().users;
+            tracing::debug!(
+                resolved = users.len(),
+                requested = user_ids.len(),
+                "RoomService: resolved display names"
+            );
+            Some(users)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "RoomService: GetUsers failed");
             None
         }
     }

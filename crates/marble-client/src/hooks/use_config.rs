@@ -12,6 +12,7 @@ use crate::{
 
 const CONFIG_USERNAME_KEY: &str = "$marble-live$/config/username";
 const CONFIG_SECRET_KEY: &str = "$marble-live$/config/secret";
+const CONFIG_AUTH_TOKEN_KEY: &str = "$marble-live$/config/auth-token";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum ConfigSecret {
@@ -29,6 +30,11 @@ impl ConfigSecret {
 pub fn use_config_username() -> UseStateHandle<Option<String>> {
     let name_storage = use_localstorage(CONFIG_USERNAME_KEY, || None::<String>);
     name_storage
+}
+
+#[hook]
+pub fn use_auth_token() -> UseStateHandle<Option<String>> {
+    use_localstorage(CONFIG_AUTH_TOKEN_KEY, || None::<String>)
 }
 
 #[hook]

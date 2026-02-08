@@ -23,7 +23,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
     handler::{
-        jwt::JwtManager,
+        jwt::{JwtManager, jwt_interceptor},
         map_service::MapServiceImpl,
         room_service::RoomServiceImpl,
         user_service::UserServiceImpl,
@@ -67,9 +67,10 @@ async fn main() -> () {
     let map_service = MapServiceImpl::new(database.clone());
     let room_service = RoomServiceImpl::new(database, signaling_base_url);
 
-    let grpc_router = Routes::new(UserServiceServer::new(user_service))
-        .add_service(MapServiceServer::new(map_service))
-        .add_service(RoomServiceServer::new(room_service))
+    let interceptor = jwt_interceptor(jwt_manager.clone());
+    let grpc_router = Routes::new(UserServiceServer::with_interceptor(user_service, interceptor.clone()))
+        .add_service(MapServiceServer::with_interceptor(map_service, interceptor.clone()))
+        .add_service(RoomServiceServer::with_interceptor(room_service, interceptor))
         .into_axum_router()
         .layer(GrpcWebLayer::new());
 

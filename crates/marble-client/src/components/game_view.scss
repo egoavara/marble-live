@@ -331,6 +331,15 @@
     }
 }
 
+.lobby-connection-indicator {
+    flex-shrink: 0;
+    font-size: 8px;
+    line-height: 1;
+
+    &.connected { color: $color-success; }
+    &.disconnected { color: $color-text-disabled; }
+}
+
 .lobby-player-name {
     flex: 1;
     font-size: $font-size-base;

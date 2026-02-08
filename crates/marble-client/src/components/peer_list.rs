@@ -92,11 +92,17 @@ pub fn peer_list(props: &PeerListProps) -> Html {
     // Add peers
     for peer in &props.peers {
         let peer_id_str = peer.peer_id.to_string();
-        let display_name = room_service
+        // peer_id → user_id → display_name
+        let user_id = room_service
             .as_ref()
             .and_then(|rs| rs.player_name(&peer_id_str))
-            .or_else(|| peer.player_id.clone())
-            .unwrap_or_else(|| format!("Peer-{}", &peer_id_str[..peer_id_str.len().min(8)]));
+            .or_else(|| peer.player_id.clone());
+        let display_name = match (&room_service, &user_id) {
+            (Some(rs), Some(uid)) => rs.display_name_or_fallback(uid),
+            _ => user_id
+                .clone()
+                .unwrap_or_else(|| format!("Peer-{}", &peer_id_str[..peer_id_str.len().min(8)])),
+        };
         let peer_arrival = props
             .arrival_info
             .iter()
