@@ -7,7 +7,7 @@ pub struct MeshGroup {
     pub group_id: u32,
     /// Maximum size of the group
     pub max_size: u32,
-    /// Players in this group (player_id -> peer_id mapping)
+    /// Players in this group (`player_id` -> `peer_id` mapping)
     pub players: HashMap<String, String>,
     /// Bridge node player IDs (typically 2 per group)
     pub bridge_players: HashSet<String>,
@@ -29,6 +29,7 @@ impl MeshGroup {
     }
 
     /// Get current player count
+    #[allow(dead_code)]
     pub fn player_count(&self) -> usize {
         self.players.len()
     }
@@ -67,7 +68,7 @@ impl MeshGroup {
             .collect()
     }
 
-    /// Select random peers for connection (up to max_connections)
+    /// Select random peers for connection (up to `max_connections`)
     pub fn select_peers_for_player(
         &self,
         player_id: &str,
@@ -112,7 +113,7 @@ impl MeshGroup {
             .collect()
     }
 
-    /// Update peer_id for a player
+    /// Update `peer_id` for a player
     pub fn update_peer_id(&mut self, player_id: &str, new_peer_id: &str) {
         if let Some(peer_id) = self.players.get_mut(player_id) {
             *peer_id = new_peer_id.to_string();

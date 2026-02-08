@@ -38,9 +38,9 @@ pub struct TopologyManager {
     pub config: TopologyManagerConfig,
     /// Mesh groups
     groups: Vec<MeshGroup>,
-    /// Player to group mapping (player_id -> group_id)
+    /// Player to group mapping (`player_id` -> `group_id`)
     player_groups: HashMap<String, u32>,
-    /// Player to peer_id mapping
+    /// Player to `peer_id` mapping
     player_peers: HashMap<String, String>,
     /// Bridge selector
     bridge_selector: BridgeSelector,
@@ -83,10 +83,10 @@ impl TopologyManager {
 
     /// Remove a player from topology
     pub fn remove_player(&mut self, player_id: &str) {
-        if let Some(group_id) = self.player_groups.remove(player_id) {
-            if let Some(group) = self.groups.get_mut(group_id as usize) {
-                group.remove_player(player_id);
-            }
+        if let Some(group_id) = self.player_groups.remove(player_id)
+            && let Some(group) = self.groups.get_mut(group_id as usize)
+        {
+            group.remove_player(player_id);
         }
         self.player_peers.remove(player_id);
         self.bridge_selector.remove_player(player_id);
@@ -142,8 +142,8 @@ impl TopologyManager {
         let connect_to: Vec<PeerConnection> = group
             .select_peers_for_player(player_id, self.config.peer_connections as usize)
             .into_iter()
-            .map(|(pid, peer_id)| PeerConnection {
-                player_id: pid,
+            .map(|(uid, peer_id)| PeerConnection {
+                user_id: uid,
                 peer_id,
             })
             .collect();
@@ -156,6 +156,7 @@ impl TopologyManager {
         };
 
         PeerTopology {
+            signaling_url: String::new(), // Set by Room
             mesh_group: group_id,
             is_bridge,
             connect_to,
@@ -164,6 +165,7 @@ impl TopologyManager {
     }
 
     /// Find a group with capacity or create a new one
+    #[allow(clippy::cast_possible_truncation)]
     fn find_or_create_group(&mut self) -> u32 {
         // Find first group with capacity
         for (i, group) in self.groups.iter().enumerate() {
@@ -189,8 +191,8 @@ impl TopologyManager {
             }
 
             // Get bridge players from this group
-            for (player_id, peer_id) in group.get_bridge_peer_ids() {
-                result.push(PeerConnection { player_id, peer_id });
+            for (user_id, peer_id) in group.get_bridge_peer_ids() {
+                result.push(PeerConnection { user_id, peer_id });
             }
         }
 
@@ -213,16 +215,18 @@ impl TopologyManager {
     }
 
     /// Get total player count
+    #[allow(dead_code)]
     pub fn player_count(&self) -> usize {
         self.player_groups.len()
     }
 
     /// Get group count
+    #[allow(dead_code)]
     pub fn group_count(&self) -> usize {
         self.groups.len()
     }
 
-    /// Update peer_id for a player (returns true if player exists and was updated)
+    /// Update `peer_id` for a player (returns true if player exists and was updated)
     pub fn update_peer_id(&mut self, player_id: &str, new_peer_id: &str) -> bool {
         if !self.player_peers.contains_key(player_id) {
             return false;
@@ -230,16 +234,16 @@ impl TopologyManager {
         self.player_peers
             .insert(player_id.to_string(), new_peer_id.to_string());
 
-        if let Some(&group_id) = self.player_groups.get(player_id) {
-            if let Some(group) = self.groups.get_mut(group_id as usize) {
-                group.update_peer_id(player_id, new_peer_id);
-            }
+        if let Some(&group_id) = self.player_groups.get(player_id)
+            && let Some(group) = self.groups.get_mut(group_id as usize)
+        {
+            group.update_peer_id(player_id, new_peer_id);
         }
         self.topology_dirty = true;
         true
     }
 
-    /// Resolve peer_ids to player_ids
+    /// Resolve `peer_ids` to `player_ids`
     pub fn resolve_peer_ids(&self, peer_ids: &[String]) -> HashMap<String, String> {
         let mut result = HashMap::new();
         // Build reverse map (peer_id → player_id)

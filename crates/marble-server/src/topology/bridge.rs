@@ -13,6 +13,7 @@ pub struct ConnectionQuality {
 
 impl ConnectionQuality {
     /// Calculate overall quality score (higher is better)
+    #[allow(clippy::cast_precision_loss)]
     pub fn score(&self) -> f32 {
         // Lower RTT and packet loss = better score
         // Higher stability = better score
@@ -24,6 +25,7 @@ impl ConnectionQuality {
     }
 
     /// Update with new measurement
+    #[allow(clippy::cast_precision_loss)]
     pub fn update(&mut self, rtt_ms: u32, packet_loss: f32, connected: bool) {
         // Exponential moving average for RTT
         self.avg_rtt_ms = self.avg_rtt_ms * 0.7 + rtt_ms as f32 * 0.3;
@@ -45,7 +47,7 @@ impl ConnectionQuality {
 pub struct BridgeSelector {
     /// Number of bridges per group
     pub bridges_per_group: usize,
-    /// Player quality scores (player_id -> quality)
+    /// Player quality scores (`player_id` -> quality)
     pub player_qualities: HashMap<String, ConnectionQuality>,
 }
 
@@ -61,7 +63,7 @@ impl BridgeSelector {
     pub fn update_quality(
         &mut self,
         player_id: &str,
-        peer_id: &str,
+        _peer_id: &str,
         rtt_ms: u32,
         packet_loss: f32,
         connected: bool,
@@ -81,8 +83,7 @@ impl BridgeSelector {
                 let score = self
                     .player_qualities
                     .get(pid)
-                    .map(|q| q.score())
-                    .unwrap_or(0.5); // Default score for new players
+                    .map_or(0.5, ConnectionQuality::score); // Default score for new players
                 (pid.clone(), score)
             })
             .collect();
@@ -104,6 +105,7 @@ impl BridgeSelector {
     }
 
     /// Get player's current quality score
+    #[allow(dead_code)]
     pub fn get_quality(&self, player_id: &str) -> Option<&ConnectionQuality> {
         self.player_qualities.get(player_id)
     }

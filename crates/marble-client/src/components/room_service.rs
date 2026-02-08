@@ -10,14 +10,14 @@ use std::rc::Rc;
 use gloo::timers::callback::Interval;
 use marble_proto::room::room_service_client::RoomServiceClient;
 use marble_proto::room::{
-    CreateRoomRequest, GetRoomPlayerRequest, JoinRoomRequest, PlayerAuth, RegisterPeerIdRequest,
+    CreateRoomRequest, JoinRoomRequest, RegisterPeerIdRequest,
     ReportArrivalRequest, ResolvePeerIdsRequest, StartGameRequest,
 };
 use tonic_web_wasm_client::Client;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
-use crate::hooks::{use_config_secret, use_config_username};
+use crate::hooks::use_config_username;
 
 // ---------------------------------------------------------------------------
 // RoomState
@@ -47,7 +47,6 @@ pub enum RoomState {
 struct RoomServiceInner {
     // Auth
     player_id: String,
-    player_secret: String,
 
     // Room lifecycle
     room_state: RoomState,
@@ -67,10 +66,9 @@ struct RoomServiceInner {
 }
 
 impl RoomServiceInner {
-    fn new(player_id: String, player_secret: String) -> Self {
+    fn new(player_id: String) -> Self {
         Self {
             player_id,
-            player_secret,
             room_state: RoomState::Idle,
             peer_cache: HashMap::new(),
             resolve_in_flight: false,
@@ -144,11 +142,9 @@ impl RoomServiceHandle {
 
         spawn_local(async move {
             let player_id;
-            let player_secret;
             {
                 let inner_ref = inner.borrow();
                 player_id = inner_ref.player_id.clone();
-                player_secret = inner_ref.player_secret.clone();
             }
 
             let Some(mut grpc) = create_grpc_client() else {
@@ -165,15 +161,25 @@ impl RoomServiceHandle {
             let join_resp = grpc
                 .join_room(JoinRoomRequest {
                     room_id: room_id.clone(),
-                    player: Some(PlayerAuth {
-                        id: player_id.clone(),
-                        secret: player_secret.clone(),
-                    }),
+                    role: None,
                 })
                 .await;
 
-            let signaling_url = match join_resp {
-                Ok(resp) => resp.into_inner().signaling_url,
+            let (signaling_url, is_host) = match join_resp {
+                Ok(resp) => {
+                    let resp = resp.into_inner();
+                    let sig_url = resp
+                        .topology
+                        .as_ref()
+                        .map(|t| t.signaling_url.clone())
+                        .unwrap_or_default();
+                    let host = resp
+                        .room
+                        .as_ref()
+                        .map(|r| r.host_user_id == player_id)
+                        .unwrap_or(false);
+                    (sig_url, host)
+                }
                 Err(e) => {
                     let mut inner_mut = inner.borrow_mut();
                     inner_mut.room_state = RoomState::Error {
@@ -185,24 +191,7 @@ impl RoomServiceHandle {
                 }
             };
 
-            // 2. GetRoomPlayer → determine is_host
-            let is_host = match grpc
-                .get_room_player(GetRoomPlayerRequest {
-                    room_id: room_id.clone(),
-                })
-                .await
-            {
-                Ok(resp) => resp
-                    .into_inner()
-                    .players
-                    .iter()
-                    .find(|p| p.id == player_id)
-                    .map(|p| p.is_host)
-                    .unwrap_or(false),
-                Err(_) => false,
-            };
-
-            // 3. Transition → Active
+            // 2. Transition → Active
             {
                 let mut inner_mut = inner.borrow_mut();
                 inner_mut.room_state = RoomState::Active {
@@ -235,14 +224,6 @@ impl RoomServiceHandle {
 
         let handle = self.clone();
         spawn_local(async move {
-            let player_id;
-            let player_secret;
-            {
-                let inner_ref = inner.borrow();
-                player_id = inner_ref.player_id.clone();
-                player_secret = inner_ref.player_secret.clone();
-            }
-
             let Some(mut grpc) = create_grpc_client() else {
                 let mut inner_mut = inner.borrow_mut();
                 inner_mut.room_state = RoomState::Error {
@@ -256,17 +237,20 @@ impl RoomServiceHandle {
             // CreateRoom
             let create_resp = grpc
                 .create_room(CreateRoomRequest {
-                    host: Some(PlayerAuth {
-                        id: player_id,
-                        secret: player_secret,
-                    }),
+                    map_id: String::new(),
                     max_players,
+                    room_name: String::new(),
+                    is_public: true,
                 })
                 .await;
 
             match create_resp {
                 Ok(resp) => {
-                    let room_id = resp.into_inner().room_id;
+                    let room_id = resp
+                        .into_inner()
+                        .room
+                        .map(|r| r.room_id)
+                        .unwrap_or_default();
                     tracing::info!("RoomService: created room {}", room_id);
                     // Chain → join
                     handle.join(&room_id);
@@ -321,14 +305,12 @@ impl RoomServiceHandle {
     // =======================================================================
 
     /// Report game start to server (host only).
-    pub fn start_game(&self, start_frame: u64, rng_seed: u64) {
+    pub fn start_game(&self, start_frame: u64) {
         let inner = self.inner.borrow();
         let room_id = match &inner.room_state {
             RoomState::Active { room_id, .. } => room_id.clone(),
             _ => return,
         };
-        let player_id = inner.player_id.clone();
-        let player_secret = inner.player_secret.clone();
 
         spawn_local(async move {
             let Some(mut grpc) = create_grpc_client() else {
@@ -336,29 +318,16 @@ impl RoomServiceHandle {
             };
             let req = StartGameRequest {
                 room_id: room_id.clone(),
-                player: Some(PlayerAuth {
-                    id: player_id,
-                    secret: player_secret,
-                }),
                 start_frame,
-                rng_seed,
             };
             match grpc.start_game(req).await {
                 Ok(resp) => {
-                    let resp = resp.into_inner();
-                    if resp.already_started {
-                        tracing::info!(
-                            room_id = %room_id,
-                            "RoomService: game already started on server"
-                        );
-                    } else {
-                        tracing::info!(
-                            room_id = %room_id,
-                            start_frame,
-                            rng_seed,
-                            "RoomService: game started on server"
-                        );
-                    }
+                    let _resp = resp.into_inner();
+                    tracing::info!(
+                        room_id = %room_id,
+                        start_frame,
+                        "RoomService: game started on server"
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -372,15 +341,13 @@ impl RoomServiceHandle {
     }
 
     /// Report player arrival to server (host only).
-    pub fn report_arrival(&self, arrived_player_id: &str, arrival_frame: u64, rank: u32) {
+    pub fn report_arrival(&self, arrived_user_id: &str, arrival_frame: u64, rank: u32) {
         let inner = self.inner.borrow();
         let room_id = match &inner.room_state {
             RoomState::Active { room_id, .. } => room_id.clone(),
             _ => return,
         };
-        let player_id = inner.player_id.clone();
-        let player_secret = inner.player_secret.clone();
-        let arrived_player_id = arrived_player_id.to_string();
+        let arrived_user_id = arrived_user_id.to_string();
 
         spawn_local(async move {
             let Some(mut grpc) = create_grpc_client() else {
@@ -388,28 +355,23 @@ impl RoomServiceHandle {
             };
             let req = ReportArrivalRequest {
                 room_id: room_id.clone(),
-                player: Some(PlayerAuth {
-                    id: player_id,
-                    secret: player_secret,
-                }),
-                arrived_player_id: arrived_player_id.clone(),
+                arrived_user_id: arrived_user_id.clone(),
                 arrival_frame,
                 rank,
             };
             match grpc.report_arrival(req).await {
                 Ok(resp) => {
-                    let resp = resp.into_inner();
+                    let _resp = resp.into_inner();
                     tracing::info!(
-                        player = %arrived_player_id,
+                        user = %arrived_user_id,
                         rank,
                         frame = arrival_frame,
-                        game_ended = resp.game_ended,
                         "RoomService: reported arrival"
                     );
                 }
                 Err(e) => {
                     tracing::warn!(
-                        player = %arrived_player_id,
+                        user = %arrived_user_id,
                         error = %e,
                         "RoomService: ReportArrival RPC failed"
                     );
@@ -478,25 +440,21 @@ pub struct RoomServiceProviderProps {
 #[function_component(RoomServiceProvider)]
 pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
     let config_username = use_config_username();
-    let config_secret = use_config_secret();
 
     let player_id = (*config_username)
         .as_ref()
         .cloned()
         .unwrap_or_default();
-    let player_secret = config_secret.to_string();
 
-    let inner = use_mut_ref(|| RoomServiceInner::new(player_id.clone(), player_secret.clone()));
+    let inner = use_mut_ref(|| RoomServiceInner::new(player_id.clone()));
 
     // Keep player credentials in sync with config changes
     {
         let inner = inner.clone();
         let pid = player_id.clone();
-        let psec = player_secret.clone();
-        use_effect_with((pid, psec), move |(pid, psec)| {
+        use_effect_with(pid, move |pid| {
             let mut inner_mut = inner.borrow_mut();
             inner_mut.player_id = pid.clone();
-            inner_mut.player_secret = psec.clone();
         });
     }
 
@@ -520,8 +478,6 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
             let interval = Interval::new(200, move || {
                 let is_active;
                 let room_id;
-                let player_id;
-                let player_secret;
                 {
                     let inner_ref = inner.borrow();
                     is_active = matches!(inner_ref.room_state, RoomState::Active { .. });
@@ -529,8 +485,6 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                         RoomState::Active { room_id, .. } => room_id.clone(),
                         _ => String::new(),
                     };
-                    player_id = inner_ref.player_id.clone();
-                    player_secret = inner_ref.player_secret.clone();
                 }
 
                 if !is_active {
@@ -545,14 +499,10 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                         inner.borrow_mut().peer_registered = true; // optimistic
                         let inner_c = inner.clone();
                         let room_id = room_id.clone();
-                        let player_id = player_id.clone();
-                        let player_secret = player_secret.clone();
 
                         spawn_local(async move {
                             let success = register_peer_id_grpc(
                                 &room_id,
-                                &player_id,
-                                &player_secret,
                                 &my_peer_id,
                             )
                             .await;
@@ -595,26 +545,22 @@ pub fn room_service_provider(props: &RoomServiceProviderProps) -> Html {
                             inner.borrow_mut().resolve_in_flight = true;
                             let inner_c = inner.clone();
                             let room_id = room_id.clone();
-                            let player_id = player_id.clone();
-                            let player_secret = player_secret.clone();
 
                             spawn_local(async move {
                                 if let Some(resolved) = resolve_peer_ids_grpc(
                                     &room_id,
-                                    &player_id,
-                                    &player_secret,
                                     &unresolved,
                                 )
                                 .await
                                 {
                                     let mut inner_mut = inner_c.borrow_mut();
-                                    for (peer_id, player_id) in &resolved {
+                                    for (peer_id, user_id) in &resolved {
                                         inner_mut
                                             .peer_cache
-                                            .insert(peer_id.clone(), player_id.clone());
+                                            .insert(peer_id.clone(), user_id.clone());
                                         // Also update Bevy's state store
                                         marble_core::bevy::wasm_entry::update_peer_player_id(
-                                            peer_id, player_id,
+                                            peer_id, user_id,
                                         );
                                     }
                                     if !resolved.is_empty() {
@@ -660,8 +606,6 @@ pub fn use_room_service() -> RoomServiceHandle {
 
 async fn register_peer_id_grpc(
     room_id: &str,
-    player_id: &str,
-    player_secret: &str,
     peer_id: &str,
 ) -> bool {
     let Some(mut grpc) = create_grpc_client() else {
@@ -671,10 +615,6 @@ async fn register_peer_id_grpc(
     for attempt in 0..=3u32 {
         let req = RegisterPeerIdRequest {
             room_id: room_id.to_string(),
-            player: Some(PlayerAuth {
-                id: player_id.to_string(),
-                secret: player_secret.to_string(),
-            }),
             peer_id: peer_id.to_string(),
         };
 
@@ -682,7 +622,6 @@ async fn register_peer_id_grpc(
             Ok(_) => {
                 tracing::info!(
                     peer_id = %peer_id,
-                    player_id = %player_id,
                     "RoomService: registered peer_id"
                 );
                 return true;
@@ -710,8 +649,6 @@ async fn register_peer_id_grpc(
 
 async fn resolve_peer_ids_grpc(
     room_id: &str,
-    player_id: &str,
-    player_secret: &str,
     peer_ids: &[String],
 ) -> Option<HashMap<String, String>> {
     if peer_ids.is_empty() {
@@ -724,16 +661,12 @@ async fn resolve_peer_ids_grpc(
 
     let req = ResolvePeerIdsRequest {
         room_id: room_id.to_string(),
-        player: Some(PlayerAuth {
-            id: player_id.to_string(),
-            secret: player_secret.to_string(),
-        }),
         peer_ids: peer_ids.to_vec(),
     };
 
     match grpc.resolve_peer_ids(req).await {
         Ok(resp) => {
-            let resolved = resp.into_inner().peer_to_player;
+            let resolved = resp.into_inner().peer_to_user;
             tracing::debug!(
                 resolved = resolved.len(),
                 requested = peer_ids.len(),

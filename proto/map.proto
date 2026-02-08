@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package marble.map;
+
+service MapService {
+  // Create map (server assigns map_id). Auth: Required
+  rpc CreateMap(CreateMapRequest) returns (CreateMapResponse);
+  // Get map (full data included). Auth: Required
+  rpc GetMap(GetMapRequest) returns (GetMapResponse);
+  // Update map (owner only). Auth: Required (owner)
+  rpc UpdateMap(UpdateMapRequest) returns (UpdateMapResponse);
+  // Delete map (owner only, fails if used in active room). Auth: Required (owner)
+  rpc DeleteMap(DeleteMapRequest) returns (DeleteMapResponse);
+  // List maps (cursor-based pagination). Auth: Required
+  rpc ListMaps(ListMapsRequest) returns (ListMapsResponse);
+}
+
+message CreateMapRequest {
+  string name = 1;           // 1-64 chars
+  string data = 2;           // RouletteConfig JSON (server treats as opaque blob)
+  string description = 3;
+  repeated string tags = 4;
+}
+message CreateMapResponse { MapDetail map = 1; }
+
+message GetMapRequest { string map_id = 1; }
+message GetMapResponse { MapDetail map = 1; }
+
+message UpdateMapRequest {
+  string map_id = 1;
+  string name = 2;             // Empty = no change
+  string data = 3;             // Empty = no change
+  string description = 4;
+  repeated string tags = 5;
+  bool update_tags = 6;        // Only apply tags field when true
+}
+message UpdateMapResponse { MapDetail map = 1; }
+
+message DeleteMapRequest { string map_id = 1; }
+message DeleteMapResponse { MapDetail map = 1; }  // Returns deleted map info
+
+message ListMapsRequest {
+  uint32 page_size = 1;       // 1-100, default 20
+  string page_token = 2;      // Cursor (empty string for first page)
+  string creator_id = 3;      // Filter: specific user's maps only
+  string name_query = 4;      // Filter: name search (case-insensitive substring)
+  repeated string tags = 5;   // Filter: all tags included
+}
+message ListMapsResponse {
+  repeated MapInfo maps = 1;
+  string next_page_token = 2;
+  uint32 total_count = 3;
+}
+
+// For list view (data excluded)
+message MapInfo {
+  string map_id = 1;
+  string name = 2;
+  string description = 3;
+  string creator_id = 4;
+  repeated string tags = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+// For detail view (data included)
+message MapDetail {
+  string map_id = 1;
+  string name = 2;
+  string description = 3;
+  string creator_id = 4;
+  repeated string tags = 5;
+  string created_at = 6;
+  string updated_at = 7;
+  string data = 8;            // RouletteConfig JSON
+}

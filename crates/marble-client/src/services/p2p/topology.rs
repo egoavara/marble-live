@@ -47,14 +47,14 @@ impl TopologyHandler {
         self.expected_peers.clear();
         for peer in &topology.connect_to {
             self.expected_peers
-                .insert(peer.player_id.clone(), peer.peer_id.clone());
+                .insert(peer.user_id.clone(), peer.peer_id.clone());
         }
 
         // Update expected bridges
         self.expected_bridges.clear();
         for peer in &topology.bridge_peers {
             self.expected_bridges
-                .insert(peer.player_id.clone(), peer.peer_id.clone());
+                .insert(peer.user_id.clone(), peer.peer_id.clone());
         }
     }
 
@@ -176,20 +176,21 @@ mod tests {
 
     fn create_test_topology() -> PeerTopology {
         PeerTopology {
+            signaling_url: String::new(),
             mesh_group: 1,
             is_bridge: true,
             connect_to: vec![
                 PeerConnection {
-                    player_id: "p1".to_string(),
+                    user_id: "p1".to_string(),
                     peer_id: "peer1".to_string(),
                 },
                 PeerConnection {
-                    player_id: "p2".to_string(),
+                    user_id: "p2".to_string(),
                     peer_id: "peer2".to_string(),
                 },
             ],
             bridge_peers: vec![PeerConnection {
-                player_id: "p3".to_string(),
+                user_id: "p3".to_string(),
                 peer_id: "peer3".to_string(),
             }],
         }

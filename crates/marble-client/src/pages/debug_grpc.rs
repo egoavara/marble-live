@@ -3,8 +3,8 @@
 use crate::components::Layout;
 use crate::hooks::use_grpc_room_service;
 use marble_proto::room::{
-    CreateRoomRequest, GetRoomPlayerRequest, GetRoomRequest, JoinRoomRequest, KickRoomRequest,
-    PlayerAuth, StartRoomRequest,
+    CreateRoomRequest, GetRoomRequest, GetRoomUsersRequest, JoinRoomRequest, KickPlayerRequest,
+    StartGameRequest,
 };
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -69,26 +69,21 @@ pub fn debug_grpc_page() -> Html {
     // CreateRoom
     let on_create_room = {
         let client = client.clone();
-        let player_id = player_id.clone();
-        let player_secret = player_secret.clone();
         let max_players = max_players.clone();
         let response = response.clone();
         let loading = loading.clone();
         Callback::from(move |_| {
             let client = client.clone();
-            let player_id = (*player_id).clone();
-            let player_secret = (*player_secret).clone();
             let max_players_val: u32 = max_players.parse().unwrap_or(4);
             let response = response.clone();
             let loading = loading.clone();
             loading.set(true);
             spawn_local(async move {
                 let req = CreateRoomRequest {
-                    host: Some(PlayerAuth {
-                        id: player_id,
-                        secret: player_secret,
-                    }),
+                    map_id: String::new(),
                     max_players: max_players_val,
+                    room_name: String::new(),
+                    is_public: true,
                 };
                 let result = client.borrow_mut().create_room(req).await;
                 match result {
@@ -108,25 +103,18 @@ pub fn debug_grpc_page() -> Html {
     let on_join_room = {
         let client = client.clone();
         let room_id = room_id.clone();
-        let player_id = player_id.clone();
-        let player_secret = player_secret.clone();
         let response = response.clone();
         let loading = loading.clone();
         Callback::from(move |_| {
             let client = client.clone();
             let room_id = (*room_id).clone();
-            let player_id = (*player_id).clone();
-            let player_secret = (*player_secret).clone();
             let response = response.clone();
             let loading = loading.clone();
             loading.set(true);
             spawn_local(async move {
                 let req = JoinRoomRequest {
                     room_id,
-                    player: Some(PlayerAuth {
-                        id: player_id,
-                        secret: player_secret,
-                    }),
+                    role: None,
                 };
                 let result = client.borrow_mut().join_room(req).await;
                 match result {
@@ -142,37 +130,30 @@ pub fn debug_grpc_page() -> Html {
         })
     };
 
-    // StartRoom
-    let on_start_room = {
+    // StartGame
+    let on_start_game = {
         let client = client.clone();
         let room_id = room_id.clone();
-        let player_id = player_id.clone();
-        let player_secret = player_secret.clone();
         let response = response.clone();
         let loading = loading.clone();
         Callback::from(move |_| {
             let client = client.clone();
             let room_id = (*room_id).clone();
-            let player_id = (*player_id).clone();
-            let player_secret = (*player_secret).clone();
             let response = response.clone();
             let loading = loading.clone();
             loading.set(true);
             spawn_local(async move {
-                let req = StartRoomRequest {
+                let req = StartGameRequest {
                     room_id,
-                    player: Some(PlayerAuth {
-                        id: player_id,
-                        secret: player_secret,
-                    }),
+                    start_frame: 0,
                 };
-                let result = client.borrow_mut().start_room(req).await;
+                let result = client.borrow_mut().start_game(req).await;
                 match result {
                     Ok(res) => {
-                        response.set(format!("StartRoom Response:\n{:#?}", res.into_inner()));
+                        response.set(format!("StartGame Response:\n{:#?}", res.into_inner()));
                     }
                     Err(e) => {
-                        response.set(format!("StartRoom Error:\n{}", e));
+                        response.set(format!("StartGame Error:\n{}", e));
                     }
                 }
                 loading.set(false);
@@ -180,40 +161,32 @@ pub fn debug_grpc_page() -> Html {
         })
     };
 
-    // KickRoom
-    let on_kick_room = {
+    // KickPlayer
+    let on_kick_player = {
         let client = client.clone();
         let room_id = room_id.clone();
-        let player_id = player_id.clone();
-        let player_secret = player_secret.clone();
         let target_player = target_player.clone();
         let response = response.clone();
         let loading = loading.clone();
         Callback::from(move |_| {
             let client = client.clone();
             let room_id = (*room_id).clone();
-            let player_id = (*player_id).clone();
-            let player_secret = (*player_secret).clone();
             let target_player = (*target_player).clone();
             let response = response.clone();
             let loading = loading.clone();
             loading.set(true);
             spawn_local(async move {
-                let req = KickRoomRequest {
+                let req = KickPlayerRequest {
                     room_id,
-                    player: Some(PlayerAuth {
-                        id: player_id,
-                        secret: player_secret,
-                    }),
-                    target_player,
+                    target_user_id: target_player,
                 };
-                let result = client.borrow_mut().kick_room(req).await;
+                let result = client.borrow_mut().kick_player(req).await;
                 match result {
                     Ok(res) => {
-                        response.set(format!("KickRoom Response:\n{:#?}", res.into_inner()));
+                        response.set(format!("KickPlayer Response:\n{:#?}", res.into_inner()));
                     }
                     Err(e) => {
-                        response.set(format!("KickRoom Error:\n{}", e));
+                        response.set(format!("KickPlayer Error:\n{}", e));
                     }
                 }
                 loading.set(false);
@@ -249,8 +222,8 @@ pub fn debug_grpc_page() -> Html {
         })
     };
 
-    // GetRoomPlayer
-    let on_get_room_player = {
+    // GetRoomUsers
+    let on_get_room_users = {
         let client = client.clone();
         let room_id = room_id.clone();
         let response = response.clone();
@@ -262,14 +235,14 @@ pub fn debug_grpc_page() -> Html {
             let loading = loading.clone();
             loading.set(true);
             spawn_local(async move {
-                let req = GetRoomPlayerRequest { room_id };
-                let result = client.borrow_mut().get_room_player(req).await;
+                let req = GetRoomUsersRequest { room_id };
+                let result = client.borrow_mut().get_room_users(req).await;
                 match result {
                     Ok(res) => {
-                        response.set(format!("GetRoomPlayer Response:\n{:#?}", res.into_inner()));
+                        response.set(format!("GetRoomUsers Response:\n{:#?}", res.into_inner()));
                     }
                     Err(e) => {
-                        response.set(format!("GetRoomPlayer Error:\n{}", e));
+                        response.set(format!("GetRoomUsers Error:\n{}", e));
                     }
                 }
                 loading.set(false);
@@ -366,19 +339,19 @@ pub fn debug_grpc_page() -> Html {
                         </button>
 
                         <button
-                            onclick={on_start_room}
+                            onclick={on_start_game}
                             disabled={*loading}
                             style="padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer;"
                         >
-                            { "StartRoom" }
+                            { "StartGame" }
                         </button>
 
                         <button
-                            onclick={on_kick_room}
+                            onclick={on_kick_player}
                             disabled={*loading}
                             style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;"
                         >
-                            { "KickRoom" }
+                            { "KickPlayer" }
                         </button>
 
                         <button
@@ -390,11 +363,11 @@ pub fn debug_grpc_page() -> Html {
                         </button>
 
                         <button
-                            onclick={on_get_room_player}
+                            onclick={on_get_room_users}
                             disabled={*loading}
                             style="padding: 10px 20px; background: #00BCD4; color: white; border: none; border-radius: 4px; cursor: pointer;"
                         >
-                            { "GetRoomPlayer" }
+                            { "GetRoomUsers" }
                         </button>
                     </div>
                 </div>

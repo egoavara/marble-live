@@ -3,7 +3,7 @@ syntax = "proto3";
 package marble.play;
 
 // ========================================
-// P2P 메시지 (Gossip 메타데이터 포함)
+// P2P messages (with Gossip metadata)
 // ========================================
 
 message P2PMessage {
@@ -11,75 +11,75 @@ message P2PMessage {
   string message_id = 1;       // UUID for deduplication
   uint32 ttl = 2;              // Remaining hop count
   uint32 origin_group = 3;     // Origin mesh group
-  string origin_player = 4;    // Original sender
+  string origin_user = 4;      // Original sender
 
   oneof payload {
-    // 접속 알림
+    // Join notification
     PlayerJoined player_joined = 10;
 
-    // 플레이어 입력
+    // Player input
     PlayerInput player_input = 11;
 
-    // 물리 동기화
+    // Physics sync
     FrameHash frame_hash = 12;
     SyncRequest sync_request = 13;
     SyncState sync_state = 14;
 
-    // RTT 측정
+    // RTT measurement
     Ping ping = 15;
     Pong pong = 16;
 
-    // 소셜
+    // Social
     ChatMessage chat_message = 17;
     Reaction reaction = 18;
 
-    // 게임 시작/종료
+    // Game start/end
     GameStart game_start = 19;
   }
 }
 
 // ========================================
-// 접속 알림
+// Join notification
 // ========================================
 
-// 신규 플레이어 접속 (접속한 클라이언트 → 전체)
+// New player joined (joined client -> all)
 message PlayerJoined {
-  string player_id = 1;
+  string user_id = 1;
 }
 
 // ========================================
-// 플레이어 입력
+// Player input
 // ========================================
 
-// 플레이어 클릭 입력 (원클릭 게임)
+// Player click input (one-click game)
 message PlayerInput {
   uint64 frame = 1;
-  string player_id = 2;
+  string user_id = 2;
 }
 
 // ========================================
-// 물리 동기화
+// Physics sync
 // ========================================
 
-// 프레임 해시 (호스트 → 전체, 결정성 검증)
+// Frame hash (host -> all, determinism verification)
 message FrameHash {
   uint64 frame = 1;
   uint64 hash = 2;
 }
 
-// 동기화 요청 (클라이언트 → 호스트)
+// Sync request (client -> host)
 message SyncRequest {
   uint64 from_frame = 1;
 }
 
-// 동기화 상태 (호스트 → 요청 클라이언트)
+// Sync state (host -> requesting client)
 message SyncState {
   uint64 frame = 1;
-  bytes state = 2;  // SyncSnapshot 직렬화 데이터
+  bytes state = 2;  // SyncSnapshot serialized data
 }
 
 // ========================================
-// RTT 측정
+// RTT measurement
 // ========================================
 
 message Ping {
@@ -91,29 +91,29 @@ message Pong {
 }
 
 // ========================================
-// 소셜
+// Social
 // ========================================
 
 message ChatMessage {
-  string player_id = 1;
+  string user_id = 1;
   string content = 2;
   uint64 timestamp_ms = 3;
 }
 
 message Reaction {
-  string player_id = 1;
+  string user_id = 1;
   string emoji = 2;
   uint64 timestamp_ms = 3;
 }
 
 // ========================================
-// 게임 시작/종료
+// Game start/end
 // ========================================
 
-// 게임 시작 (호스트 → 전체)
+// Game start (host -> all)
 message GameStart {
-  uint64 seed = 1;            // RNG 시드
-  bytes initial_state = 2;    // SyncSnapshot 직렬화 데이터
-  string gamerule = 3;        // 선택된 gamerule (예: "top_n", "last_n")
-  uint64 session_version = 4; // 세션 버전 (리스폰 구분용)
+  uint64 seed = 1;            // RNG seed
+  bytes initial_state = 2;    // SyncSnapshot serialized data
+  string gamerule = 3;        // Selected gamerule (e.g., "top_n", "last_n")
+  uint64 session_version = 4; // Session version (for respawn distinction)
 }

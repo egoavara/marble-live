@@ -213,7 +213,7 @@ pub fn poll_p2p_socket(
                     &socket_res.player_id,
                     3,
                     Payload::ChatMessage(marble_proto::play::ChatMessage {
-                        player_id: socket_res.player_id.clone(),
+                        user_id: socket_res.player_id.clone(),
                         content: content.clone(),
                         timestamp_ms,
                     }),
@@ -239,7 +239,7 @@ pub fn poll_p2p_socket(
                     &socket_res.player_id,
                     3,
                     Payload::Reaction(marble_proto::play::Reaction {
-                        player_id: socket_res.player_id.clone(),
+                        user_id: socket_res.player_id.clone(),
                         emoji: emoji.clone(),
                         timestamp_ms,
                     }),
@@ -432,7 +432,7 @@ fn process_p2p_payload(
 
         Payload::ChatMessage(chat) => {
             state_stores.chat.add_message(
-                chat.player_id.clone(),
+                chat.user_id.clone(),
                 chat.content.clone(),
                 chat.timestamp_ms as f64,
             );
@@ -440,7 +440,7 @@ fn process_p2p_payload(
 
         Payload::Reaction(reaction) => {
             state_stores.reactions.add_reaction(
-                reaction.player_id.clone(),
+                reaction.user_id.clone(),
                 reaction.emoji.clone(),
                 reaction.timestamp_ms as f64,
             );
@@ -472,7 +472,7 @@ fn process_p2p_payload(
         _ => {
             tracing::debug!(
                 "[p2p] Unhandled payload from {} (msg_id={})",
-                msg.origin_player,
+                msg.origin_user,
                 msg.message_id
             );
         }

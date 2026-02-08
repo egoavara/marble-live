@@ -1,25 +1,24 @@
 //! P2P Debug page for testing Partial Mesh + Gossip communication.
 //! Supports multiple peer instances in a single browser tab.
 
-use marble_proto::room::{CreateRoomRequest, PlayerAuth};
+use marble_proto::room::CreateRoomRequest;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 use crate::components::{NetworkVisualization, PeerConfig, PeerInstanceCard};
-use crate::hooks::{use_config_secret, use_config_username, use_grpc_room_service};
+use crate::hooks::{use_config_username, use_grpc_room_service};
 
 /// P2P Debug Page Component with multi-instance support
 #[function_component(DebugP2pPage)]
 pub fn debug_p2p_page() -> Html {
     let grpc = use_grpc_room_service();
     let config_username = use_config_username();
-    let config_secret = use_config_secret();
 
     // Username must be set before using P2P debug page
     let base_player_id = (*config_username)
         .clone()
         .expect("Username must be set before using P2P debug page");
-    let base_player_secret = (*config_secret).to_string();
+    let base_player_secret = String::new(); // Legacy field, kept for PeerConfig compat
 
     // Multi-instance state
     let peer_id_counter = use_state(|| 1u32);
@@ -90,17 +89,17 @@ pub fn debug_p2p_page() -> Html {
 
             spawn_local(async move {
                 let req = CreateRoomRequest {
-                    host: Some(PlayerAuth {
-                        id: player_id.clone(),
-                        secret: player_secret.clone(),
-                    }),
+                    map_id: String::new(),
                     max_players,
+                    room_name: String::new(),
+                    is_public: true,
                 };
 
                 match grpc.borrow_mut().create_room(req).await {
                     Ok(resp) => {
                         let resp = resp.into_inner();
-                        global_room_id.set(resp.room_id.clone());
+                        let room_id_val = resp.room.map(|r| r.room_id).unwrap_or_default();
+                        global_room_id.set(room_id_val.clone());
 
                         // Auto-add host as the first peer instance
                         let host_id = *peer_id_counter;
@@ -117,7 +116,7 @@ pub fn debug_p2p_page() -> Html {
                         web_sys::console::log_1(
                             &format!(
                                 "Room created: {} (host added as instance #{})",
-                                resp.room_id, host_id
+                                room_id_val, host_id
                             )
                             .into(),
                         );

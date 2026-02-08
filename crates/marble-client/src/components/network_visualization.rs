@@ -4,7 +4,7 @@
 //! Supports pan (drag) and zoom (scroll) interactions without triggering React re-renders.
 //! Fetches topology data directly from the server using GetRoomTopology API.
 
-use marble_proto::room::{GetRoomTopologyRequest, PlayerAuth};
+use marble_proto::room::GetRoomTopologyRequest;
 use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -36,9 +36,9 @@ pub struct PeerNetworkInfo {
 pub struct NetworkVisualizationProps {
     /// Room ID to fetch topology from
     pub room_id: String,
-    /// Player ID for authentication
+    /// Player ID (kept for display, auth now via JWT)
     pub player_id: String,
-    /// Player secret for authentication
+    /// Player secret (legacy, no longer used for auth)
     pub player_secret: String,
     /// Auto-refresh interval in milliseconds (0 = disabled)
     #[prop_or(0)]
@@ -585,8 +585,6 @@ pub fn network_visualization(props: &NetworkVisualizationProps) -> Html {
     {
         let grpc = grpc.clone();
         let room_id = props.room_id.clone();
-        let player_id = props.player_id.clone();
-        let player_secret = props.player_secret.clone();
         let network_info = network_info.clone();
         let loading_state = loading_state.clone();
         let has_loaded_once = has_loaded_once.clone();
@@ -604,10 +602,6 @@ pub fn network_visualization(props: &NetworkVisualizationProps) -> Html {
             spawn_local(async move {
                 let req = GetRoomTopologyRequest {
                     room_id: room_id.clone(),
-                    player_auth: Some(PlayerAuth {
-                        id: player_id,
-                        secret: player_secret,
-                    }),
                 };
 
                 match grpc.borrow_mut().get_room_topology(req).await {
@@ -619,13 +613,13 @@ pub fn network_visualization(props: &NetworkVisualizationProps) -> Html {
                             if let Some(topology) = &player_info.topology {
                                 let peer_info = PeerNetworkInfo {
                                     instance_id: idx as u32,
-                                    player_id: player_info.player_id.clone(),
+                                    player_id: player_info.user_id.clone(),
                                     mesh_group: Some(topology.mesh_group),
                                     is_bridge: topology.is_bridge,
                                     connected_peers: topology
                                         .connect_to
                                         .iter()
-                                        .map(|c| c.player_id.clone())
+                                        .map(|c| c.user_id.clone())
                                         .collect(),
                                     is_connected: player_info.is_connected,
                                 };

@@ -215,7 +215,7 @@ impl GameLoopHandle {
             if should_report_to_server {
                 *self.server_game_started.borrow_mut() = true;
                 if let Some(ref rs) = self.room_service {
-                    rs.start_game(start_frame, rng_seed);
+                    rs.start_game(start_frame);
                 }
             } else {
                 tracing::info!("Respawn (server already notified, P2P only)");

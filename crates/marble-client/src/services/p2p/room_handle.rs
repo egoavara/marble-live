@@ -255,6 +255,7 @@ impl P2pRoomHandle {
         // Get topology info
         let topology = inner.borrow().topology.clone();
         let topo = topology.unwrap_or(PeerTopology {
+            signaling_url: String::new(),
             mesh_group: 0,
             is_bridge: false,
             connect_to: vec![],

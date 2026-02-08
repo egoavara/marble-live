@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package marble.user;
+
+service UserService {
+  // Auth & JWT issuance. Auth: NONE
+  rpc Login(LoginRequest) returns (LoginResponse);
+  // Single user lookup. Auth: Required
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  // Batch user lookup (max 100). Auth: Required
+  rpc GetUsers(GetUsersRequest) returns (GetUsersResponse);
+  // Update own profile (user_id extracted from JWT). Auth: Required (owner)
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+}
+
+enum AuthType {
+  AUTH_TYPE_UNSPECIFIED = 0;
+  AUTH_TYPE_ANONYMOUS = 1;   // Anonymous browser-based
+  AUTH_TYPE_SSO = 2;         // External IDP (Google, etc.)
+}
+
+message LoginRequest {
+  oneof method {
+    AnonymousLogin anonymous = 1;
+    SsoLogin sso = 2;
+  }
+}
+
+// Anonymous login: (salt + fingerprint) pair for same-browser recognition
+// Same (salt, fingerprint) -> same user_id returned, otherwise new user created
+message AnonymousLogin {
+  string display_name = 1;  // User-entered display name
+  string salt = 2;          // Random value stored in LocalStorage
+  string fingerprint = 3;   // Canvas+WebGL browser fingerprint
+}
+
+// SSO login: External IDP token/code verified on server, JWT issued
+message SsoLogin {
+  string idp = 1;           // "google", "discord", etc.
+  string credential = 2;    // OAuth2 authorization code or ID token
+  string display_name = 3;  // Empty = use IDP profile name
+}
+
+message LoginResponse {
+  UserInfo user = 1;             // Same structure as GetUser response
+  string token = 2;              // JWT (Authorization: Bearer <token>)
+  string token_expires_at = 3;   // RFC 3339
+}
+
+message GetUserRequest { string user_id = 1; }
+message GetUserResponse { UserInfo user = 1; }
+
+message GetUsersRequest { repeated string user_ids = 1; }  // Max 100
+message GetUsersResponse { repeated UserInfo users = 1; }  // Missing IDs omitted
+
+message UserInfo {
+  string user_id = 1;
+  string display_name = 2;
+  AuthType auth_type = 3;
+  string created_at = 4;    // RFC 3339
+}
+
+message UpdateProfileRequest { string display_name = 1; }  // 1-32 chars
+message UpdateProfileResponse { UserInfo user = 1; }

@@ -11,7 +11,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use http::{Method, header};
+use marble_proto::map::map_service_server::MapServiceServer;
 use marble_proto::room::room_service_server::RoomServiceServer;
+use marble_proto::user::user_service_server::UserServiceServer;
 use matchbox_signaling::SignalingServer;
 use rust_embed::Embed;
 use tonic::service::Routes;
@@ -20,7 +22,12 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
-    handler::room_service::{self, RoomServiceImpl},
+    handler::{
+        jwt::JwtManager,
+        map_service::MapServiceImpl,
+        room_service::RoomServiceImpl,
+        user_service::UserServiceImpl,
+    },
     service::database::Database,
 };
 
@@ -47,12 +54,22 @@ async fn main() -> () {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
 
+    // JWT manager with a random secret (reset on restart, which is fine for in-memory stage)
+    let jwt_secret = uuid::Uuid::new_v4().to_string();
+    let jwt_manager = JwtManager::new(jwt_secret, 24); // 24 hour expiry
+
     let database = Database::new();
-    let room_service = RoomServiceImpl::new(
-        database,
-        format!("ws://localhost:{}/signaling", addr.port()),
-    );
-    let grpc_router = Routes::new(RoomServiceServer::new(room_service))
+
+    let signaling_base_url = format!("ws://localhost:{}/signaling", addr.port());
+
+    // Create service implementations (database is Clone via Arc)
+    let user_service = UserServiceImpl::new(database.clone(), jwt_manager.clone());
+    let map_service = MapServiceImpl::new(database.clone());
+    let room_service = RoomServiceImpl::new(database, signaling_base_url);
+
+    let grpc_router = Routes::new(UserServiceServer::new(user_service))
+        .add_service(MapServiceServer::new(map_service))
+        .add_service(RoomServiceServer::new(room_service))
         .into_axum_router()
         .layer(GrpcWebLayer::new());
 
@@ -63,6 +80,7 @@ async fn main() -> () {
         .allow_headers([
             header::CONTENT_TYPE,
             header::ACCEPT,
+            header::AUTHORIZATION,
             "x-grpc-web".parse().unwrap(),
             "grpc-timeout".parse().unwrap(),
         ])
@@ -75,8 +93,6 @@ async fn main() -> () {
     let app_router = Router::new().nest("/grpc", grpc_router).layer(cors);
 
     // Build signaling server with integrated app router
-    // NOTE: fallback must be set on the final router inside build_with,
-    // because Router::merge() does not propagate fallback services.
     let signaling_server = SignalingServer::full_mesh_builder(addr)
         .cors()
         .trace()
@@ -94,7 +110,7 @@ async fn main() -> () {
         });
 
     tracing::info!("Server listening on {addr}");
-    tracing::info!("  - gRPC-Web: http://{addr}/grpc/room.RoomService/*");
+    tracing::info!("  - gRPC-Web: http://{addr}/grpc/*");
     tracing::info!("  - Signaling: ws://{addr}/signaling/{{room_id}}");
     tracing::info!("  - SPA (embedded): http://{addr}/");
 

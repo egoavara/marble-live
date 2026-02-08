@@ -1,260 +1,223 @@
 syntax = "proto3";
 
-package room;
+package marble.room;
 
-// Room service for managing game sessions
 service RoomService {
-  // Create a new room
-  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
+  // === Room management ===
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);       // Auth: Required (creator=host)
+  rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);               // Auth: Required
+  rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);         // Auth: Required
+  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);            // Auth: Required
+  rpc GetRoomUsers(GetRoomUsersRequest) returns (GetRoomUsersResponse); // Auth: Required
+  rpc KickPlayer(KickPlayerRequest) returns (KickPlayerResponse);      // Auth: Required (host only)
 
-  // Join an existing room
-  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
+  // === Game lifecycle ===
+  rpc StartGame(StartGameRequest) returns (StartGameResponse);         // Auth: Required (host only)
+  rpc ReportArrival(ReportArrivalRequest) returns (ReportArrivalResponse); // Auth: Required (host only)
 
-  // Start the room
-  rpc StartRoom(StartRoomRequest) returns (StartRoomResponse);
-
-  // Start the game (spawn marbles) - host only, once per room
-  rpc StartGame(StartGameRequest) returns (StartGameResponse);
-
-  // Report player arrival (marble reached hole) - host only
-  rpc ReportArrival(ReportArrivalRequest) returns (ReportArrivalResponse);
-
-  // Kick a player from room
-  rpc KickRoom(KickRoomRequest) returns (KickRoomResponse);
-
-  // Get room info
-  rpc GetRoom(GetRoomRequest) returns (GetRoomResponse);
-
-  // Get room player info
-  rpc GetRoomPlayer(GetRoomPlayerRequest) returns (GetRoomPlayerResponse);
-
-  // Report connection status (periodic call from clients)
-  rpc ReportConnection(ReportConnectionRequest) returns (ReportConnectionResponse);
-
-  // Get topology info (for reconnection)
-  rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse);
-
-  // Register actual peer_id after P2P connection established
-  rpc RegisterPeerId(RegisterPeerIdRequest) returns (RegisterPeerIdResponse);
-
-  // Get all players' topologies in a room (requires auth)
-  rpc GetRoomTopology(GetRoomTopologyRequest) returns (GetRoomTopologyResponse);
-
-  // Resolve peer_ids to player_ids
-  rpc ResolvePeerIds(ResolvePeerIdsRequest) returns (ResolvePeerIdsResponse);
+  // === P2P topology ===
+  rpc RegisterPeerId(RegisterPeerIdRequest) returns (RegisterPeerIdResponse);     // Auth: Required (member)
+  rpc ReportConnection(ReportConnectionRequest) returns (ReportConnectionResponse); // Auth: Required (member)
+  rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse);               // Auth: Required (member)
+  rpc GetRoomTopology(GetRoomTopologyRequest) returns (GetRoomTopologyResponse);   // Auth: Required (member)
+  rpc ResolvePeerIds(ResolvePeerIdsRequest) returns (ResolvePeerIdsResponse);     // Auth: Required (member)
 }
+
+// State machine: WAITING -> PLAYING -> ENDED
+enum RoomState {
+  ROOM_STATE_UNSPECIFIED = 0;
+  ROOM_STATE_WAITING = 1;   // Players can join
+  ROOM_STATE_PLAYING = 2;   // Game in progress (marbles spawned)
+  ROOM_STATE_ENDED = 3;     // All players arrived or timeout
+}
+
+// Room role (enum for extensibility instead of bool)
+enum RoomRole {
+  ROOM_ROLE_UNSPECIFIED = 0;  // Server auto-infer
+  ROOM_ROLE_PARTICIPANT = 1;  // Game participant
+  ROOM_ROLE_SPECTATOR = 2;   // Spectator
+}
+
+// --- Room management ---
 
 message CreateRoomRequest {
-  PlayerAuth host = 1;
-  uint32 max_players = 2;
+  string map_id = 1;         // MapService map_id
+  uint32 max_players = 2;    // 2-32
+  string room_name = 3;      // Optional (empty = server auto-generate)
+  bool is_public = 4;        // Whether to expose in ListRooms (default true)
+}
+message CreateRoomResponse {
+  RoomInfo room = 1;
+  PeerTopology topology = 2;  // Host's initial topology (includes signaling_url)
 }
 
-message CreateRoomResponse {
-  string room_id = 1;
-  string signaling_url = 2;
+message GetRoomRequest { string room_id = 1; }
+message GetRoomResponse { RoomInfo room = 1; }
+
+message ListRoomsRequest {
+  uint32 page_size = 1;             // 1-100, default 20
+  string page_token = 2;
+  repeated RoomState states = 3;    // Filter: specific states only (empty = all)
+  string map_id = 4;                // Filter: specific map
+  string name_query = 5;            // Filter: name search
+  bool has_available_slots = 6;     // Filter: rooms with free slots only
+}
+message ListRoomsResponse {
+  repeated RoomSummary rooms = 1;
+  string next_page_token = 2;
+  uint32 total_count = 3;
 }
 
 message JoinRoomRequest {
   string room_id = 1;
-  PlayerAuth player = 2;
+  optional RoomRole role = 2; // Unspecified = server auto-infer (participants < max_players -> PARTICIPANT, else SPECTATOR)
 }
-
 message JoinRoomResponse {
-  string signaling_url = 1;
-  PeerTopology topology = 2;  // Peer connection topology info
+  RoomInfo room = 1;
+  PeerTopology topology = 2;  // Topology (includes signaling_url)
 }
 
-message StartRoomRequest {
+message GetRoomUsersRequest { string room_id = 1; }
+message GetRoomUsersResponse { repeated RoomUser users = 1; }
+
+message RoomUser {
+  string user_id = 1;     // Use UserService.GetUsers to resolve display_name
+  bool is_host = 2;
+  RoomRole role = 3;      // PARTICIPANT or SPECTATOR
+  string joined_at = 4;   // RFC 3339
+}
+
+message KickPlayerRequest {
   string room_id = 1;
-  PlayerAuth player = 2;
+  string target_user_id = 2;
 }
-
-message StartRoomResponse {
-  string started_at = 1;
-}
-
-// Start game (spawn marbles) - can only be called once per room
-message StartGameRequest {
-  string room_id = 1;
-  PlayerAuth player = 2;
-  uint64 start_frame = 3;
-  uint64 rng_seed = 4;
-}
-
-message StartGameResponse {
-  bool success = 1;
-  bool already_started = 2;
-  string started_at = 3;
-}
-
-// Report player arrival (when marble reaches hole)
-message ReportArrivalRequest {
-  string room_id = 1;
-  PlayerAuth player = 2;
-  string arrived_player_id = 3;
-  uint64 arrival_frame = 4;
-  uint32 rank = 5;
-}
-
-message ReportArrivalResponse {
-  bool success = 1;
-  bool game_ended = 2;  // True when all players have arrived
-}
-
-
-message KickRoomRequest {
-  string room_id = 1;
-  PlayerAuth player = 2;
-  string target_player = 3;
-}
-
-message KickRoomResponse {
-}
-
-message GetRoomRequest {
-  string room_id = 1;
-}
-
-message GetRoomResponse {
+message KickPlayerResponse {
   RoomInfo room = 1;
 }
 
-message GetRoomPlayerRequest {
+// --- Game lifecycle ---
+
+message StartGameRequest {
   string room_id = 1;
+  uint64 start_frame = 2;   // Marble spawn frame (rng_seed already issued at room creation)
+}
+message StartGameResponse {
+  RoomInfo room = 1;
 }
 
-message GetRoomPlayerResponse {
-  repeated PlayerInfo players = 1;
+message ReportArrivalRequest {
+  string room_id = 1;
+  string arrived_user_id = 2;
+  uint64 arrival_frame = 3;
+  uint32 rank = 4;
 }
+message ReportArrivalResponse {
+  RoomInfo room = 1;
+}
+
+// --- Room info ---
 
 message RoomInfo {
-  string id = 1;
-  uint32 max_players = 2;
-  RoomState state = 3;
-  string started_at = 4;
-
-  // Network settings
-  uint32 lockstep_delay_frames = 5;  // Lockstep delay frames
-  uint32 gossip_ttl = 6;             // Gossip TTL (hop limit)
-  uint32 mesh_group_size = 7;        // Mesh group size
-  uint32 peer_connections = 8;       // Connections per peer (4~6)
-
-  // Game state
-  uint64 start_frame = 9;            // Frame when game started (spawn)
-  uint64 rng_seed = 10;              // RNG seed used for game
-  repeated PlayerResult results = 11; // Player arrival results
+  string room_id = 1;
+  string room_name = 2;
+  string map_id = 3;           // Use MapService.GetMap for map data
+  string host_user_id = 4;     // Use UserService.GetUser for host name
+  uint32 max_players = 5;
+  uint32 current_players = 6;
+  RoomState state = 7;
+  bool is_public = 8;
+  string created_at = 9;
+  string started_at = 10;      // Empty if WAITING
+  NetworkConfig network_config = 11;
+  GameState game_state = 12;   // rng_seed set at creation, rest filled after StartGame
+  uint64 topology_version = 13; // Monotonically increasing counter on topology changes
 }
 
-enum RoomState {
-  UNDEFINED = 0;
-  WAITING = 1;
-  STARTED = 2;
-  ENDED = 3;
+message RoomSummary {
+  string room_id = 1;
+  string room_name = 2;
+  string map_id = 3;
+  string host_user_id = 4;
+  uint32 max_players = 5;
+  uint32 current_players = 6;
+  RoomState state = 7;
+  string created_at = 8;
 }
 
-message PlayerAuth {
-  string id = 1;
-  string secret = 2;
+message NetworkConfig {
+  uint32 lockstep_delay_frames = 1;
+  uint32 gossip_ttl = 2;
+  uint32 mesh_group_size = 3;
+  uint32 peer_connections = 4;
 }
 
-message PlayerInfo {
-  string id = 1;
-  bool is_host = 2;
-  string display_id = 3;
+message GameState {
+  uint64 rng_seed = 1;              // Server auto-generates at room creation (immediate lobby physics use)
+  uint64 start_frame = 2;           // Set at StartGame
+  repeated PlayerResult results = 3; // Sorted by rank
 }
 
-// Player result (arrival info)
 message PlayerResult {
-  string player_id = 1;
+  string user_id = 1;
   uint32 rank = 2;
   uint64 arrival_frame = 3;
 }
 
-// ========================================
-// Topology related messages
-// ========================================
+// --- P2P topology (player_id -> user_id unified) ---
 
-// Peer connection info
 message PeerConnection {
   string peer_id = 1;
-  string player_id = 2;
+  string user_id = 2;
 }
 
-// Peer topology info (included in JoinRoom response)
 message PeerTopology {
-  uint32 mesh_group = 1;                    // Group ID (0, 1, 2...)
-  bool is_bridge = 2;                       // Is bridge node
-  repeated PeerConnection connect_to = 3;   // Peers to connect (4~6)
-  repeated PeerConnection bridge_peers = 4; // Bridge only: other group bridges
-}
-
-// Connection status report (client → server)
-message ReportConnectionRequest {
-  string room_id = 1;
-  PlayerAuth player = 2;
-  repeated PeerConnectionStatus peer_statuses = 3;
+  string signaling_url = 1;   // matchbox signaling WebSocket URL (recoverable via GetTopology after refresh)
+  uint32 mesh_group = 2;
+  bool is_bridge = 3;
+  repeated PeerConnection connect_to = 4;
+  repeated PeerConnection bridge_peers = 5;
 }
 
 message PeerConnectionStatus {
   string peer_id = 1;
-  uint32 rtt_ms = 2;           // RTT in milliseconds
-  float packet_loss = 3;       // Packet loss rate (0.0~1.0)
-  bool connected = 4;          // Connection status
+  uint32 rtt_ms = 2;
+  float packet_loss = 3;
+  bool connected = 4;
 }
 
-message ReportConnectionResponse {
-  bool topology_changed = 1;              // Topology changed flag
-  optional PeerTopology new_topology = 2; // New topology if changed
-}
-
-// Get topology request (for reconnection)
-message GetTopologyRequest {
-  string room_id = 1;
-  PlayerAuth player = 2;
-}
-
-message GetTopologyResponse {
-  PeerTopology topology = 1;
-}
-
-// Register peer_id request (client → server after P2P connection)
 message RegisterPeerIdRequest {
   string room_id = 1;
-  PlayerAuth player = 2;
-  string peer_id = 3;
+  string peer_id = 2;
 }
-
 message RegisterPeerIdResponse {
-  bool success = 1;
-  optional PeerTopology updated_topology = 2;
+  optional PeerTopology updated_topology = 1;
 }
 
-// Get room topology request (requires auth - only room members can view)
-message GetRoomTopologyRequest {
+message ReportConnectionRequest {
   string room_id = 1;
-  PlayerAuth player_auth = 2;  // Authentication required
+  repeated PeerConnectionStatus peer_statuses = 2;
+}
+message ReportConnectionResponse {
+  bool topology_changed = 1;
+  optional PeerTopology new_topology = 2;
 }
 
-// Per-player topology info
+message GetTopologyRequest { string room_id = 1; }
+message GetTopologyResponse { PeerTopology topology = 1; }
+
+message GetRoomTopologyRequest { string room_id = 1; }
+message GetRoomTopologyResponse { repeated PlayerTopologyInfo players = 1; }
+
 message PlayerTopologyInfo {
-  string player_id = 1;
-  PeerTopology topology = 2;  // Reuse existing PeerTopology
-  bool is_connected = 3;      // Current connection status
+  string user_id = 1;
+  PeerTopology topology = 2;
+  bool is_connected = 3;
 }
 
-// Get room topology response
-message GetRoomTopologyResponse {
-  repeated PlayerTopologyInfo players = 1;
-}
-
-// Resolve peer_ids to player_ids request
 message ResolvePeerIdsRequest {
   string room_id = 1;
-  PlayerAuth player = 2;
-  repeated string peer_ids = 3;
+  repeated string peer_ids = 2;
 }
-
-// Resolve peer_ids to player_ids response
 message ResolvePeerIdsResponse {
-  map<string, string> peer_to_player = 1;  // peer_id → player_id
+  map<string, string> peer_to_user = 1;  // peer_id -> user_id
 }

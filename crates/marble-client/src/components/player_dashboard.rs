@@ -1,6 +1,6 @@
 //! Player dashboard component for displaying room players.
 
-use crate::hooks::{use_config_secret, use_room_player};
+use crate::hooks::{use_config_username, use_room_player};
 use yew::prelude::*;
 
 /// Props for the PlayerDashboard component.
@@ -16,9 +16,12 @@ pub struct PlayerDashboardProps {
 #[function_component(PlayerDashboard)]
 pub fn player_dashboard(props: &PlayerDashboardProps) -> Html {
     let room_player_state = use_room_player(&props.room_id);
-    let config_secret = use_config_secret();
+    let config_username = use_config_username();
 
-    let current_player_id = config_secret.to_string();
+    let current_user_id = (*config_username)
+        .as_ref()
+        .cloned()
+        .unwrap_or_default();
 
     let content = if room_player_state.loading {
         html! {
@@ -43,7 +46,7 @@ pub fn player_dashboard(props: &PlayerDashboardProps) -> Html {
         html! {
             <div class="dashboard-list">
                 {room_player_state.players.iter().enumerate().map(|(idx, player)| {
-                    let is_self = player.id == current_player_id;
+                    let is_self = player.user_id == current_user_id;
                     let item_class = if is_self {
                         "dashboard-item self"
                     } else {
@@ -51,9 +54,9 @@ pub fn player_dashboard(props: &PlayerDashboardProps) -> Html {
                     };
 
                     html! {
-                        <div class={item_class} key={player.id.clone()}>
+                        <div class={item_class} key={player.user_id.clone()}>
                             <span class="dashboard-rank">{idx + 1}</span>
-                            <span class="dashboard-name">{&player.display_id}</span>
+                            <span class="dashboard-name">{&player.user_id}</span>
                             <div class="dashboard-tags">
                                 {if player.is_host {
                                     html! { <span class="tag host">{"HOST"}</span> }

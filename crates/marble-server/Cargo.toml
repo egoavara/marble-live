@@ -27,5 +27,6 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 parking_lot.workspace = true
 http.workspace = true
+rand.workspace = true
 rust-embed.workspace = true
 mime_guess.workspace = true

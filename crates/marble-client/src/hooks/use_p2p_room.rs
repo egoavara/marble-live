@@ -70,21 +70,6 @@ pub fn use_p2p_room_with_player_id(
     use_p2p_room_internal(room_id, player_id, config)
 }
 
-/// P2P room hook with player credentials (ID and secret)
-///
-/// Use this when you need to register peer_id with the server after P2P connection.
-/// The player_secret will be used for authentication when calling RegisterPeerId.
-#[hook]
-pub fn use_p2p_room_with_credentials(
-    room_id: &str,
-    player_id: &str,
-    player_secret: &str,
-    mut config: P2pRoomConfig,
-) -> P2pRoomHandle {
-    config.player_secret = Some(player_secret.to_string());
-    use_p2p_room_internal(room_id, player_id, config)
-}
-
 /// Internal hook implementation shared by all variants
 #[hook]
 fn use_p2p_room_internal(room_id: &str, player_id: &str, config: P2pRoomConfig) -> P2pRoomHandle {

@@ -28,22 +28,3 @@ pub fn required_str(s: &str, msg: &'static str) -> Result<(), tonic::Status> {
     }
 }
 
-macro_rules! inner_tonic_required {
-    ($opt:expr) => {
-        match $opt {
-            std::option::Option::Some(value) => std::result::Result::Ok(value),
-            std::option::Option::None => std::result::Result::Err(tonic::Status::invalid_argument(
-                format!("Required field '{}' missing ", stringify!($opt)),
-            )),
-        }
-    };
-    ($opt:expr, $msg:expr) => {
-        match $opt {
-            std::option::Option::Some(value) => std::result::Result::Ok(value),
-            std::option::Option::None => {
-                std::result::Result::Err(tonic::Status::invalid_argument($msg))
-            }
-        }
-    };
-}
-pub(crate) use inner_tonic_required as tonic_required;

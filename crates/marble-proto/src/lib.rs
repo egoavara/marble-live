@@ -6,12 +6,30 @@
 //! - `server`: Enable gRPC server/client code generation (requires tokio runtime)
 
 #[allow(clippy::pedantic)]
-pub mod room {
+pub mod user {
     #[cfg(feature = "server")]
-    tonic::include_proto!("room");
+    tonic::include_proto!("marble.user");
 
     #[cfg(not(feature = "server"))]
-    include!(concat!(env!("OUT_DIR"), "/room.rs"));
+    include!(concat!(env!("OUT_DIR"), "/marble.user.rs"));
+}
+
+#[allow(clippy::pedantic)]
+pub mod map {
+    #[cfg(feature = "server")]
+    tonic::include_proto!("marble.map");
+
+    #[cfg(not(feature = "server"))]
+    include!(concat!(env!("OUT_DIR"), "/marble.map.rs"));
+}
+
+#[allow(clippy::pedantic)]
+pub mod room {
+    #[cfg(feature = "server")]
+    tonic::include_proto!("marble.room");
+
+    #[cfg(not(feature = "server"))]
+    include!(concat!(env!("OUT_DIR"), "/marble.room.rs"));
 }
 
 #[allow(clippy::pedantic)]

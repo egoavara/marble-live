@@ -14,8 +14,8 @@ use super::room_service::use_room_service;
 use super::{ChatPanel, PeerList, ReactionDisplay};
 use crate::hooks::{
     P2pRoomConfig, PlayerInfo, send_command, use_bevy, use_bevy_chat, use_bevy_game,
-    use_bevy_players, use_bevy_reactions, use_config_secret, use_config_username,
-    use_p2p_room_with_credentials,
+    use_bevy_players, use_bevy_reactions, use_config_username,
+    use_p2p_room_with_player_id,
 };
 
 /// Canvas ID for the game view (uses the global canvas from App.rs).
@@ -96,13 +96,11 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
 
     // User config
     let config_username = use_config_username();
-    let config_secret = use_config_secret();
 
     let player_id = config_username
         .as_ref()
         .map(|x| x.to_string())
         .unwrap_or_default();
-    let player_secret = config_secret.to_string();
 
     // Room service for peer name resolution
     let room_service = use_room_service();
@@ -114,7 +112,7 @@ fn game_view_inner(props: &GameViewInnerProps) -> Html {
         ..Default::default()
     };
 
-    let p2p = use_p2p_room_with_credentials(&props.room_id, &player_id, &player_secret, config);
+    let p2p = use_p2p_room_with_player_id(&props.room_id, &player_id, config);
 
     let peers = p2p.peers();
     let connection_state = p2p.state();

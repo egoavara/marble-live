@@ -3,13 +3,13 @@
 //! Each card represents an independent P2P connection instance.
 
 use marble_proto::play::p2p_message::Payload;
-use marble_proto::room::{JoinRoomRequest, PeerTopology, PlayerAuth};
+use marble_proto::room::{JoinRoomRequest, PeerTopology};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 use crate::components::network_visualization::PeerNetworkInfo;
 use crate::hooks::{
-    P2pConnectionState, P2pRoomConfig, use_grpc_room_service, use_p2p_room_with_credentials,
+    P2pConnectionState, P2pRoomConfig, use_grpc_room_service, use_p2p_room_with_player_id,
 };
 
 /// Configuration for a single peer instance
@@ -71,10 +71,9 @@ pub fn peer_instance_card(props: &PeerInstanceCardProps) -> Html {
     }
 
     // P2P Room Hook - each card has its own independent P2P connection
-    let p2p = use_p2p_room_with_credentials(
+    let p2p = use_p2p_room_with_player_id(
         &*local_room_id,
         &props.config.player_id,
-        &props.config.player_secret,
         P2pRoomConfig {
             auto_connect: true,
             max_messages: 50,
@@ -165,10 +164,7 @@ pub fn peer_instance_card(props: &PeerInstanceCardProps) -> Html {
             spawn_local(async move {
                 let req = JoinRoomRequest {
                     room_id: target_room.clone(),
-                    player: Some(PlayerAuth {
-                        id: player_id.clone(),
-                        secret: player_secret.clone(),
-                    }),
+                    role: None,
                 };
 
                 match grpc.borrow_mut().join_room(req).await {
@@ -387,7 +383,7 @@ pub fn peer_instance_card(props: &PeerInstanceCardProps) -> Html {
                     if let Payload::ChatMessage(chat) = &msg.payload {
                         Some(html! {
                             <div style="margin-bottom: 2px; color: #e0e0e0;">
-                                <strong style="color: #667eea;">{ format!("[{}]", chat.player_id) }</strong>
+                                <strong style="color: #667eea;">{ format!("[{}]", chat.user_id) }</strong>
                                 { format!(": {}", chat.content) }
                             </div>
                         })

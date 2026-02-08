@@ -150,7 +150,7 @@ impl GossipHandler {
             message_id: msg.message_id.clone(),
             ttl: msg.ttl.saturating_sub(1),
             origin_group: msg.origin_group,
-            origin_player: msg.origin_player.clone(),
+            origin_user: msg.origin_user.clone(),
             payload: msg.payload.clone(),
         }
     }
@@ -169,7 +169,7 @@ impl GossipHandler {
             message_id,
             ttl,
             origin_group: self.my_group,
-            origin_player: player_id.to_string(),
+            origin_user: player_id.to_string(),
             payload: Some(payload),
         }
     }
@@ -212,7 +212,7 @@ mod tests {
             message_id: "test".to_string(),
             ttl: 0,
             origin_group: 0,
-            origin_player: "p1".to_string(),
+            origin_user: "p1".to_string(),
             payload: None,
         };
         // Prepare for relay should decrement TTL
