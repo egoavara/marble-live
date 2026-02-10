@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <clipPath id="body-clip"><circle cx="128" cy="128" r="118"/></clipPath>
+  </defs>
+
+  <!-- Part: body (body + flag + outline) -->
+  <g id="layer-body">
+    <circle cx="128" cy="128" r="118" fill="#FFFFFF"/>
+  </g>
+  <g id="layer-flag" clip-path="url(#body-clip)">
+    <rect x="0" y="0" width="256" height="128" fill="#FFFFFF"/>
+    <rect x="0" y="128" width="256" height="128" fill="#DC143C"/>
+  </g>
+  <g id="layer-outline">
+    <circle cx="128" cy="128" r="118" fill="none" stroke="#000" stroke-width="6"/>
+  </g>
+
+  <!-- Part: eyes -->
+  <g id="layer-eyes">
+    <g id="eye-left">
+      <ellipse cx="98" cy="130" rx="18" ry="12" fill="#FFF" stroke="#000" stroke-width="3"/>
+    </g>
+    <g id="eye-right">
+      <ellipse cx="158" cy="130" rx="18" ry="12" fill="#FFF" stroke="#000" stroke-width="3"/>
+    </g>
+  </g>
+
+  <!-- Part: eyebrows -->
+  <g id="layer-eyebrows">
+    <line x1="82" y1="118" x2="112" y2="122" stroke="#000" stroke-width="4" stroke-linecap="round"/>
+    <line x1="144" y1="122" x2="174" y2="118" stroke="#000" stroke-width="4" stroke-linecap="round"/>
+  </g>
+
+  <!-- Part: mouth -->
+  <g id="layer-mouth">
+    <!-- Empty by default, filled per expression -->
+  </g>
+
+  <!-- Part: accessories -->
+  <g id="layer-accessories">
+    <!-- Hats, items, etc. -->
+  </g>
+
+  <!-- Part: effects -->
+  <g id="layer-effects">
+    <!-- Shadows, glows, etc. -->
+  </g>
+</svg>

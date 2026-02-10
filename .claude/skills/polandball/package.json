@@ -1,0 +1,19 @@
+{
+  "name": "polandball-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "render": "node render.mjs",
+    "render:parts": "node render.mjs --parts",
+    "render:all": "node render.mjs --all",
+    "preview": "node preview.mjs",
+    "preview:filmstrip": "node preview.mjs --filmstrip",
+    "sheet": "node spritesheet.mjs"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "gifenc": "^1.0.3",
+    "sharp": "^0.33.5"
+  }
+}
