@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     data-style="borderball" data-country="KR" data-accessories="gat">
+  <defs>
+    <clipPath id="body-clip">
+      <circle cx="256" cy="256" r="200"/>
+    </clipPath>
+  </defs>
+
+  <!-- Flag layer (clipped to body) - South Korean Taegeukgi -->
+  <g id="layer-flag" clip-path="url(#body-clip)">
+    <!-- White background -->
+    <rect x="56" y="56" width="400" height="400" fill="#FFFFFF"/>
+
+    <!-- Red (upper) half of taegeuk -->
+    <path d="M 256 196 A 60 60 0 0 1 256 316 A 30 30 0 0 0 256 256 A 30 30 0 0 1 256 196"
+          fill="#CD2E3A"/>
+
+    <!-- Blue (lower) half of taegeuk -->
+    <path d="M 256 316 A 60 60 0 0 1 256 196 A 30 30 0 0 0 256 256 A 30 30 0 0 1 256 316"
+          fill="#0047A0"/>
+
+    <!--
+      Trigrams (건곤감이) - using transform groups
+      Each group: 3 bars (solid=full rect, broken=two rects with gap)
+      Bar: 50px wide, 8px tall, 5px gap between bars
+      Broken bar gap: 8px in center
+      Positioned at ~102px from center at 45-degree diagonals
+      Bars rotated perpendicular to radial direction
+    -->
+
+    <!-- 건 (Geon/Heaven) ☰ - Top-left: 3 solid bars -->
+    <g transform="translate(154, 154) rotate(-45)">
+      <rect x="-25" y="-17" width="50" height="8" rx="1" fill="#000"/>
+      <rect x="-25" y="-4" width="50" height="8" rx="1" fill="#000"/>
+      <rect x="-25" y="9" width="50" height="8" rx="1" fill="#000"/>
+    </g>
+
+    <!-- 감 (Gam/Water) ☵ - Top-right: broken, solid, broken -->
+    <g transform="translate(358, 154) rotate(45)">
+      <!-- outer (line 3): broken -->
+      <rect x="-25" y="-17" width="21" height="8" rx="1" fill="#000"/>
+      <rect x="4" y="-17" width="21" height="8" rx="1" fill="#000"/>
+      <!-- middle (line 2): solid -->
+      <rect x="-25" y="-4" width="50" height="8" rx="1" fill="#000"/>
+      <!-- inner (line 1): broken -->
+      <rect x="-25" y="9" width="21" height="8" rx="1" fill="#000"/>
+      <rect x="4" y="9" width="21" height="8" rx="1" fill="#000"/>
+    </g>
+
+    <!-- 이 (Ri/Fire) ☲ - Bottom-left: solid, broken, solid -->
+    <g transform="translate(154, 358) rotate(45)">
+      <!-- inner (line 1): solid -->
+      <rect x="-25" y="-17" width="50" height="8" rx="1" fill="#000"/>
+      <!-- middle (line 2): broken -->
+      <rect x="-25" y="-4" width="21" height="8" rx="1" fill="#000"/>
+      <rect x="4" y="-4" width="21" height="8" rx="1" fill="#000"/>
+      <!-- outer (line 3): solid -->
+      <rect x="-25" y="9" width="50" height="8" rx="1" fill="#000"/>
+    </g>
+
+    <!-- 곤 (Gon/Earth) ☷ - Bottom-right: 3 broken bars -->
+    <g transform="translate(358, 358) rotate(-45)">
+      <rect x="-25" y="-17" width="21" height="8" rx="1" fill="#000"/>
+      <rect x="4" y="-17" width="21" height="8" rx="1" fill="#000"/>
+      <rect x="-25" y="-4" width="21" height="8" rx="1" fill="#000"/>
+      <rect x="4" y="-4" width="21" height="8" rx="1" fill="#000"/>
+      <rect x="-25" y="9" width="21" height="8" rx="1" fill="#000"/>
+      <rect x="4" y="9" width="21" height="8" rx="1" fill="#000"/>
+    </g>
+  </g>
+
+  <!-- Outline layer -->
+  <g id="layer-outline">
+    <circle cx="256" cy="256" r="200" fill="none" stroke="#000000" stroke-width="12"/>
+  </g>
+
+  <!-- Accessories behind eyes: Gat (Korean traditional hat) - enlarged -->
+  <g id="layer-accessories-back">
+    <g id="acc-gat">
+      <!-- Wide brim - extends beyond body -->
+      <ellipse cx="256" cy="88" rx="215" ry="24"
+               fill="#1A1A1A" stroke="#000000" stroke-width="3"/>
+      <!-- Brim top surface highlight -->
+      <ellipse cx="256" cy="86" rx="210" ry="20"
+               fill="#2A2A2A" stroke="none"/>
+      <!-- Crown (모자) - taller and wider -->
+      <path d="M 216 88 L 224 22 L 288 22 L 296 88 Z"
+            fill="#1A1A1A" stroke="#000000" stroke-width="3"/>
+      <!-- Crown top cap -->
+      <ellipse cx="256" cy="22" rx="32" ry="8"
+               fill="#2A2A2A" stroke="#000000" stroke-width="2"/>
+      <!-- Chin strings -->
+      <line x1="184" y1="90" x2="170" y2="192"
+            stroke="#1A1A1A" stroke-width="3" stroke-linecap="round"/>
+      <line x1="328" y1="90" x2="342" y2="192"
+            stroke="#1A1A1A" stroke-width="3" stroke-linecap="round"/>
+      <!-- Decorative beads at string ends -->
+      <circle cx="170" cy="194" r="5" fill="#8B4513" stroke="#000" stroke-width="1.5"/>
+      <circle cx="342" cy="194" r="5" fill="#8B4513" stroke="#000" stroke-width="1.5"/>
+    </g>
+  </g>
+
+  <!-- Eyes layer - borderball arch style, neutral expression, NO PUPILS -->
+  <g id="layer-eyes">
+    <!-- Left eye -->
+    <path d="M 196 185 A 28 28 0 0 1 252 185 Z"
+          fill="#FFFFFF" stroke="#000000" stroke-width="4"/>
+    <!-- Right eye -->
+    <path d="M 264 185 A 28 28 0 0 1 320 185 Z"
+          fill="#FFFFFF" stroke="#000000" stroke-width="4"/>
+  </g>
+</svg>

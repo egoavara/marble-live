@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     data-accessory-id="gat"
+     data-accessory-layer="back">
+  <!-- Ghost body guide (positioning only) -->
+  <circle cx="256" cy="256" r="200"
+          fill="none" stroke="#CCCCCC" stroke-width="2" stroke-dasharray="8 6" opacity="0.5"/>
+  <!-- Ghost eye guides -->
+  <path d="M 185 215 A 30 38 0 0 1 245 215 Z"
+        fill="none" stroke="#CCCCCC" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
+  <path d="M 275 215 A 30 38 0 0 1 335 215 Z"
+        fill="none" stroke="#CCCCCC" stroke-width="1" stroke-dasharray="4 4" opacity="0.4"/>
+
+  <!-- ======= GAT (Korean Traditional Hat) ======= -->
+  <g id="acc-gat">
+    <!-- Wide brim - a large flat ellipse -->
+    <ellipse cx="256" cy="82" rx="160" ry="18"
+             fill="#1A1A1A" stroke="#000000" stroke-width="3"/>
+    <!-- Crown (모자) - tall cylinder tapering slightly -->
+    <path d="M 222 82 L 228 22 L 284 22 L 290 82 Z"
+          fill="#1A1A1A" stroke="#000000" stroke-width="3"/>
+    <!-- Crown top - flat top of the hat -->
+    <ellipse cx="256" cy="22" rx="28" ry="6"
+             fill="#2A2A2A" stroke="#000000" stroke-width="2"/>
+    <!-- Brim top surface highlight (subtle) -->
+    <ellipse cx="256" cy="80" rx="155" ry="14"
+             fill="#2A2A2A" stroke="none"/>
+    <!-- Chin strings -->
+    <line x1="200" y1="82" x2="188" y2="160"
+          stroke="#1A1A1A" stroke-width="3" stroke-linecap="round"/>
+    <line x1="312" y1="82" x2="324" y2="160"
+          stroke="#1A1A1A" stroke-width="3" stroke-linecap="round"/>
+    <!-- Small decorative beads at chin string ends -->
+    <circle cx="188" cy="162" r="4" fill="#8B4513" stroke="#000" stroke-width="1.5"/>
+    <circle cx="324" cy="162" r="4" fill="#8B4513" stroke="#000" stroke-width="1.5"/>
+  </g>
+</svg>
