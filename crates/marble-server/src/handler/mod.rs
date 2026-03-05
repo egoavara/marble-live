@@ -1,3 +1,4 @@
+pub mod avatar_service;
 pub mod jwt;
 pub mod map_service;
 pub mod room_service;

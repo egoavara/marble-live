@@ -6,6 +6,8 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 use thiserror::Error;
 
+use marble_proto::avatar::AvatarInfo;
+
 use crate::common::room::{Room, RoomError};
 
 // ========================================
@@ -57,6 +59,7 @@ pub struct Database {
     /// (salt, fingerprint) -> `user_id` index for anonymous login lookup
     anon_index: Arc<RwLock<HashMap<(String, String), String>>>,
     maps: Arc<RwLock<HashMap<String, StoredMap>>>,
+    avatars: Arc<RwLock<HashMap<String, AvatarInfo>>>,
 }
 
 #[derive(Error, Debug)]
@@ -107,6 +110,7 @@ impl Database {
             users: Arc::new(RwLock::new(HashMap::new())),
             anon_index: Arc::new(RwLock::new(HashMap::new())),
             maps: Arc::new(RwLock::new(HashMap::new())),
+            avatars: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -333,6 +337,20 @@ impl Database {
         let next_token = page.last().map(|m| m.map_id.clone()).unwrap_or_default();
 
         (page, next_token, total_count)
+    }
+
+    // ========================================
+    // Avatar operations
+    // ========================================
+
+    pub fn set_avatar(&self, user_id: &str, avatar: AvatarInfo) {
+        let mut avatars = self.avatars.write();
+        avatars.insert(user_id.to_string(), avatar);
+    }
+
+    pub fn get_avatar(&self, user_id: &str) -> Option<AvatarInfo> {
+        let avatars = self.avatars.read();
+        avatars.get(user_id).cloned()
     }
 
     // ========================================

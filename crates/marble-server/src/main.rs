@@ -11,6 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use http::{Method, header};
+use marble_proto::avatar::avatar_service_server::AvatarServiceServer;
 use marble_proto::map::map_service_server::MapServiceServer;
 use marble_proto::room::room_service_server::RoomServiceServer;
 use marble_proto::user::user_service_server::UserServiceServer;
@@ -23,6 +24,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
     handler::{
+        avatar_service::AvatarServiceImpl,
         jwt::{JwtManager, jwt_interceptor},
         map_service::MapServiceImpl,
         room_service::RoomServiceImpl,
@@ -65,6 +67,7 @@ async fn main() -> () {
     // Create service implementations (database is Clone via Arc)
     let user_service = UserServiceImpl::new(database.clone(), jwt_manager.clone());
     let map_service = MapServiceImpl::new(database.clone());
+    let avatar_service = AvatarServiceImpl::new(database.clone(), jwt_manager.clone());
     let room_service = RoomServiceImpl::new(database, signaling_base_url);
 
     let reflection_v1 = tonic_reflection::server::Builder::configure()
@@ -79,7 +82,8 @@ async fn main() -> () {
     let interceptor = jwt_interceptor(jwt_manager.clone());
     let grpc_router = Routes::new(UserServiceServer::with_interceptor(user_service, interceptor.clone()))
         .add_service(MapServiceServer::with_interceptor(map_service, interceptor.clone()))
-        .add_service(RoomServiceServer::with_interceptor(room_service, interceptor))
+        .add_service(RoomServiceServer::with_interceptor(room_service, interceptor.clone()))
+        .add_service(AvatarServiceServer::with_interceptor(avatar_service, interceptor))
         .add_service(reflection_v1)
         .add_service(reflection_v1alpha)
         .into_axum_router()

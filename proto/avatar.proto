@@ -1,0 +1,103 @@
+syntax = "proto3";
+package marble.avatar;
+
+service AvatarService {
+  // 자기 자신의 아바타 설정. Auth: Required (owner, JWT에서 user_id 추출)
+  rpc SetAvatar(SetAvatarRequest) returns (SetAvatarResponse);
+  // 특정 유저의 아바타 조회. Auth: Required
+  rpc GetAvatar(GetAvatarRequest) returns (GetAvatarResponse);
+  // 여러 유저의 아바타 일괄 조회 (max 100). Auth: Required
+  rpc GetAvatars(GetAvatarsRequest) returns (GetAvatarsResponse);
+}
+
+// === Avatar Type ===
+
+enum AvatarType {
+  AVATAR_TYPE_UNSPECIFIED = 0;
+  AVATAR_TYPE_COLOR = 1;      // 단색 공
+  AVATAR_TYPE_IMAGE = 2;      // 이미지 URL 기반
+  // reserved 3; // AVATAR_TYPE_SPRITE — 차후 파츠 조합형 sprite 확장 시 사용
+}
+
+// === Outline (모든 avatar_type에 공통) ===
+
+enum OutlineStyle {
+  OUTLINE_STYLE_UNSPECIFIED = 0;
+  OUTLINE_STYLE_SOLID = 1;
+  OUTLINE_STYLE_DASHED = 2;
+  OUTLINE_STYLE_DOTTED = 3;
+}
+
+message OutlineConfig {
+  uint32 color = 1;            // RGBA (0xRRGGBBAA)
+  float width = 2;             // 두께 (pixels)
+  OutlineStyle style = 3;
+}
+
+// === Color Avatar ===
+
+message ColorAvatar {
+  uint32 fill_color = 1;      // RGBA (0xRRGGBBAA)
+}
+
+// === Image Avatar ===
+
+message ImageAvatar {
+  string image_url = 1;       // 이미지 URL (차후 업로드 대체 가능)
+  // 이미지에서 사용할 영역 (crop)
+  float crop_x = 2;           // 0.0~1.0 normalized
+  float crop_y = 3;
+  float crop_width = 4;       // 0.0~1.0
+  float crop_height = 5;      // 0.0~1.0
+}
+
+// === Sprite Avatar (차후 확장 예정 — 현재 미구현) ===
+// 확장 시 AVATAR_TYPE_SPRITE (3) 추가, oneof avatar에 SpriteAvatar 필드 추가
+//
+// 설계 방향:
+// - z-index 기반 레이어 조합: 각 파츠(SpritePart)가 z_index로 렌더링 순서 결정
+// - 파츠별 sprite sheet: 각 파츠가 자체 image_url + cell_width/cell_height (pixel 단위)
+// - SpriteFrame: sprite sheet 내 pixel 좌표 (x, y, width, height)로 프레임 영역 지정
+// - SpriteAnimation: frames 배열 내 start_frame/frame_count로 애니메이션 범위 지정
+// - 파츠별 optional tint_color (RGBA)
+//
+// 예시 구조:
+// message SpriteFrame { uint32 x, y, width, height; }
+// message SpritePart { int32 z_index; string image_url; uint32 cell_width/cell_height;
+//                       repeated SpriteFrame frames; optional uint32 tint_color; }
+// message SpriteAnimation { string name; uint32 start_frame, frame_count;
+//                           float frame_duration; bool looping; }
+// message SpriteAvatar { repeated SpritePart parts; repeated SpriteAnimation animations; }
+
+// === Avatar 전체 ===
+
+message AvatarInfo {
+  string user_id = 1;
+  AvatarType avatar_type = 2;
+  oneof avatar {
+    ColorAvatar color = 3;
+    ImageAvatar image = 4;
+    // reserved 5; // SpriteAvatar sprite — 차후 확장 시 추가
+  }
+  OutlineConfig outline = 6;
+  string updated_at = 7;      // RFC 3339
+}
+
+// === RPC Messages ===
+
+message SetAvatarRequest {
+  AvatarType avatar_type = 1;
+  oneof avatar {
+    ColorAvatar color = 2;
+    ImageAvatar image = 3;
+    // reserved 4; // SpriteAvatar sprite — 차후 확장 시 추가
+  }
+  OutlineConfig outline = 5;
+}
+message SetAvatarResponse { AvatarInfo avatar = 1; }
+
+message GetAvatarRequest { string user_id = 1; }
+message GetAvatarResponse { AvatarInfo avatar = 1; }
+
+message GetAvatarsRequest { repeated string user_ids = 1; } // Max 100
+message GetAvatarsResponse { repeated AvatarInfo avatars = 1; }

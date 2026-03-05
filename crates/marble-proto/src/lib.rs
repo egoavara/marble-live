@@ -43,3 +43,12 @@ pub mod play {
     #[cfg(not(feature = "server"))]
     include!(concat!(env!("OUT_DIR"), "/marble.play.rs"));
 }
+
+#[allow(clippy::pedantic)]
+pub mod avatar {
+    #[cfg(feature = "server")]
+    tonic::include_proto!("marble.avatar");
+
+    #[cfg(not(feature = "server"))]
+    include!(concat!(env!("OUT_DIR"), "/marble.avatar.rs"));
+}
