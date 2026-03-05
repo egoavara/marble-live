@@ -695,19 +695,15 @@ impl RoomServiceHandle {
 // ---------------------------------------------------------------------------
 
 fn create_grpc_client() -> Option<RoomServiceClient<Client>> {
-    let origin = web_sys::window()?.location().origin().ok()?;
-    Some(RoomServiceClient::new(Client::new(format!(
-        "{}/grpc",
-        origin
-    ))))
+    Some(RoomServiceClient::new(Client::new(
+        crate::services::endpoint::grpc_base_url(),
+    )))
 }
 
 fn create_user_grpc_client() -> Option<UserServiceClient<Client>> {
-    let origin = web_sys::window()?.location().origin().ok()?;
-    Some(UserServiceClient::new(Client::new(format!(
-        "{}/grpc",
-        origin
-    ))))
+    Some(UserServiceClient::new(Client::new(
+        crate::services::endpoint::grpc_base_url(),
+    )))
 }
 
 fn attach_auth<T>(msg: T, token: &Option<String>) -> tonic::Request<T> {

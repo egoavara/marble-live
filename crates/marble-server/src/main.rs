@@ -62,7 +62,8 @@ async fn main() -> () {
 
     let database = Database::new();
 
-    let signaling_base_url = format!("ws://localhost:{}/signaling", addr.port());
+    let signaling_base_url = std::env::var("SIGNALING_URL")
+        .unwrap_or_else(|_| format!("ws://localhost:{}/signaling", addr.port()));
 
     // Create service implementations (database is Clone via Arc)
     let user_service = UserServiceImpl::new(database.clone(), jwt_manager.clone());
@@ -106,7 +107,7 @@ async fn main() -> () {
         ]);
 
     // App router (gRPC only - fallback will be added in build_with)
-    let app_router = Router::new().nest("/grpc", grpc_router).layer(cors);
+    let app_router = Router::new().merge(grpc_router).layer(cors);
 
     // Build signaling server with integrated app router
     let signaling_server = SignalingServer::full_mesh_builder(addr)
@@ -126,7 +127,7 @@ async fn main() -> () {
         });
 
     tracing::info!("Server listening on {addr}");
-    tracing::info!("  - gRPC-Web: http://{addr}/grpc/*");
+    tracing::info!("  - gRPC-Web: http://{addr}/ (root-mounted)");
     tracing::info!("  - Signaling: ws://{addr}/signaling/{{room_id}}");
     tracing::info!("  - SPA (embedded): http://{addr}/");
 

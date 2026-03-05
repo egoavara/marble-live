@@ -248,7 +248,7 @@ impl P2pRoomHandle {
             .config
             .signaling_url
             .clone()
-            .unwrap_or_else(|| format!("ws://localhost:3000/signaling/{}", room_id));
+            .unwrap_or_else(|| format!("{}/{}", crate::services::endpoint::signaling_base_url(), room_id));
 
         state_handle.set(P2pConnectionState::Connecting);
 

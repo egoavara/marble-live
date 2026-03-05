@@ -4,14 +4,12 @@ use std::rc::Rc;
 use tonic_web_wasm_client::Client;
 use yew::prelude::*;
 
+use crate::services::endpoint::grpc_base_url;
+
 #[hook]
 pub fn use_grpc_room_service() -> Rc<RefCell<RoomServiceClient<Client>>> {
     let client = use_mut_ref(|| {
-        let Some(window) = web_sys::window() else {
-            panic!("No window object available");
-        };
-        let origin = window.location().origin().unwrap();
-        let client = Client::new(format!("{}/grpc", origin));
+        let client = Client::new(grpc_base_url());
         RoomServiceClient::new(client)
     });
     client
